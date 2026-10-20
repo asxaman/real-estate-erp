@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.pyc
+
+# Virtual environment (everyone rebuilds their own)
+.venv/
+venv/
+
+# Local database and secrets (never upload these)
+db.sqlite3
+.env
+
+# Editor
+.vscode/
+.idea/
