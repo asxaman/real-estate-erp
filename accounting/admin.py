@@ -1,12 +1,12 @@
 import calendar
-from datetime import date, timedelta
+from datetime import date
 
 from django import forms
 from django.contrib import admin, messages
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db.models import Sum
 from django.forms.models import BaseInlineFormSet
-from django.http import HttpResponseRedirect
+from django.http import Http404, HttpResponseRedirect
 from django.shortcuts import get_object_or_404
 from django.template.response import TemplateResponse
 from django.urls import path, reverse
@@ -25,6 +25,7 @@ from .models import (
     AccountingSettings,
     AccountMapping,
     AuditLog,
+    CreditNote,
     FiscalPeriod,
     JournalEntry,
     JournalLine,
@@ -35,7 +36,8 @@ from .models import (
     unmapped_roles,
 )
 from .posting import reverse_entry
-from .rules import create_lease_invoice, post_all_waiting, run_month_end, waiting_items
+from .rules import create_lease_invoice, post_all_waiting, void_lease_invoice, waiting_items
+from .rules_more import create_opening_invoice, opening_numbers
 
 
 def calendar_month_name(number):
@@ -230,6 +232,21 @@ class AccountAdmin(UnfoldModelAdmin):
                     messages.success(request, f"Invoice {invoice.number} issued for {lease.tenant.name}.")
                     for error in errors:
                         messages.warning(request, f"Not posted yet: {error}")
+            elif action == "open":
+                if not user.has_perm("accounting.add_leaseinvoice"):
+                    raise PermissionDenied
+                lease_id = request.POST.get("lease", "")
+                lease = get_object_or_404(Lease, pk=int(lease_id)) if lease_id.isdigit() else None
+                if lease is None:
+                    raise PermissionDenied
+                try:
+                    invoice, errors = create_opening_invoice(lease, user)
+                except ValidationError as exc:
+                    messages.error(request, " ".join(exc.messages))
+                else:
+                    messages.success(request, f"Opening balances {invoice.number} posted for {lease.tenant.name}.")
+                    for error in errors:
+                        messages.warning(request, f"Not posted yet: {error}")
             elif action == "sync":
                 if not user.has_perm("accounting.post_journalentry"):
                     raise PermissionDenied
@@ -237,24 +254,6 @@ class AccountAdmin(UnfoldModelAdmin):
                 messages.success(request, f"{posted} posting step(s) done.")
                 for error in errors:
                     messages.warning(request, error)
-            elif action == "month_end":
-                if not user.has_perm("accounting.post_journalentry"):
-                    raise PermissionDenied
-                try:
-                    year, month = int(request.POST.get("year", "")), int(request.POST.get("month", ""))
-                    if not (2000 <= year <= 2100 and 1 <= month <= 12):
-                        raise ValueError
-                except ValueError:
-                    messages.error(request, "Choose a valid month and year.")
-                else:
-                    result = run_month_end(year, month, user)
-                    messages.success(
-                        request,
-                        f"Month end done: {result['rent_entries']} rent release(s) totalling AED {result['rent_total']:,.2f} "
-                        f"and {result['vat_entries']} VAT release(s).",
-                    )
-                    for error in result["errors"]:
-                        messages.warning(request, error)
             return HttpResponseRedirect(here)
 
         info = waiting_items()
@@ -262,16 +261,16 @@ class AccountAdmin(UnfoldModelAdmin):
         rows = [
             {"lease": lease, "default_date": max(lease.start_date, cutover)} for lease in info["to_invoice"]
         ]
-        today = timezone.localdate()
-        last_month_end = today.replace(day=1) - timedelta(days=1)
+        open_rows = []
+        for lease in info["to_open"]:
+            figures = opening_numbers(lease, cutover)
+            open_rows.append({"lease": lease, "n": figures})
         context = dict(
             self.admin_site.each_context(request),
             title="Daily postings",
             info=info,
             rows=rows,
-            default_year=last_month_end.year,
-            default_month=last_month_end.month,
-            months=[(i, calendar_month_name(i)) for i in range(1, 13)],
+            open_rows=open_rows,
             can_invoice=user.has_perm("accounting.add_leaseinvoice"),
             can_post=user.has_perm("accounting.post_journalentry"),
             settings_url=reverse("admin:accounting_accountingsettings_changelist"),
@@ -496,6 +495,14 @@ class JournalEntryAdmin(UnfoldModelAdmin):
     def save_related(self, request, form, formsets, change):
         super().save_related(request, form, formsets, change)
         if not change:
+            if AccountingSettings.load().separate_approver:
+                # Two-person rule: someone else must approve it before it counts.
+                form.instance.check_ready_to_post()
+                messages.info(
+                    request,
+                    "Saved as a draft. A second person must open it and click 'Approve and post'.",
+                )
+                return
             # Lines are saved: check everything once more and make it permanent.
             form.instance.post(user=request.user)
 
@@ -503,12 +510,53 @@ class JournalEntryAdmin(UnfoldModelAdmin):
         custom = [
             path("<int:pk>/reverse/", self.admin_site.admin_view(self.reverse_view),
                  name="accounting_journalentry_reverse"),
+            path("<int:pk>/approve/", self.admin_site.admin_view(self.approve_view),
+                 name="accounting_journalentry_approve"),
+            path("<int:pk>/discard/", self.admin_site.admin_view(self.discard_view),
+                 name="accounting_journalentry_discard"),
         ]
         return custom + super().get_urls()
+
+    def approve_view(self, request, pk):
+        """Second person: check and post a draft journal."""
+        if request.method != "POST" or not request.user.has_perm("accounting.post_journalentry"):
+            raise PermissionDenied
+        entry = get_object_or_404(JournalEntry, pk=pk)
+        back = HttpResponseRedirect(reverse("admin:accounting_journalentry_change", args=[entry.pk]))
+        if entry.is_posted:
+            messages.info(request, f"{entry.number} is already posted.")
+            return back
+        if AccountingSettings.load().separate_approver and entry.created_by_id == request.user.pk:
+            messages.error(request, "You made this entry, so someone else must approve it.")
+            return back
+        try:
+            entry.post(user=request.user)
+        except ValidationError as exc:
+            messages.error(request, " ".join(exc.messages))
+            return back
+        messages.success(request, f"{entry.number} was approved and posted.")
+        return back
+
+    def discard_view(self, request, pk):
+        """Throw away a draft that was never posted."""
+        if request.method != "POST" or not request.user.has_perm("accounting.post_journalentry"):
+            raise PermissionDenied
+        entry = get_object_or_404(JournalEntry, pk=pk)
+        if entry.is_posted:
+            messages.error(request, "A posted entry cannot be deleted. Reverse it instead.")
+            return HttpResponseRedirect(reverse("admin:accounting_journalentry_change", args=[entry.pk]))
+        entry.lines.all()._raw_delete(entry.lines.db)
+        entry.delete()
+        AuditLog.record("discard", user=request.user, detail=f"A draft journal was discarded: {entry.memo}")
+        messages.success(request, "The draft was discarded.")
+        return HttpResponseRedirect(reverse("admin:accounting_journalentry_changelist"))
 
     def change_view(self, request, object_id, form_url="", extra_context=None):
         extra = dict(extra_context or {})
         entry = JournalEntry.objects.filter(pk=object_id).first()
+        if entry and not entry.is_posted and request.user.has_perm("accounting.post_journalentry"):
+            extra["approve_url"] = reverse("admin:accounting_journalentry_approve", args=[entry.pk])
+            extra["discard_url"] = reverse("admin:accounting_journalentry_discard", args=[entry.pk])
         if entry and entry.is_posted:
             reversal = JournalEntry.objects.filter(reverses=entry).first()
             extra["reversed_by"] = reversal
@@ -527,6 +575,9 @@ class JournalEntryAdmin(UnfoldModelAdmin):
         error = ""
         day = timezone.localdate()
         reason = ""
+        if request.method == "POST" and AccountingSettings.load().separate_approver and entry.created_by_id == request.user.pk:
+            messages.error(request, "You made this entry, so someone else must reverse it.")
+            return HttpResponseRedirect(reverse("admin:accounting_journalentry_change", args=[entry.pk]))
         if request.method == "POST":
             reason = request.POST.get("reason", "").strip()
             try:
@@ -561,7 +612,7 @@ class JournalEntryAdmin(UnfoldModelAdmin):
 
 @admin.register(AccountingSettings)
 class AccountingSettingsAdmin(UnfoldModelAdmin):
-    fields = ("legal_name", "trn", "address", "cutover_date")
+    fields = ("legal_name", "trn", "address", "cutover_date", "separate_approver")
 
     def has_add_permission(self, request):
         return False
@@ -615,16 +666,39 @@ class _ReadOnlyAdmin(UnfoldModelAdmin):
 
 @admin.register(LeaseInvoice)
 class LeaseInvoiceAdmin(_ReadOnlyAdmin):
-    list_display = ("number", "date", "lease", "total_amount", "vat_amount", "print_link")
+    list_display = ("number", "date", "lease", "total_amount", "vat_amount", "is_opening", "is_void", "print_link")
+    list_filter = ("is_opening", "is_void")
     search_fields = ("number", "lease__tenant__name")
     date_hierarchy = "date"
+    actions = ["cancel_invoices"]
 
     @admin.display(description="Print")
     def print_link(self, obj):
+        if obj.is_opening:
+            return "Opening balances (no tax invoice)"
         return format_html(
             '<a href="{}" target="_blank">Open printable invoice</a>',
             reverse("admin:accounting_leaseinvoice_print", args=[obj.pk]),
         )
+
+    def has_cancel_permission(self, request):
+        return request.user.has_perm("accounting.reverse_journalentry")
+
+    @admin.action(
+        description="Cancel the selected invoices (to correct the lease and invoice again)",
+        permissions=["cancel"],
+    )
+    def cancel_invoices(self, request, queryset):
+        done = 0
+        for invoice in queryset.filter(is_void=False):
+            try:
+                void_lease_invoice(invoice, user=request.user)
+            except ValidationError as exc:
+                self.message_user(request, f"{invoice.number}: {' '.join(exc.messages)}", messages.ERROR)
+            else:
+                done += 1
+        if done:
+            self.message_user(request, f"{done} invoice(s) cancelled. You can now correct the lease and invoice it again.", messages.SUCCESS)
 
     def get_urls(self):
         custom = [
@@ -637,6 +711,8 @@ class LeaseInvoiceAdmin(_ReadOnlyAdmin):
         if not self.has_view_permission(request):
             raise PermissionDenied
         invoice = get_object_or_404(LeaseInvoice.objects.select_related("lease__tenant", "lease__unit__property"), pk=pk)
+        if invoice.is_opening:
+            raise Http404("Opening balances are not an invoice to the tenant.")
         lease = invoice.lease
         context = dict(
             self.admin_site.each_context(request),
@@ -646,6 +722,43 @@ class LeaseInvoiceAdmin(_ReadOnlyAdmin):
             schedule=lease.cheques.filter(purpose=Cheque.Purpose.RENT).order_by("cheque_date", "id"),
         )
         return TemplateResponse(request, "admin/accounting/leaseinvoice/print.html", context)
+
+
+@admin.register(CreditNote)
+class CreditNoteAdmin(_ReadOnlyAdmin):
+    list_display = ("number", "date", "lease", "total_amount", "vat_amount", "is_void", "print_link")
+    list_filter = ("is_void",)
+    search_fields = ("number", "lease__tenant__name")
+    date_hierarchy = "date"
+
+    @admin.display(description="Print")
+    def print_link(self, obj):
+        return format_html(
+            '<a href="{}" target="_blank">Open printable credit note</a>',
+            reverse("admin:accounting_creditnote_print", args=[obj.pk]),
+        )
+
+    def get_urls(self):
+        custom = [
+            path("<int:pk>/print/", self.admin_site.admin_view(self.print_view),
+                 name="accounting_creditnote_print"),
+        ]
+        return custom + super().get_urls()
+
+    def print_view(self, request, pk):
+        if not self.has_view_permission(request):
+            raise PermissionDenied
+        note = get_object_or_404(
+            CreditNote.objects.select_related("invoice", "lease__tenant", "lease__unit__property"), pk=pk
+        )
+        context = dict(
+            self.admin_site.each_context(request),
+            note=note,
+            invoice=note.invoice,
+            lease=note.lease,
+            company=AccountingSettings.load(),
+        )
+        return TemplateResponse(request, "admin/accounting/creditnote/print.html", context)
 
 
 @admin.register(ReceiptVoucher)

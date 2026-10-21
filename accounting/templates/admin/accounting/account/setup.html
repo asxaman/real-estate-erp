@@ -26,7 +26,7 @@
   <div class="step">
     <h2>2. Chart of accounts
       {% if account_count %}<span class="done">&#10003; {{ account_count }} accounts</span>{% else %}<span class="todo">to do</span>{% endif %}</h2>
-    <p>The starter chart is made for this business (deferred rent, post-dated cheques, tenant/owner/vendor accounts, separate company and owner-trust bank accounts). It only adds accounts that are missing and never changes yours. Have your accountant review it, then rename or add accounts under Chart of accounts.</p>
+    <p>The starter chart is made for this business (tenant receivable, post-dated cheques, tenant/owner/vendor accounts, separate company and owner-trust bank accounts). It only adds accounts that are missing and never changes yours. Have your accountant review it, then rename or add accounts under Chart of accounts.</p>
     {% if can_chart %}
     <form method="post">{% csrf_token %}<input type="hidden" name="action" value="chart">
       <button type="submit" class="default">{% if account_count %}Add any missing starter accounts{% else %}Create the starter chart of accounts{% endif %}</button></form>
@@ -36,7 +36,7 @@
   <div class="step">
     <h2>2b. Posting accounts
       {% if unmapped %}<span class="todo">to do</span>{% else %}<span class="done">&#10003; all set</span>{% endif %}</h2>
-    <p>Tells the system which account to use for each automatic posting (cheques in hand, deferred rent, VAT payable and so on). The starter chart fills this in for you. Change a choice only if your accountant renames or replaces an account.</p>
+    <p>Tells the system which account to use for each automatic posting (PDC receivable, owner payable, VAT payable and so on). The starter chart fills this in for you. Change a choice only if your accountant renames or replaces an account.</p>
     {% if unmapped %}<p class="todo">Missing: {{ unmapped|join:", " }}.</p>{% endif %}
     {% if perms.accounting.view_accountmapping %}<a class="button" href="{% url 'admin:accounting_accountmapping_changelist' %}">Open posting accounts</a>{% endif %}
   </div>

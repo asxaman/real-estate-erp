@@ -33,7 +33,7 @@ Then open http://127.0.0.1:8000/admin/
 A double-entry general ledger lives in the `accounting` app (menu: Accounting). Step 1 is the foundation:
 
 - **Chart of accounts** (data, not code): add or rename accounts in the admin. `setup_accounting` creates a *starter* chart
-  built for this business (deferred rent, post-dated cheques, tenant/owner/vendor control accounts, separate operating and
+  built for this business (post-dated cheques, tenant/owner/vendor control accounts, separate operating and
   owner-trust bank accounts). Have your UAE accountant review it before relying on it.
 - **Journal entries** are balanced (debits = credits), numbered without gaps (JV-2026-000001) and **never edited or deleted**:
   you cancel a mistake with a reversing entry. This is enforced by the program and again by the database itself.
@@ -54,18 +54,34 @@ python manage.py makemigrations accounting
 python manage.py migrate
 ```
 
-**Step 2: rent and cheques post by themselves (accrual basis).** Set your cutover date, then use Accounting > Daily postings:
+**Step 2: the accounting cycle posts by itself.** Set your cutover date, then use Accounting > Daily postings. The cycle:
 
-- **Lease invoice** (once per lease, printable, numbered INV-2026-000001, carries your TRN). Company-owned rent is held as
-  *deferred revenue* and the VAT as *output VAT not yet due*. Third-party rent is held for the owner, never as our income.
-- **Cheques post by themselves** when you change their status on the cheque desk: in hand (the tenant's balance drops and a
-  numbered receipt voucher is issued), deposited, cleared (money reaches the bank; for owners' rent it is credited to the owner and
-  our management fee and its VAT are taken), bounced (the tenant's balance is restored). Cash, card and transfer post when paid.
-  Owners' rent goes to the owner trust bank, company rent to the operating bank.
-- **Month end** (Daily postings > Month end): releases rent from deferred revenue to rent income by the exact days of the lease,
-  and moves VAT to "VAT payable" for instalments whose date has come.
+1. **Lease invoice** (once per lease, for the whole contract, numbered INV-2026-000001): Dr Tenant receivable. Cr Owner payable
+   (third-party unit) or Rent income (company unit). VAT, when the lease has it, goes to VAT output payable. On each lease you
+   choose whether the VAT is added on top of the rent or already inside it.
+2. **Every payment gets a receipt voucher (RV)**; the debit depends on how the tenant pays: cash > Cash account; bank transfer >
+   Owner trust bank (third-party unit) or Operating bank (company unit); card > Merchant clearing (moves to the bank when you
+   enter "card money reached the bank on"); post-dated cheque > PDC receivable. The credit is Tenant receivable
+   (a security deposit credits Tenant security deposits instead).
+3. **PDCs recorded:** Dr PDC receivable / Cr Tenant receivable. The tenant statement is clear.
+4. **Cheque clears:** Dr Bank / Cr PDC receivable (depositing posts nothing).
+5. **Cheque bounces** (even after clearing): Dr PDC bounced receivable / Cr PDC receivable. Account 1140 is the instant report
+   of who owes for bad cheques.
+6. **Bounced cheque replaced** (cash, transfer, card or another cheque): the replacement credits PDC bounced receivable.
+   Fees and penalties are invoiced first (Dr Tenant receivable / Cr Income), then paid like any payment.
+7. **Early exit:** cheques handed back are cancelled (Dr Tenant receivable / Cr PDC receivable), a credit note takes the unused
+   rent off (Dr Owner payable or Rent income and VAT / Cr Tenant receivable), and the penalty is invoiced and paid.
+8. **Maintenance** on a third-party unit: Dr Owner payable (cost + markup) / Cr Vendor payable (cost) / Cr Maintenance markup
+   income. Enter "vendor paid on" to pay the vendor from the bank. The markup % is set on the property.
+9. **Owner statement paid:** Dr Owner payable (fee + VAT on the fee) / Cr Management fee income and VAT; Dr Owner payable
+   (payout) / Cr Owner trust bank.
+10. **Move-out:** Dr Tenant security deposits / Cr Trust bank (the refund) and Cr Owner payable (damages for the owner).
+
+There is no deferred rent and no month end any more. Third-party early-exit penalties go to the owner (they appear on the owner
+statement); company-unit penalties are our income.
 - If a posting cannot be made (for example the month is locked) the payment is still saved and the step waits on Daily postings.
-- Not posted yet (later steps): deposits, commission, fees, penalties, expenses, owner payouts, VAT return, financial statements.
+- Also posted now: deposits, commission, fees and penalties, deposit refunds, expenses, owner statement payouts, early-exit credit notes, opening balances for leases that started before the cutover. Not yet: VAT return, financial statements.
+- Locks: an invoiced lease and a posted cheque cannot have money fields changed. Optional two-person rule for manual journals, automatic month end.
 
 Next steps: vendor bills and payment vouchers, owner payouts and deposits, VAT return, income statement, balance sheet, ageing,
 bank reconciliation and year-end closing.

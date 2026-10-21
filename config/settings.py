@@ -186,9 +186,10 @@ UNFOLD = {
                 "separator": True,
                 "items": [
                     {"title": "Accounting setup", "icon": "rule_settings", "link": _link("accounting_setup"), "permission": _can_acc("view_account")},
-                    {"title": "Daily postings", "icon": "published_with_changes", "link": _link("accounting_postings"), "permission": _can_acc("view_journalline")},
+                    {"title": "Daily postings", "icon": "published_with_changes", "link": _link("accounting_postings"), "permission": _can_acc("view_journalline"), "badge": "accounting.badges.postings_badge", "badge_variant": "danger"},
                     {"title": "Lease invoices", "icon": "request_page", "link": _link("accounting_leaseinvoice_changelist"), "permission": _can_acc("view_leaseinvoice")},
                     {"title": "Receipt vouchers", "icon": "receipt", "link": _link("accounting_receiptvoucher_changelist"), "permission": _can_acc("view_receiptvoucher")},
+                    {"title": "Credit notes", "icon": "assignment_return", "link": _link("accounting_creditnote_changelist"), "permission": _can_acc("view_creditnote")},
                     {"title": "Journal entries", "icon": "menu_book", "link": _link("accounting_journalentry_changelist"), "permission": _can_acc("view_journalentry")},
                     {"title": "Trial balance", "icon": "balance", "link": _link("accounting_account_trial_balance"), "permission": _can_acc("view_journalline")},
                     {"title": "General ledger", "icon": "book", "link": _link("accounting_account_general_ledger"), "permission": _can_acc("view_journalline")},

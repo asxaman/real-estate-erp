@@ -8,6 +8,7 @@ from django.urls import reverse
 from django.utils import timezone
 from django.utils.http import urlencode
 
+from . import ledger_hooks
 from .models import (
     Cheque,
     Expense,
@@ -139,8 +140,16 @@ def dashboard_context(request):
         priority__in=[MaintenanceRequest.Priority.URGENT, MaintenanceRequest.Priority.EMERGENCY]
     ).count()
 
+    postings_waiting = ledger_hooks.call("waiting_count", default=0) or 0
+    try:
+        postings_url = reverse("admin:accounting_postings")
+    except Exception:
+        postings_url = ""
+
     return {
         "dash": {
+            "postings_waiting": postings_waiting,
+            "postings_url": postings_url,
             "today": today,
             "month_label": today.strftime("%B %Y"),
             "cheque_tiles": cheque_tiles,

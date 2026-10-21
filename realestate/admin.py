@@ -18,6 +18,7 @@ from django.utils.safestring import mark_safe
 from unfold.admin import ModelAdmin as UnfoldModelAdmin
 from unfold.admin import TabularInline as UnfoldTabularInline
 
+from . import ledger_hooks
 from .models import (
     Cheque,
     ChequeEvent,
@@ -382,6 +383,7 @@ class PropertyAdmin(UnfoldModelAdmin):
     conditional_fields = {
         "owner": "ownership_type == 'third_party'",
         "management_fee_percent": "ownership_type == 'third_party'",
+        "maintenance_markup_percent": "ownership_type == 'third_party'",
         "management_start": "ownership_type == 'third_party'",
         "management_end": "ownership_type == 'third_party'",
     }
@@ -443,6 +445,7 @@ class PropertyAdmin(UnfoldModelAdmin):
                     "ownership_type",
                     "owner",
                     "management_fee_percent",
+                    "maintenance_markup_percent",
                     "management_start",
                     "management_end",
                 ),
@@ -839,6 +842,7 @@ class LeaseAdmin(UnfoldModelAdmin):
                 "fields": (
                     "annual_rent",
                     "vat_percent",
+                    "vat_inclusive",
                     "number_of_payments",
                     "payment_method",
                     "agency_commission",
@@ -869,6 +873,9 @@ class LeaseAdmin(UnfoldModelAdmin):
 
     def get_readonly_fields(self, request, obj=None):
         fixed = ["financial_summary", "deposit_panel", "ending_panel", "status"]
+        if obj is not None and ledger_hooks.call("lease_invoiced", obj.pk, default=False):
+            # The invoice is issued: these are what it was made from.
+            fixed += ["tenant", "unit", "annual_rent", "vat_percent", "vat_inclusive", "start_date", "end_date"]
         if obj is not None and obj.deposit_refunded_on:
             fixed += [
                 "deposit_carried_over",
@@ -1462,6 +1469,7 @@ class ChequeAdmin(UnfoldModelAdmin):
                     "returned_date",
                     "return_reason",
                     "replaces",
+                    "settled_on",
                 ),
             },
         ),

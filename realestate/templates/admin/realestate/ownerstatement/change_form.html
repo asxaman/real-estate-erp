@@ -45,6 +45,7 @@
       Before {{ statement.period_start|date:"d M Y" }} there are {{ uncovered.cheques }} cleared rent cheque(s)
       and {{ uncovered.expenses }} owner expense(s) that are on <strong>no statement</strong>.
       Create a statement that covers their dates so the owner is not short-paid.
+      Approving is blocked while they are left out, unless you choose <strong>Approve anyway</strong>.
     </div>
   {% endif %}
 
@@ -70,6 +71,12 @@
           <form method="post" action="{% url 'admin:realestate_ownerstatement_action' statement.pk 'approve' %}"
                 onsubmit="return confirm('Approve this statement? It will be locked.');">{% csrf_token %}
             <button type="submit" class="default">Approve</button></form>
+          {% if uncovered and uncovered.cheques or uncovered and uncovered.expenses %}
+          <form method="post" action="{% url 'admin:realestate_ownerstatement_action' statement.pk 'approve' %}"
+                onsubmit="return confirm('Approve although older payments and expenses are on no statement? They will stay out of this statement.');">{% csrf_token %}
+            <input type="hidden" name="allow_gaps" value="1">
+            <button type="submit" class="button">Approve anyway</button></form>
+          {% endif %}
         {% elif statement.status == "approved" %}
           <form method="post" action="{% url 'admin:realestate_ownerstatement_action' statement.pk 'reopen' %}"
                 onsubmit="return confirm('Reopen this statement as a draft?');">{% csrf_token %}

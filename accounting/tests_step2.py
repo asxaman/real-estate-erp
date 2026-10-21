@@ -13,6 +13,7 @@ from realestate.models import Cheque, Lease, Owner, Property, Tenant, Unit
 
 from . import reports, rules
 from .chart import seed_chart
+from .posting_roles import ROLE_DEFAULTS
 from .models import (
     ZERO,
     Account,
@@ -102,19 +103,27 @@ class LeaseInvoiceTests(Step2Base):
         self.assertEqual(invoice.number, "INV-2026-000001")
         self.assertEqual((invoice.rent_amount, invoice.vat_amount, invoice.total_amount), (D("12000.00"), D("600.00"), D("12600.00")))
         self.assertTrue(invoice.is_tax_invoice)
-        self.assertEqual(self.bal("1100"), D("12600.00"))
-        self.assertEqual(self.bal("2300"), D("12000.00"))
-        self.assertEqual(self.bal("2410"), D("600.00"))
-        self.assertEqual(self.bal("4010"), D("0.00"))  # nothing is income yet
+        self.assertEqual(self.bal("1100"), D("12600.00"))  # the tenant owes the whole contract
+        self.assertEqual(self.bal("4010"), D("12000.00"))  # company rent is income straight away
+        self.assertEqual(self.bal("2400"), D("600.00"))  # VAT output payable
 
-    def test_third_party_invoice_is_held_for_the_owner_not_income(self):
+    def test_vat_can_be_inside_the_rent(self):
+        lease = self.lease(self.own_unit, vat="5")
+        lease.vat_inclusive = True
+        lease.save()
+        invoice, _ = rules.create_lease_invoice(lease, date(2026, 3, 1))
+        self.assertEqual(invoice.total_amount, D("12000.00"))
+        self.assertEqual((invoice.rent_amount, invoice.vat_amount), (D("11428.57"), D("571.43")))
+        self.assertEqual(self.bal("1100"), D("12000.00"))
+        self.assertEqual(self.bal("2400"), D("571.43"))
+
+    def test_third_party_invoice_is_owed_to_the_owner_not_income(self):
         lease = self.lease(self.tp_unit)
         invoice, _ = rules.create_lease_invoice(lease, date(2026, 3, 1))
         self.assertFalse(invoice.is_tax_invoice)
         self.assertEqual(self.bal("1100"), D("12000.00"))
-        self.assertEqual(self.bal("2110"), D("12000.00"))
-        self.assertEqual(self.bal("2300"), D("0.00"))
-        self.assertEqual(self.bal("2100"), D("0.00"))
+        self.assertEqual(self.bal("2100"), D("12000.00"))  # owner payable
+        self.assertEqual(self.bal("4010"), D("0.00"))
 
     def test_refused_without_cutover_before_cutover_or_twice(self):
         lease = self.lease(self.own_unit)
@@ -144,31 +153,54 @@ class ChequeLifecycleTests(Step2Base):
 
     def test_the_full_cheque_chain_for_company_owned_rent(self):
         cheque = self.cheque(self.lease_own, "10001", "3150")
-        self.assertEqual(JournalEntry.objects.filter(source_tag="received").count(), 0)  # still expected
+        self.assertEqual(JournalEntry.objects.filter(source_tag="pdc_held").count(), 0)  # still expected
 
         self.set_status(cheque, "received", received_date=date(2026, 3, 2))
-        self.assertEqual(self.bal("1110"), D("3150.00"))
-        self.assertEqual(self.bal("1100"), D("9450.00"))  # the tenant owes less once the cheque is in hand
+        self.assertEqual(self.bal("1130"), D("3150.00"))  # PDC receivable
+        self.assertEqual(self.bal("1100"), D("9450.00"))  # the tenant owes less once the cheque is recorded
         voucher = ReceiptVoucher.objects.get()
         self.assertEqual(voucher.number, "RV-2026-000001")
         self.assertEqual(voucher.amount, D("3150.00"))
 
+        before = JournalEntry.objects.count()
         self.set_status(cheque, "deposited", deposited_date=date(2026, 3, 5))
-        self.assertEqual((self.bal("1110"), self.bal("1120")), (D("0.00"), D("3150.00")))
+        self.assertEqual(JournalEntry.objects.count(), before)  # depositing posts nothing
+        self.assertEqual(self.bal("1130"), D("3150.00"))
 
         self.set_status(cheque, "cleared", cleared_date=date(2026, 3, 10))
-        self.assertEqual((self.bal("1120"), self.bal("1010")), (D("0.00"), D("3150.00")))
-        # VAT for this instalment is now due: 3150 - 3000 = 150
-        self.assertEqual((self.bal("2410"), self.bal("2400")), (D("450.00"), D("150.00")))
+        self.assertEqual((self.bal("1130"), self.bal("1010")), (D("0.00"), D("3150.00")))
+        self.assertEqual(self.bal("2400"), D("600.00"))  # the VAT was booked with the invoice
         self.assertEqual(reports.ledger_health(), [])
 
-    def test_a_bounced_cheque_restores_the_receivable(self):
+    def test_a_bounced_cheque_moves_to_the_bounced_account_not_the_tenant(self):
         cheque = self.cheque(self.lease_own, "10002", "3150", status="received", received_date=date(2026, 3, 2))
         self.set_status(cheque, "deposited", deposited_date=date(2026, 3, 5))
         self.set_status(cheque, "returned", returned_date=date(2026, 3, 9), return_reason="insufficient_funds")
-        self.assertEqual(self.bal("1100"), D("12600.00"))
-        self.assertEqual((self.bal("1110"), self.bal("1120"), self.bal("1010")), (D("0.00"),) * 3)
+        self.assertEqual(self.bal("1100"), D("9450.00"))  # tenant receivable stays clean
+        self.assertEqual((self.bal("1130"), self.bal("1140"), self.bal("1010")), (D("0.00"), D("3150.00"), D("0.00")))
         self.assertEqual(reports.ledger_health(), [])
+
+    def test_a_cleared_cheque_taken_back_by_the_bank_goes_to_bounced(self):
+        cheque = self.cheque(self.lease_own, "10007", "3150", status="received", received_date=date(2026, 3, 2))
+        self.set_status(cheque, "cleared", cleared_date=date(2026, 3, 10))
+        self.assertEqual(self.bal("1010"), D("3150.00"))
+        self.set_status(cheque, "returned", returned_date=date(2026, 3, 20), return_reason="insufficient_funds")
+        self.assertEqual((self.bal("1010"), self.bal("1130"), self.bal("1140")), (D("0.00"), D("0.00"), D("3150.00")))
+        self.assertEqual(self.bal("1100"), D("9450.00"))
+        self.assertEqual(reports.ledger_health(), [])
+
+    def test_a_replacement_settles_the_bounced_amount(self):
+        cheque = self.cheque(self.lease_own, "10008", "3150", status="received", received_date=date(2026, 3, 2))
+        self.set_status(cheque, "returned", returned_date=date(2026, 3, 9), return_reason="insufficient_funds")
+        new = Cheque.objects.create(
+            lease=self.lease_own, method="cash", purpose="rent", amount=D("3150"),
+            cheque_date=date(2026, 3, 12), status="cleared", cleared_date=date(2026, 3, 12),
+            replaces=cheque,
+        )
+        self.assertEqual(self.bal("1140"), D("0.00"))
+        self.assertEqual(self.bal("1030"), D("3150.00"))  # cash account
+        self.assertEqual(self.bal("1100"), D("9450.00"))
+        self.assertTrue(new.pk)
 
     def test_posting_again_changes_nothing(self):
         cheque = self.cheque(self.lease_own, "10003", "3150", status="received", received_date=date(2026, 3, 2))
@@ -182,18 +214,18 @@ class ChequeLifecycleTests(Step2Base):
         self.set_status(cheque, "deposited", deposited_date=date(2026, 3, 5))
         self.set_status(cheque, "cleared", cleared_date=date(2026, 3, 10))
         self.set_status(cheque, "deposited")
-        self.assertEqual((self.bal("1010"), self.bal("1120")), (D("0.00"), D("3150.00")))
+        self.assertEqual((self.bal("1010"), self.bal("1130")), (D("0.00"), D("3150.00")))
         self.assertTrue(JournalEntry.objects.filter(source="reversal").exists())
         self.set_status(cheque, "cleared", cleared_date=date(2026, 3, 10))
-        self.assertEqual((self.bal("1010"), self.bal("1120")), (D("3150.00"), D("0.00")))
+        self.assertEqual((self.bal("1010"), self.bal("1130")), (D("3150.00"), D("0.00")))
         self.assertEqual(reports.ledger_health(), [])
 
-    def test_cash_payment_goes_straight_to_the_bank_and_gets_a_receipt(self):
+    def test_cash_payment_goes_to_the_cash_account_and_gets_a_receipt(self):
         cash = Cheque.objects.create(
             lease=self.lease_own, method="cash", purpose="rent", amount=D("3150"),
             cheque_date=date(2026, 3, 1), status="cleared", cleared_date=date(2026, 3, 3),
         )
-        self.assertEqual(self.bal("1010"), D("3150.00"))
+        self.assertEqual(self.bal("1030"), D("3150.00"))  # cash account
         self.assertEqual(self.bal("1100"), D("9450.00"))
         self.assertEqual(ReceiptVoucher.objects.filter(cheque=cash).count(), 1)
 
@@ -222,17 +254,51 @@ class ChequeLifecycleTests(Step2Base):
         self.assertEqual(self.bal("1010"), D("3150.00"))
         self.assertEqual(rules.waiting_items()["cheques"], [])
 
-    def test_only_rent_payments_are_posted_in_this_step(self):
+    def test_a_deposit_is_a_liability_not_income(self):
         Cheque.objects.create(
             lease=self.lease_own, method="cash", purpose="security_deposit", amount=D("1000"),
             cheque_date=date(2026, 3, 1), status="cleared", cleared_date=date(2026, 3, 3),
         )
-        self.assertEqual(self.bal("1010"), D("0.00"))
-        self.assertEqual(rules.waiting_items()["other_purposes"], 1)
+        self.assertEqual(self.bal("2200"), D("1000.00"))
+        self.assertEqual(self.bal("1030"), D("1000.00"))
+        self.assertEqual(self.bal("1100"), D("12600.00"))  # the deposit does not reduce the rent owed
+        self.assertEqual(ReceiptVoucher.objects.count(), 1)
+
+    def test_card_goes_to_merchant_clearing_until_the_bank_settles(self):
+        card = Cheque.objects.create(
+            lease=self.lease_own, method="card", purpose="rent", amount=D("3150"),
+            cheque_date=date(2026, 3, 1), status="cleared", cleared_date=date(2026, 3, 1),
+        )
+        self.assertEqual((self.bal("1040"), self.bal("1010")), (D("3150.00"), D("0.00")))
+        card.settled_on = date(2026, 3, 4)
+        card.save()
+        self.assertEqual((self.bal("1040"), self.bal("1010")), (D("0.00"), D("3150.00")))
+        self.assertEqual(reports.ledger_health(), [])
+
+    def test_a_bank_transfer_for_a_company_unit_goes_to_the_operating_bank(self):
+        Cheque.objects.create(
+            lease=self.lease_own, method="transfer", purpose="rent", amount=D("3150"),
+            cheque_date=date(2026, 3, 1), status="cleared", cleared_date=date(2026, 3, 1),
+        )
+        self.assertEqual((self.bal("1010"), self.bal("1020")), (D("3150.00"), D("0.00")))
+
+    def test_a_fee_is_invoiced_then_paid(self):
+        fee = Cheque.objects.create(
+            lease=self.lease_own, method="cash", purpose="bounce_fee", amount=D("525"),
+            cheque_date=date(2026, 3, 1), status="pending",
+        )
+        self.assertEqual(self.bal("1100"), D("13125.00"))  # 12,600 rent + 525 fee invoiced
+        self.assertGreater(self.bal("4070"), D("0.00"))
+        fee.status = "cleared"
+        fee.cleared_date = date(2026, 3, 2)
+        fee.save()
+        self.assertEqual(self.bal("1100"), D("12600.00"))
+        self.assertEqual(self.bal("1030"), D("525.00"))
+        self.assertEqual(reports.ledger_health(), [])
 
 
 class ThirdPartyTests(Step2Base):
-    def test_clearing_credits_the_owner_and_takes_the_fee_and_its_vat(self):
+    def test_the_owner_is_credited_on_the_invoice_and_the_bank_gets_the_cash(self):
         lease = self.lease(self.tp_unit)
         rules.create_lease_invoice(lease, date(2026, 3, 1))
         cheque = self.cheque(lease, "20001", "3000", status="received", received_date=date(2026, 3, 2))
@@ -240,78 +306,30 @@ class ThirdPartyTests(Step2Base):
         self.set_status(cheque, "cleared", cleared_date=date(2026, 3, 10))
         self.assertEqual(self.bal("1020"), D("3000.00"))  # owners' money sits in the trust bank
         self.assertEqual(self.bal("1010"), D("0.00"))
-        self.assertEqual(self.bal("2110"), D("9000.00"))
-        self.assertEqual(self.bal("2100"), D("2685.00"))  # 3000 - 300 fee - 15 VAT on the fee
-        self.assertEqual(self.bal("4020"), D("300.00"))
-        self.assertEqual(self.bal("2400"), D("15.00"))
+        self.assertEqual(self.bal("2100"), D("12000.00"))  # the owner is owed the full contract
+        self.assertEqual(self.bal("4020"), D("0.00"))  # our fee is taken when the statement is paid
         self.assertEqual(self.bal("4010"), D("0.00"))  # third-party rent is never our income
         balances = {r["party_id"]: r["balance"] for r in reports.party_balances(Account.objects.get(code="2100"))}
-        self.assertEqual(balances, {self.owner.pk: D("2685.00")})
+        self.assertEqual(balances, {self.owner.pk: D("12000.00")})
         self.assertTrue(all(row["ok"] for row in reports.reconciliation()))
         self.assertEqual(reports.ledger_health(), [])
 
-    def test_a_bounce_after_clearing_undoes_the_owner_credit(self):
+    def test_a_bounce_after_clearing_moves_it_to_bounced_receivable(self):
         lease = self.lease(self.tp_unit)
         rules.create_lease_invoice(lease, date(2026, 3, 1))
         cheque = self.cheque(lease, "20002", "3000", status="received", received_date=date(2026, 3, 2))
         self.set_status(cheque, "deposited", deposited_date=date(2026, 3, 5))
         self.set_status(cheque, "cleared", cleared_date=date(2026, 3, 10))
         self.set_status(cheque, "returned", returned_date=date(2026, 3, 20), return_reason="stop_payment")
-        self.assertEqual((self.bal("1020"), self.bal("2100"), self.bal("4020"), self.bal("2400")), (D("0.00"),) * 4)
-        self.assertEqual(self.bal("1100"), D("12000.00"))
-        self.assertEqual(self.bal("2110"), D("12000.00"))
+        self.assertEqual((self.bal("1020"), self.bal("1130")), (D("0.00"), D("0.00")))
+        self.assertEqual(self.bal("1140"), D("3000.00"))
+        self.assertEqual(self.bal("1100"), D("9000.00"))
         self.assertEqual(reports.ledger_health(), [])
-
-
-class MonthEndTests(Step2Base):
-    def setUp(self):
-        super().setUp()
-        self.lease_own = self.lease(self.own_unit, vat="5")
-        rules.create_lease_invoice(self.lease_own, date(2026, 3, 1))
-
-    def test_rent_is_released_by_exact_days_and_is_not_repeated(self):
-        result = rules.run_month_end(2026, 3)
-        self.assertEqual(result["errors"], [])
-        self.assertEqual(self.bal("4010"), D("1019.18"))  # 12,000 x 31 / 365
-        self.assertEqual(self.bal("2300"), D("10980.82"))
-        entries = JournalEntry.objects.count()
-        rules.run_month_end(2026, 3)
-        self.assertEqual(JournalEntry.objects.count(), entries)
-
-    def test_over_the_whole_lease_exactly_the_rent_is_released(self):
-        for year, month in [(2026, m) for m in range(3, 13)] + [(2027, 1), (2027, 2)]:
-            result = rules.run_month_end(year, month)
-            self.assertEqual(result["errors"], [], (year, month))
-        self.assertEqual(self.bal("4010"), D("12000.00"))
-        self.assertEqual(self.bal("2300"), D("0.00"))
-        rules.run_month_end(2027, 3)  # nothing more to release
-        self.assertEqual(self.bal("4010"), D("12000.00"))
-
-    def test_skipping_months_catches_up(self):
-        rules.run_month_end(2026, 5)
-        self.assertEqual(self.bal("4010"), (D("12000") * 92 / 365).quantize(D("0.01")))  # 1 Mar to 31 May
-
-    def test_vat_becomes_due_when_the_instalment_date_arrives(self):
-        self.cheque(self.lease_own, "10010", "3150", status="received", received_date=date(2026, 3, 2), cheque_date=date(2026, 3, 1))
-        self.cheque(self.lease_own, "10011", "3150", status="received", received_date=date(2026, 3, 2), cheque_date=date(2026, 6, 1))
-        result = rules.run_month_end(2026, 3)
-        self.assertEqual(result["vat_entries"], 1)
-        self.assertEqual(self.bal("2400"), D("150.00"))
-        rules.run_month_end(2026, 6)
-        self.assertEqual(self.bal("2400"), D("300.00"))
-        rules.run_month_end(2026, 6)
-        self.assertEqual(self.bal("2400"), D("300.00"))
-
-    def test_third_party_leases_have_no_deferred_release(self):
-        tp = self.lease(self.tp_unit)
-        rules.create_lease_invoice(tp, date(2026, 3, 1))
-        rules.run_month_end(2026, 3)
-        self.assertEqual(self.bal("2110"), D("12000.00"))
 
 
 class MappingAndDocumentTests(Step2Base):
     def test_each_job_points_to_an_account(self):
-        self.assertEqual(AccountMapping.objects.count(), 12)
+        self.assertEqual(AccountMapping.objects.count(), len(ROLE_DEFAULTS))
         self.assertEqual(unmapped_roles(), [])
         trust_job = AccountMapping.objects.get(key="bank_trust")
         trust_job.account = Account.objects.get(code="1010")  # the company's own bank: wrong
@@ -321,9 +339,9 @@ class MappingAndDocumentTests(Step2Base):
     def test_a_missing_account_is_reported_and_never_breaks_saving_a_cheque(self):
         lease = self.lease(self.own_unit)
         rules.create_lease_invoice(lease, date(2026, 3, 1))
-        AccountMapping.objects.filter(key="pdc_in_hand").delete()
-        Account.objects.filter(code="1110").update(code="1119")
-        self.assertEqual(unmapped_roles(), ["Post-dated cheques in hand"])
+        AccountMapping.objects.filter(key="pdc_ar").delete()
+        Account.objects.filter(code="1130").update(code="1139")
+        self.assertEqual(unmapped_roles(), ["PDC receivable (cheques held for the tenant)"])
         cheque = self.cheque(lease, "40001", "3000", status="received", received_date=date(2026, 3, 2))  # saves fine
         self.assertEqual(Cheque.objects.filter(pk=cheque.pk).count(), 1)
         self.assertEqual(self.bal("1100"), D("12000.00"))  # but nothing was posted
@@ -359,7 +377,7 @@ class MappingAndDocumentTests(Step2Base):
 
 
 class DailyPostingsPageTests(Step2Base):
-    def test_accountant_issues_an_invoice_and_runs_month_end(self):
+    def test_accountant_issues_an_invoice_from_the_page(self):
         lease = self.lease(self.own_unit, vat="5")
         self.client.force_login(make_user("amal", "Accountant"))
         url = reverse("admin:accounting_postings")
@@ -369,8 +387,7 @@ class DailyPostingsPageTests(Step2Base):
         self.assertEqual(response.status_code, 302)
         invoice = LeaseInvoice.objects.get()
         self.assertEqual(invoice.created_by.username, "amal")
-        self.client.post(url, {"action": "month_end", "year": "2026", "month": "3"})
-        self.assertEqual(self.bal("4010"), D("1019.18"))
+        self.assertEqual(self.bal("4010"), D("12000.00"))
         self.assertEqual(self.client.post(url, {"action": "sync"}).status_code, 302)
 
     def test_a_manager_can_look_but_not_post_and_others_cannot_open_it(self):
@@ -379,7 +396,6 @@ class DailyPostingsPageTests(Step2Base):
         self.client.force_login(make_user("mia", "Manager"))
         self.assertEqual(self.client.get(url).status_code, 200)
         self.assertEqual(self.client.post(url, {"action": "invoice", "lease": lease.pk}).status_code, 403)
-        self.assertEqual(self.client.post(url, {"action": "month_end", "year": "2026", "month": "3"}).status_code, 403)
         self.assertEqual(LeaseInvoice.objects.count(), 0)
         self.client.force_login(make_user("viv", "Viewer (read only)"))
         self.assertEqual(self.client.get(url).status_code, 403)

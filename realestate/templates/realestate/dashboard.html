@@ -40,7 +40,9 @@
     {% if perms.realestate.add_ownerstatement %}<a class="button" href="{% url 'admin:realestate_ownerstatement_add' %}">+ New owner statement</a>{% endif %}
   </div>
   {% if perms.realestate.view_cheque %}
-  <h2>Cheques and payments &mdash; <a href="{{ dash.desk_url }}">open the daily cheque desk</a></h2>
+    {% if dash.postings_waiting and dash.postings_url %}<div style="padding:10px 14px;margin:0 0 14px;border:1px solid #c62828;background:#ffebee;color:#7f0000;border-radius:6px"><strong>{{ dash.postings_waiting }} accounting posting(s) are waiting.</strong> <a href="{{ dash.postings_url }}">Open Daily postings</a> to see why.</div>
+  {% endif %}
+<h2>Cheques and payments &mdash; <a href="{{ dash.desk_url }}">open the daily cheque desk</a></h2>
   <div class="dash-row">
     {% for label, count, color in dash.cheque_tiles %}
       <a class="tile {{ color }}{% if not count %} zero{% endif %}" href="{{ dash.desk_url }}">

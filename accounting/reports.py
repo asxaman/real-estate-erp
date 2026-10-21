@@ -172,9 +172,9 @@ def ledger_health():
                 f"sub-ledger {row['subledger_total']:,.2f} (unassigned {row['unassigned']:,.2f})."
             )
 
-    from .models import LeaseInvoice, ReceiptVoucher
+    from .models import CreditNote, LeaseInvoice, ReceiptVoucher
 
-    document_models = {"INV": LeaseInvoice, "RV": ReceiptVoucher}
+    document_models = {"INV": LeaseInvoice, "OBI": LeaseInvoice, "RV": ReceiptVoucher, "CN": CreditNote}
     for seq in NumberSequence.objects.all():
         prefix = seq.key.rsplit("-", 1)[0]
         if prefix in document_models:

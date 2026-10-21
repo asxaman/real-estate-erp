@@ -180,6 +180,13 @@ class ExpenseAdmin(UnfoldModelAdmin):
                 "fields": ("tenant", "recovered_amount", "recovered_on"),
             },
         ),
+        (
+            "Paying the vendor",
+            {
+                "description": "Until you enter the date, the vendor's bill is shown as owed to the vendor.",
+                "fields": ("vendor_paid_on",),
+            },
+        ),
         ("Receipt", {"fields": ("receipt", "notes")}),
     )
 
@@ -212,7 +219,7 @@ class ExpenseAdmin(UnfoldModelAdmin):
     def get_readonly_fields(self, request, obj=None):
         if obj is not None and obj.is_locked:
             # Money the tenant pays back can still be recorded.
-            keep_open = {"tenant", "recovered_amount", "recovered_on"}
+            keep_open = {"tenant", "recovered_amount", "recovered_on", "vendor_paid_on"}
             return [
                 f.name for f in Expense._meta.fields if f.editable and f.name not in keep_open
             ]
@@ -222,6 +229,21 @@ class ExpenseAdmin(UnfoldModelAdmin):
         if obj is not None and obj.statement_status is not None:
             return False
         return super().has_delete_permission(request, obj)
+
+    def delete_view(self, request, object_id, extra_context=None):
+        # The ledger refuses to lose a posted expense (for example the month is locked).
+        try:
+            return super().delete_view(request, object_id, extra_context)
+        except ValidationError as exc:
+            self.message_user(request, " ".join(exc.messages), messages.ERROR)
+            return HttpResponseRedirect(reverse("admin:realestate_expense_change", args=[object_id]))
+
+    def delete_queryset(self, request, queryset):
+        for expense in queryset:
+            try:
+                expense.delete()
+            except ValidationError as exc:
+                self.message_user(request, f"{expense}: {' '.join(exc.messages)}", messages.ERROR)
 
 
 # ---------------------------------------------------------------------------
@@ -549,7 +571,7 @@ class OwnerStatementAdmin(UnfoldModelAdmin):
                 log_change(request, statement, f"Recalculated ({count} lines).")
                 messages.success(request, f"Recalculated: {count} line(s).")
             elif action == "approve":
-                statement.approve(user=request.user)
+                statement.approve(user=request.user, allow_gaps=request.POST.get("allow_gaps") == "1")
                 log_change(request, statement, "Approved and locked.")
                 messages.success(request, "Statement approved. It is now locked.")
             elif action == "reopen":

@@ -6,6 +6,13 @@
   <a href="{% url 'admin:accounting_journalentry_change' reversed_by.pk %}">{{ reversed_by.number }}</a>.
 </p>
 {% endif %}
+{% if approve_url %}
+<div style="padding:8px 12px;border:1px solid #1565c0;border-radius:4px;background:rgba(21,101,192,.10);margin:0 0 12px">
+  <p style="margin:0 0 8px"><b>This is a draft.</b> It is not in the accounts until it is posted.</p>
+  <form method="post" action="{{ approve_url }}" style="display:inline">{% csrf_token %}<button type="submit" class="default">Approve and post</button></form>
+  <form method="post" action="{{ discard_url }}" style="display:inline" onsubmit="return confirm('Throw this draft away?');">{% csrf_token %}<button type="submit" class="button">Discard draft</button></form>
+</div>
+{% endif %}
 {% if reverse_url %}
 <p><a class="button" href="{{ reverse_url }}">Reverse this entry...</a>
   <small>Posted entries cannot be edited. A reversal cancels the entry and keeps the history.</small></p>

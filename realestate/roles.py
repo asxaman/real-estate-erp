@@ -28,8 +28,9 @@ EVERYTHING = [
 ] + DOCUMENTS
 
 # Bump this when permissions are added, and list the new ones in INTRODUCED.
-ROLES_VERSION = 4
+ROLES_VERSION = 5
 INTRODUCED = {
+    5: {"view_creditnote"},
     4: {
         "view_leaseinvoice", "add_leaseinvoice", "view_receiptvoucher",
         "view_accountmapping", "change_accountmapping",
@@ -55,7 +56,7 @@ INTRODUCED = {
 ACCOUNTING_VIEW = {
     "account": VIEW, "fiscalperiod": VIEW, "journalentry": VIEW,
     "journalline": VIEW, "auditlog": VIEW, "accountingsettings": VIEW,
-    "leaseinvoice": VIEW, "receiptvoucher": VIEW, "accountmapping": VIEW,
+    "leaseinvoice": VIEW, "receiptvoucher": VIEW, "accountmapping": VIEW, "creditnote": VIEW,
 }
 
 
@@ -88,6 +89,7 @@ ROLES = {
         journalline=VIEW, auditlog=VIEW,
         accountingsettings=("view", "change"),
         leaseinvoice=("view", "add"), receiptvoucher=VIEW, accountmapping=("view", "change"),
+        creditnote=VIEW,
     ),
     "Leasing agent": _view_all(
         tenant=EDIT, lease=EDIT, unit=EDIT, cheque=EDIT,

@@ -13,6 +13,7 @@ from django.dispatch import receiver
 from django.db.models import Case, CharField, Exists, OuterRef, Q, Sum, Value, When
 from django.utils import timezone
 
+from . import ledger_hooks
 from .fields import EmiratesIDField, IBANField, PassportField
 from .utils import (
     add_months,
@@ -379,6 +380,15 @@ class Property(models.Model):
         blank=True,
         validators=[MinValueValidator(0), MaxValueValidator(100)],
         help_text="Leave empty to use the owner's default fee.",
+    )
+    maintenance_markup_percent = models.DecimalField(
+        "markup on repairs (%)",
+        max_digits=5,
+        decimal_places=2,
+        default=Decimal("0.00"),
+        validators=[MinValueValidator(0), MaxValueValidator(100)],
+        help_text="Our markup on repair costs charged to the owner (only if the management "
+        "contract allows it). For example 10.",
     )
     management_start = models.DateField(
         "management agreement start", null=True, blank=True
@@ -840,6 +850,12 @@ class Lease(models.Model):
         validators=[MinValueValidator(0), MaxValueValidator(100)],
         help_text="Residential rent has no VAT (leave 0). Commercial rent normally has 5% VAT.",
     )
+    vat_inclusive = models.BooleanField(
+        "VAT is already inside the rent",
+        default=False,
+        help_text="Tick if the annual rent already contains the VAT (the tenant pays exactly "
+        "the rent). Leave unticked if the VAT is added on top of the rent.",
+    )
     security_deposit = models.DecimalField(
         "security deposit (AED)",
         max_digits=12,
@@ -976,12 +992,16 @@ class Lease(models.Model):
         """VAT for one year of rent."""
         rent = self.annual_rent or Decimal("0")
         percent = self.vat_percent or Decimal("0")
+        if self.vat_inclusive:
+            return split_vat(rent, percent)[1]
         return (rent * percent / 100).quantize(Decimal("0.01"))
 
     @property
     def contract_total(self):
         """Rent plus VAT for the whole lease period (the yearly rent, pro-rated)."""
         rent = self.annual_rent or Decimal("0")
+        if self.vat_inclusive:
+            return prorate(rent, self.term_months)
         return prorate(rent + self.vat_amount, self.term_months)
 
     @property
@@ -1381,8 +1401,58 @@ class Lease(models.Model):
         if self.renewal_of_id and self.pk and self.renewal_of_id == self.pk:
             errors["renewal_of"] = "A lease cannot renew itself."
 
+        percent = self.vat_percent or 0
+        if self.usage == self.Usage.RESIDENTIAL and percent > 0:
+            errors["vat_percent"] = (
+                "Residential rent is exempt from VAT. Leave this at 0 (or change the "
+                "usage to Commercial)."
+            )
+        elif self.usage in (self.Usage.COMMERCIAL, self.Usage.INDUSTRIAL) and percent <= 0:
+            errors["vat_percent"] = (
+                "Commercial and industrial rent normally carries 5% VAT. Enter the VAT "
+                "rate (for example 5), or change the usage to Residential."
+            )
+
+        problem = self._ledger_change_problem()
+        if problem:
+            errors["__all__"] = problem
+
         if errors:
             raise ValidationError(errors)
+
+    # --- the accounts: no silent changes after the invoice ---------------------
+
+    LEDGER_LOCKED_FIELDS = (
+        "tenant_id",
+        "unit_id",
+        "annual_rent",
+        "start_date",
+        "end_date",
+        "vat_percent",
+        "vat_inclusive",
+    )
+
+    def _ledger_change_problem(self):
+        """Why this lease cannot be changed (it already has an invoice), or ''."""
+        if not self.pk or not ledger_hooks.call("lease_invoiced", self.pk, default=False):
+            return ""
+        old = Lease.objects.filter(pk=self.pk).first()
+        if old is None:
+            return ""
+        if any(getattr(old, name) != getattr(self, name) for name in self.LEDGER_LOCKED_FIELDS):
+            return (
+                "This lease already has an invoice in the accounts, so the tenant, unit, "
+                "rent, VAT and dates cannot be changed. If the invoice was a mistake, ask "
+                "the accountant to cancel it (Accounting > Lease invoices) and then "
+                "correct the lease."
+            )
+        return ""
+
+    def save(self, *args, **kwargs):
+        problem = self._ledger_change_problem()
+        if problem:
+            raise ValidationError(problem)
+        super().save(*args, **kwargs)
 
 
 class LeaseDocument(DocumentBase):
@@ -1497,6 +1567,12 @@ class Cheque(models.Model):
     deposited_date = models.DateField(null=True, blank=True)
     cleared_date = models.DateField("cleared / paid date", null=True, blank=True)
     returned_date = models.DateField(null=True, blank=True)
+    settled_on = models.DateField(
+        "card money reached the bank on",
+        null=True,
+        blank=True,
+        help_text="Card payments only: the day the card company paid the money into the bank.",
+    )
     return_reason = models.CharField(
         max_length=30, choices=ReturnReason.choices, blank=True
     )
@@ -1572,6 +1648,26 @@ class Cheque(models.Model):
             return False
         return any(getattr(old, f) != getattr(self, f) for f in self.LOCKED_FIELDS)
 
+    # Once a payment is in the accounts these may not change; the entries would no
+    # longer match. (Its status and dates are fine: the accounts follow them.)
+    LEDGER_LOCKED_FIELDS = ("amount", "lease_id", "purpose", "method")
+
+    def _ledger_change_problem(self):
+        """Why this payment cannot be changed (it is already in the accounts), or ''."""
+        if not self.pk or not ledger_hooks.call("cheque_posted", self.pk, default=False):
+            return ""
+        old = Cheque.objects.filter(pk=self.pk).first()
+        if old is None:
+            return ""
+        if any(getattr(old, name) != getattr(self, name) for name in self.LEDGER_LOCKED_FIELDS):
+            return (
+                "This payment is already in the accounts, so its amount, lease, purpose "
+                "and way of paying cannot be changed. If it was entered wrongly, cancel "
+                "it (only possible before the bank has it) and add a new one, or ask the "
+                "accountant to reverse the entries."
+            )
+        return ""
+
     # --- checks and automatic dates ---------------------------------------
 
     def clean(self):
@@ -1636,6 +1732,10 @@ class Cheque(models.Model):
                 "This payment is on an approved owner statement and cannot be "
                 "changed. Reopen the statement first."
             )
+        elif self.pk:
+            problem = self._ledger_change_problem()
+            if problem:
+                errors["__all__"] = problem
         if errors:
             raise ValidationError(errors)
 
@@ -1650,10 +1750,18 @@ class Cheque(models.Model):
             self.cheque_number = ""
             self.bank_name = ""
 
-        if self.pk and self.is_locked and self._changed_from_saved():
+        if (
+            self.pk
+            and self.is_locked
+            and not getattr(self, "_allow_locked_change", False)
+            and self._changed_from_saved()
+        ):
             raise ValidationError(
                 "This payment is on an approved owner statement and cannot be changed."
             )
+        problem = self._ledger_change_problem()
+        if problem:
+            raise ValidationError(problem)
 
         if self.status == S.RECEIVED and not self.received_date:
             self.received_date = today
@@ -1737,26 +1845,55 @@ class Cheque(models.Model):
         self._move_to(self.Status.CLEARED, user)
 
     def mark_returned(self, reason, on=None, user=None, note="", fee=None):
-        """Bounce a deposited cheque. Adds the bounced-cheque fee if one is set."""
-        self._require_unlocked()
-        if not self.is_cheque or self.status != self.Status.DEPOSITED:
-            raise ValidationError("Only a deposited cheque can be marked as returned.")
+        """Bounce a deposited cheque (or one the bank takes back after it cleared).
+
+        Adds the bounced-cheque fee if one is set. If the cheque had already been
+        paid out to the owner on a PAID statement, the owner's share is charged to
+        them as an expense on their next statement."""
+        S = self.Status
+        if not self.is_cheque or self.status not in (S.DEPOSITED, S.CLEARED):
+            raise ValidationError(
+                "Only a deposited or cleared cheque can be marked as returned."
+            )
+        statement = self.statement_line.statement if getattr(self, "statement_line", None) else None
+        paid_out = statement is not None and statement.status == OwnerStatement.Status.PAID
+        if not paid_out:
+            self._require_unlocked()
         if reason not in self.ReturnReason.values:
             raise ValidationError("Choose why the cheque was returned.")
         if fee is None:
             fee = CompanySettings.load().bounce_fee
+        returned_on = on or timezone.localdate()
         with transaction.atomic():
+            share = statement.owner_share_of(self) if paid_out else None
             self.return_reason = reason
-            self.returned_date = on or timezone.localdate()
-            self._move_to(self.Status.RETURNED, user, note)
+            self.returned_date = returned_on
+            if paid_out:
+                self._allow_locked_change = True
+            self._move_to(S.RETURNED, user, note)
+            if paid_out and share and share > 0:
+                Expense.objects.create(
+                    property=self.lease.unit.property,
+                    unit=self.lease.unit,
+                    category=ExpenseCategory.OTHER,
+                    description=(
+                        f"Cheque {self.cheque_number or self.pk} bounced after the owner was "
+                        f"paid ({statement.number})"
+                    ),
+                    expense_date=returned_on,
+                    amount=share,
+                    bearer=Expense.Bearer.OWNER,
+                    is_clawback=True,
+                    notes="Created automatically: the owner already received this money.",
+                )
             if fee and fee > 0:
                 Cheque.objects.create(
                     lease=self.lease,
                     purpose=self.Purpose.BOUNCE_FEE,
                     method=self.Method.CASH,
                     amount=fee,
-                    cheque_date=self.returned_date,
-                    status=self.Status.PENDING,
+                    cheque_date=returned_on,
+                    status=S.PENDING,
                     notes=f"Fee for bounced cheque {self.cheque_number}.",
                 )
 
@@ -1795,6 +1932,12 @@ class Cheque(models.Model):
         if self.status in (self.Status.CLEARED, self.Status.DEPOSITED, self.Status.CANCELLED):
             raise ValidationError(
                 "A payment that is deposited or already paid cannot be cancelled."
+            )
+        if self.status in (self.Status.RETURNED, self.Status.REPLACED):
+            raise ValidationError(
+                "A bounced cheque cannot be cancelled: the tenant still owes the money. "
+                "Create a replacement and collect it. If it will never be paid, ask the "
+                "accountant to write it off."
             )
         self._move_to(self.Status.CANCELLED, user, note)
 
@@ -2053,6 +2196,12 @@ class Expense(models.Model):
     recovered_on = models.DateField(
         "tenant paid back on", null=True, blank=True
     )
+    vendor_paid_on = models.DateField(
+        "vendor paid on",
+        null=True,
+        blank=True,
+        help_text="The day we paid the vendor's bill. Until then it is owed to the vendor.",
+    )
     receipt = models.FileField(
         upload_to=document_upload_path,
         blank=True,
@@ -2060,6 +2209,12 @@ class Expense(models.Model):
         help_text="Invoice or receipt: PDF, JPG or PNG, up to 10 MB.",
     )
     notes = models.TextField(blank=True)
+    is_clawback = models.BooleanField(
+        default=False,
+        editable=False,
+        help_text="Created automatically when a cheque bounces after the owner was paid. "
+        "It only appears on the owner's statement; the accounts were already corrected.",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -2081,6 +2236,21 @@ class Expense(models.Model):
         """True once an approved or paid owner statement includes this expense."""
         status = self.statement_status
         return status is not None and status != OwnerStatement.Status.DRAFT
+
+    @_property
+    def markup_amount(self):
+        """Our markup on a repair charged to the owner of a third-party property."""
+        if self.bearer != self.Bearer.OWNER or self.is_clawback or self.amount is None:
+            return Decimal("0.00")
+        prop = self.property
+        if prop.ownership_type != Property.Ownership.THIRD_PARTY:
+            return Decimal("0.00")
+        return percent_of(self.amount, prop.maintenance_markup_percent or Decimal("0"))
+
+    @_property
+    def owner_charge(self):
+        """What the owner is charged: the repair plus our markup."""
+        return (self.amount or Decimal("0.00")) + self.markup_amount
 
     @_property
     def still_to_recover(self):
@@ -2480,7 +2650,7 @@ class OwnerStatement(models.Model):
                     property=expense.property,
                     date=expense.expense_date,
                     description=f"{expense.description}{where}",
-                    amount=expense.amount,
+                    amount=expense.owner_charge,
                     expense=expense,
                 )
             )
@@ -2543,8 +2713,39 @@ class OwnerStatement(models.Model):
         """Items INSIDE this period that are not on the statement yet."""
         return self._count_unstatemented(self.period_start, self.period_end)
 
-    def approve(self, user=None):
+    def owner_share_of(self, cheque):
+        """What the owner got from one cleared payment on this statement: the rent
+        without VAT (plus the VAT when it is paid to the owner) less our fee and the
+        VAT on the fee. Penalties go to the owner in full; other payments are ours."""
+        if cheque.purpose == Cheque.Purpose.PENALTY:
+            return cheque.amount
+        if cheque.purpose != Cheque.Purpose.RENT:
+            return Decimal("0.00")
+        lease = cheque.lease
+        prop = lease.unit.property
+        net, vat = split_vat(cheque.amount, lease.vat_percent)
+        fee = Decimal("0.00")
+        day = cheque.cleared_date or timezone.localdate()
+        if prop.owner_id != self.owner_id:
+            fee = percent_of(net, Decimal(self.owner.management_fee_percent or 0))
+        elif prop.fee_applies_on(day):
+            fee = percent_of(net, prop.effective_fee_percent or Decimal("0"))
+        fee_vat = percent_of(fee, self.fee_vat_percent)
+        share = net - fee - fee_vat + (vat if self.pay_vat_to_owner else Decimal("0.00"))
+        return max(share, Decimal("0.00"))
+
+    def approve(self, user=None, allow_gaps=False):
         self._require(self.Status.DRAFT, "Only a draft statement can be approved.")
+        if not allow_gaps:
+            gap = self.uncovered_items()
+            if gap["cheques"] or gap["expenses"]:
+                raise ValidationError(
+                    f"Before {self.period_start:%d %b %Y} there are {gap['cheques']} cleared "
+                    f"rent payment(s) and {gap['expenses']} owner expense(s) on no statement, "
+                    "so the owner would never be paid for them. Move this statement's start "
+                    "date back to include them, or use 'Approve anyway' if they are meant "
+                    "to stay out (for example, history from before you started using the system)."
+                )
         if self.is_stale():
             raise ValidationError(
                 "Something changed since this statement was calculated (a new "

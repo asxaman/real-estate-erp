@@ -375,7 +375,7 @@ class ChartTests(LedgerBase):
         self.assertEqual(self.receivable.control_kind, "tenant")
         self.assertEqual(self.owner_payable.control_kind, "owner")
         self.assertEqual(self.vendor_payable.control_kind, "vendor")
-        for code in ("1110", "1120", "2200", "2300", "2400", "3020", "4020", "5100"):
+        for code in ("1130", "1140", "2200", "2400", "3020", "4020", "5100"):
             self.assertTrue(Account.objects.filter(code=code).exists(), code)
 
     def test_invalid_account_setups_are_refused(self):

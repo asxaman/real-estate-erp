@@ -146,6 +146,17 @@
                         </select>
                         <button type="submit" name="action" value="return" class="btn-bad">Bounced</button>
                       </form>
+                    {% elif c.status == "cleared" and c.method == "cheque" %}
+                      <form method="post" action="{% url 'admin:realestate_cheque_workflow' c.pk %}"
+                            onsubmit="return confirm('Use this only if the bank took the money back after it cleared. Continue?');">
+                        {% csrf_token %}<input type="hidden" name="next" value="{{ request.get_full_path }}">
+                        <select name="reason" aria-label="Why did the bank take it back?">
+                          {% for value, label in return_reasons %}
+                            <option value="{{ value }}">{{ label }}</option>
+                          {% endfor %}
+                        </select>
+                        <button type="submit" name="action" value="return" class="btn-bad">Bank took it back</button>
+                      </form>
                     {% elif c.status == "returned" %}
                       <form method="post" action="{% url 'admin:realestate_cheque_workflow' c.pk %}">
                         {% csrf_token %}<input type="hidden" name="next" value="{{ request.get_full_path }}">

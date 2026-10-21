@@ -69,6 +69,13 @@ class AccountingSettings(models.Model):
         help_text="The day the ledger starts. Nothing can be posted before this date. "
         "Opening balances are posted on this date.",
     )
+    separate_approver = models.BooleanField(
+        "two people for manual journals",
+        default=False,
+        help_text="Tick when you have more than one accountant: a manual journal or a reversal "
+        "must then be done by someone other than the person who made the original. "
+        "Leave it unticked if you work alone.",
+    )
 
     class Meta:
         verbose_name = "accounting settings"
@@ -439,6 +446,15 @@ class JournalEntry(models.Model):
             )
         return super().delete(*args, **kwargs)
 
+    def check_ready_to_post(self):
+        """Raise ValidationError if this draft could not be posted (used to refuse a
+        bad draft at once, even when someone else will do the posting later)."""
+        lines = list(self.lines.select_related("account"))
+        check_lines(
+            [(ln.account, ln.debit, ln.credit, ln.tenant_id, ln.owner_id, ln.vendor_id) for ln in lines]
+        )
+        check_posting_date(self.date)
+
     def post(self, user=None, allow_inactive_accounts=False):
         """Check everything, give the entry its number and make it permanent."""
         with transaction.atomic():
@@ -662,16 +678,26 @@ def ensure_mappings():
 
 
 class LeaseInvoice(models.Model):
-    """The master invoice for a whole lease (a tax invoice when VAT applies)."""
+    """The master invoice for a whole lease (a tax invoice when VAT applies).
+
+    A lease has one live invoice at a time. If it was a mistake it is cancelled
+    (`is_void`) before any money has moved, and a new one is issued."""
 
     number = models.CharField(max_length=30, unique=True, editable=False)
-    lease = models.OneToOneField("realestate.Lease", on_delete=models.PROTECT, related_name="invoice")
+    lease = models.ForeignKey("realestate.Lease", on_delete=models.PROTECT, related_name="invoices")
     date = models.DateField()
     rent_amount = models.DecimalField(max_digits=14, decimal_places=2)
     vat_percent = models.DecimalField(max_digits=5, decimal_places=2, default=ZERO)
     vat_amount = models.DecimalField(max_digits=14, decimal_places=2, default=ZERO)
     total_amount = models.DecimalField(max_digits=14, decimal_places=2)
     entry = models.OneToOneField(JournalEntry, on_delete=models.PROTECT, related_name="lease_invoice")
+    is_opening = models.BooleanField(
+        default=False,
+        help_text="Brings a lease that started before the cutover date into the books. "
+        "It is not a new tax invoice.",
+    )
+    is_void = models.BooleanField(default=False)
+    voided_at = models.DateTimeField(null=True, blank=True)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
     )
@@ -686,7 +712,7 @@ class LeaseInvoice(models.Model):
 
     @property
     def is_tax_invoice(self):
-        return self.vat_amount > 0
+        return self.vat_amount > 0 and not self.is_opening
 
     def save(self, *args, **kwargs):
         if not self._state.adding:
@@ -695,6 +721,40 @@ class LeaseInvoice(models.Model):
 
     def delete(self, *args, **kwargs):
         raise ImmutableLedgerError("An issued invoice cannot be deleted.")
+
+
+class CreditNote(models.Model):
+    """Reduces a lease invoice, for example when the tenant leaves early."""
+
+    number = models.CharField(max_length=30, unique=True, editable=False)
+    invoice = models.ForeignKey(LeaseInvoice, on_delete=models.PROTECT, related_name="credit_notes")
+    lease = models.ForeignKey("realestate.Lease", on_delete=models.PROTECT, related_name="credit_notes")
+    date = models.DateField()
+    rent_amount = models.DecimalField(max_digits=14, decimal_places=2)
+    vat_amount = models.DecimalField(max_digits=14, decimal_places=2, default=ZERO)
+    total_amount = models.DecimalField(max_digits=14, decimal_places=2)
+    reason = models.CharField(max_length=255, blank=True)
+    entry = models.OneToOneField(JournalEntry, on_delete=models.PROTECT, related_name="credit_note")
+    is_void = models.BooleanField(default=False, help_text="Set automatically when the credit note is reversed.")
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-date", "-id"]
+        verbose_name = "credit note"
+
+    def __str__(self):
+        return self.number
+
+    def save(self, *args, **kwargs):
+        if not self._state.adding:
+            raise ImmutableLedgerError("A credit note cannot be changed.")
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ImmutableLedgerError("A credit note cannot be deleted.")
 
 
 class ReceiptVoucher(models.Model):
