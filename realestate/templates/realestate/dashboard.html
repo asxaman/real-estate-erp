@@ -1,0 +1,106 @@
+{% extends "admin/index.html" %}
+
+{% block content %}
+<style>
+  .dash { margin-bottom: 26px; }
+  .dash h2 { font-size: 15px; margin: 22px 0 8px; }
+  .dash-row { display: flex; gap: 12px; flex-wrap: wrap; }
+  .tile { flex: 1 1 150px; min-width: 140px; border: 1px solid var(--hairline-color, #ddd); border-left-width: 5px; border-radius: 6px; padding: 10px 14px; background: var(--body-bg, #fff); text-decoration: none; color: var(--body-fg, #222); display: block; }
+  .tile .n { font-size: 26px; font-weight: 700; line-height: 1.1; }
+  .tile .t { font-size: 12px; opacity: .8; }
+  .tile.primary { border-left-color: #1565c0; }
+  .tile.warn { border-left-color: #ef6c00; }
+  .tile.info { border-left-color: #6a1b9a; }
+  .tile.danger { border-left-color: #c62828; }
+  .tile.good { border-left-color: #2e7d32; }
+  .tile.zero .n { opacity: .45; }
+  a.tile:hover { background: var(--darkened-bg, #f5f5f5); }
+  .dash-cols { display: flex; gap: 22px; flex-wrap: wrap; }
+  .dash-cols > div { flex: 1 1 340px; min-width: 300px; }
+  .dash table { width: 100%; }
+  .dash td.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .bar { background: #1565c0; height: 14px; border-radius: 3px; min-width: 2px; }
+  .dash-note { font-size: 12px; opacity: .75; margin: 4px 0 0; }
+</style>
+
+<div class="dash">
+  <h2>Cheques &mdash; <a href="{{ dash.desk_url }}">open the daily cheque desk</a></h2>
+  <div class="dash-row">
+    {% for label, count, color in dash.cheque_tiles %}
+      <a class="tile {{ color }}{% if not count %} zero{% endif %}" href="{{ dash.desk_url }}">
+        <div class="n">{{ count }}</div><div class="t">{{ label }}</div></a>
+    {% endfor %}
+  </div>
+
+  <h2>Rent in {{ dash.month_label }}</h2>
+  <div class="dash-row">
+    <div class="tile primary"><div class="n">{{ dash.expected|floatformat:"0g" }}</div><div class="t">AED due this month (cheque dates)</div></div>
+    <div class="tile good"><div class="n">{{ dash.collected|floatformat:"0g" }}</div><div class="t">AED cleared this month</div></div>
+    <div class="tile info"><div class="n">{{ dash.still_to_come|floatformat:"0g" }}</div><div class="t">AED still to come</div></div>
+    <div class="tile danger{% if not dash.overdue_total %} zero{% endif %}"><div class="n">{{ dash.overdue_total|floatformat:"0g" }}</div><div class="t">AED overdue in total</div></div>
+  </div>
+
+  <div class="dash-cols">
+    <div>
+      <h2>Rent cleared, last 6 months (AED)</h2>
+      <table>
+        {% for m in dash.months %}
+        <tr>
+          <td style="width:70px;">{{ m.label }}</td>
+          <td><div class="bar" style="width: {{ m.percent }}%;"></div></td>
+          <td class="num">{{ m.total|floatformat:"0g" }}</td>
+        </tr>
+        {% endfor %}
+      </table>
+    </div>
+    <div>
+      <h2>Who owes rent (date passed, not cleared)</h2>
+      {% if dash.owing %}
+      <table>
+        <tr><th style="text-align:left;">Tenant</th><th style="text-align:left;">Unit</th><th class="num">Cheques</th><th class="num">AED</th></tr>
+        {% for row in dash.owing %}
+        <tr>
+          <td>{{ row.lease__tenant__name }}</td>
+          <td>{{ row.lease__unit__property__name }} {{ row.lease__unit__unit_number }}</td>
+          <td class="num">{{ row.count }}</td>
+          <td class="num">{{ row.total|floatformat:"2g" }}</td>
+        </tr>
+        {% endfor %}
+      </table>
+      <p class="dash-note">Biggest 8 shown. Open the cheque desk to act on them.</p>
+      {% else %}
+      <p>Nobody owes rent right now.</p>
+      {% endif %}
+    </div>
+  </div>
+
+  <h2>Units &mdash; {{ dash.occupancy }}% occupied ({{ dash.total_units }} units)</h2>
+  <div class="dash-row">
+    <a class="tile good" href="{{ dash.vacant_url }}"><div class="n">{{ dash.units.vacant }}</div><div class="t">Vacant (click to see)</div></a>
+    <div class="tile primary"><div class="n">{{ dash.units.occupied }}</div><div class="t">Occupied</div></div>
+    <div class="tile warn"><div class="n">{{ dash.units.reserved }}</div><div class="t">Reserved</div></div>
+    <div class="tile info"><div class="n">{{ dash.units.maintenance }}</div><div class="t">Under maintenance</div></div>
+  </div>
+
+  <h2>Contracts and documents</h2>
+  <div class="dash-row">
+    <a class="tile danger{% if not dash.leases_overdue %} zero{% endif %}" href="{{ dash.leases_overdue_url }}"><div class="n">{{ dash.leases_overdue }}</div><div class="t">Leases past end date, still active</div></a>
+    <a class="tile warn{% if not dash.leases_30 %} zero{% endif %}" href="{{ dash.leases_30_url }}"><div class="n">{{ dash.leases_30 }}</div><div class="t">Leases ending in 30 days</div></a>
+    <a class="tile info{% if not dash.leases_90 %} zero{% endif %}" href="{{ dash.leases_90_url }}"><div class="n">{{ dash.leases_90 }}</div><div class="t">Leases ending in 90 days</div></a>
+    <div class="tile danger{% if not dash.docs_expired %} zero{% endif %}"><div class="n">{{ dash.docs_expired }}</div><div class="t">Owners / tenants with expired or incomplete papers<br>
+      <a href="{{ dash.tenants_expired_url }}">tenants</a> &middot; <a href="{{ dash.owners_expired_url }}">owners</a></div></div>
+    <div class="tile warn{% if not dash.docs_expiring %} zero{% endif %}"><div class="n">{{ dash.docs_expiring }}</div><div class="t">Papers expiring soon<br>
+      <a href="{{ dash.tenants_expiring_url }}">tenants</a> &middot; <a href="{{ dash.owners_expiring_url }}">owners</a></div></div>
+  </div>
+
+  <h2>Owner payouts and maintenance</h2>
+  <div class="dash-row">
+    <a class="tile warn{% if not dash.waiting_expenses %} zero{% endif %}" href="{{ dash.waiting_expenses_url }}"><div class="n">{{ dash.waiting_expenses }}</div><div class="t">Owner expenses not on a statement yet</div></a>
+    <a class="tile info{% if not dash.drafts %} zero{% endif %}" href="{{ dash.drafts_url }}"><div class="n">{{ dash.drafts }}</div><div class="t">Draft owner statements</div></a>
+    <a class="tile primary{% if not dash.payable_count %} zero{% endif %}" href="{{ dash.payable_url }}"><div class="n">{{ dash.payable_count }}</div><div class="t">Approved, waiting to be paid<br>AED {{ dash.payable_total|floatformat:"2g" }}</div></a>
+    <a class="tile warn{% if not dash.open_jobs %} zero{% endif %}" href="{{ dash.jobs_url }}"><div class="n">{{ dash.open_jobs }}</div><div class="t">Open maintenance jobs{% if dash.urgent_jobs %}<br><strong>{{ dash.urgent_jobs }} urgent</strong>{% endif %}</div></a>
+  </div>
+</div>
+
+{{ block.super }}
+{% endblock %}

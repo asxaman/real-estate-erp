@@ -1191,3 +1191,19 @@ class ChequeAdmin(admin.ModelAdmin):
 
 # Expenses, maintenance and owner statements live in their own file.
 from . import admin_finance  # noqa: E402,F401
+
+
+# The home page: replace the plain "index" view with one that also shows the dashboard.
+from .dashboard import dashboard_context  # noqa: E402
+
+_plain_index = admin.site.index
+
+
+def _dashboard_index(request, extra_context=None):
+    context = dict(extra_context or {})
+    context.update(dashboard_context(request))
+    return _plain_index(request, context)
+
+
+admin.site.index = _dashboard_index
+admin.site.index_template = "realestate/dashboard.html"
