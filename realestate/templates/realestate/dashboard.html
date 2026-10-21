@@ -1,13 +1,19 @@
 {% extends "admin/index.html" %}
+{% load static %}
+
+{% block extrastyle %}
+  {{ block.super }}
+  <link rel="stylesheet" href="{% static 'realestate/admin/ui.css' %}">
+{% endblock %}
 
 {% block content %}
 <style>
   .dash { margin-bottom: 26px; }
-  .dash a.button { color:#fff; padding:8px 14px; text-decoration:none; font-size:13px; }
+  .dash a.button { background:#1f5f8b; border-radius:6px; display:inline-block; color:#fff; padding:8px 14px; text-decoration:none; font-size:13px; }
   .dash-row.quick { margin-bottom:6px; }
   .dash h2 { font-size: 15px; margin: 22px 0 8px; }
   .dash-row { display: flex; gap: 12px; flex-wrap: wrap; }
-  .tile { flex: 1 1 150px; min-width: 140px; border: 1px solid var(--hairline-color, #ddd); border-left-width: 5px; border-radius: 6px; padding: 10px 14px; background: var(--body-bg, #fff); text-decoration: none; color: var(--body-fg, #222); display: block; }
+  .tile { flex: 1 1 150px; min-width: 140px; border: 1px solid rgba(127,127,127,.4); border-left-width: 5px; border-radius: 6px; padding: 10px 14px; background: transparent; text-decoration: none; color: inherit; display: block; }
   .tile .n { font-size: 26px; font-weight: 700; line-height: 1.1; }
   .tile .t { font-size: 12px; opacity: .8; }
   .tile.primary { border-left-color: #1565c0; }
@@ -16,7 +22,7 @@
   .tile.danger { border-left-color: #c62828; }
   .tile.good { border-left-color: #2e7d32; }
   .tile.zero .n { opacity: .45; }
-  a.tile:hover { background: var(--darkened-bg, #f5f5f5); }
+  a.tile:hover { background: rgba(127,127,127,.12); }
   .dash-cols { display: flex; gap: 22px; flex-wrap: wrap; }
   .dash-cols > div { flex: 1 1 340px; min-width: 300px; }
   .dash table { width: 100%; }
@@ -25,7 +31,7 @@
   .dash-note { font-size: 12px; opacity: .75; margin: 4px 0 0; }
 </style>
 
-<div class="dash">
+<div class="dash erp-page">
   <div class="dash-row quick">
     <a class="button" href="{% url 'admin:realestate_lease_add' %}">+ New lease</a>
     <a class="button" href="{% url 'admin:realestate_tenant_add' %}">+ New tenant</a>
@@ -111,5 +117,4 @@
   </div>
 </div>
 
-{{ block.super }}
 {% endblock %}

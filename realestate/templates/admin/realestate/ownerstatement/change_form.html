@@ -1,9 +1,15 @@
 {% extends "admin/change_form.html" %}
+{% load static %}
+
+{% block extrastyle %}
+  {{ block.super }}
+  <link rel="stylesheet" href="{% static 'realestate/admin/ui.css' %}">
+{% endblock %}
 
 {% block content %}
 {% if statement %}
 <style>
-  .os-panel { border:1px solid var(--hairline-color,#ddd); border-radius:6px; padding:14px 18px; margin:0 0 18px; background:var(--darkened-bg,#f8f8f8); }
+  .os-panel { color:inherit; border:1px solid rgba(127,127,127,.4); border-radius:6px; padding:14px 18px; margin:0 0 18px; background:rgba(127,127,127,.12); }
   .os-panel h2 { margin:0 0 10px; font-size:15px; }
   .os-grid { display:flex; gap:24px; flex-wrap:wrap; align-items:flex-start; }
   .os-table td { padding:3px 14px 3px 0; }
@@ -16,7 +22,7 @@
   .os-ok { color:#2e7d32; font-weight:600; }
 </style>
 
-<div class="os-panel">
+<div class="os-panel erp-page">
   <h2>Statement {{ statement.number }}: {{ statement.owner }}
     ({{ statement.period_start|date:"d M Y" }} to {{ statement.period_end|date:"d M Y" }})
     &mdash; {{ statement.get_status_display }}</h2>

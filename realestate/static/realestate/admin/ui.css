@@ -1,0 +1,30 @@
+/* Shared look for our own pages (dashboard, cheque desk, statement panel).
+   Works in light and dark mode: it only uses neutral, see-through colours. */
+
+.erp-page { color: inherit; }
+.erp-page h2 { font-weight: 600; }
+.erp-page p { margin: 6px 0; }
+.erp-page small { opacity: .75; }
+
+.erp-page table { width: 100%; border-collapse: collapse; }
+.erp-page th, .erp-page td {
+  padding: 7px 10px; text-align: left; vertical-align: top;
+  border-bottom: 1px solid rgba(127, 127, 127, .3);
+}
+.erp-page th { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; opacity: .7; font-weight: 600; }
+.erp-page td.num, .erp-page th.num { text-align: right; }
+
+.erp-page a:not(.tile):not(.button) { color: rgb(37, 99, 235); text-decoration: underline; }
+html.dark .erp-page a:not(.tile):not(.button) { color: rgb(96, 165, 250); }
+.erp-page a.tile { text-decoration: none; }
+.erp-page .tile a { text-decoration: underline; }
+
+.erp-page select, .erp-page input[type="text"], .erp-page input[type="date"] {
+  border: 1px solid rgba(127, 127, 127, .5); border-radius: 6px;
+  padding: 5px 8px; background: transparent; color: inherit; font-size: 13px;
+}
+.erp-page select option { color: #111; background: #fff; }
+.erp-page button { cursor: pointer; font-size: 13px; font-weight: 600; border-radius: 6px; }
+.erp-page button.button, .erp-page button.default, .erp-page a.button {
+  background: rgb(37, 99, 235); color: #fff; border: 0; padding: 6px 12px;
+}

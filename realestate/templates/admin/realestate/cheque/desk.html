@@ -1,17 +1,19 @@
 {% extends "admin/base_site.html" %}
+{% load static %}
 
 {% block extrastyle %}
 {{ block.super }}
+  <link rel="stylesheet" href="{% static 'realestate/admin/ui.css' %}">
 <style>
   .desk-date { margin: 0 0 14px; font-size: 14px; }
   .tiles { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 26px; }
   .tile {
     display: flex; flex-direction: column; min-width: 150px; padding: 10px 14px;
-    border: 1px solid var(--border-color, #ccc); border-left-width: 6px;
-    border-radius: 6px; background: var(--body-bg, #fff); color: var(--body-fg, #333);
+    border: 1px solid rgba(127,127,127,.4); border-left-width: 6px;
+    border-radius: 6px; background: transparent; color: inherit;
     text-decoration: none;
   }
-  .tile:hover { text-decoration: none; background: var(--darkened-bg, #f8f8f8); }
+  .tile:hover { text-decoration: none; background: rgba(127,127,127,.12); }
   .tile-count { font-size: 26px; font-weight: 700; line-height: 1.1; }
   .tile-title { font-size: 12px; text-transform: uppercase; letter-spacing: .03em; opacity: .8; }
   .tile-total { font-size: 12px; margin-top: 2px; opacity: .8; }
@@ -26,8 +28,8 @@
   .desk-section { margin-bottom: 30px; }
   .desk-section h2 {
     margin: 0 0 4px; padding: 6px 10px; font-size: 15px; font-weight: 700;
-    border-left: 6px solid #9e9e9e; background: var(--darkened-bg, #f3f3f3);
-    color: var(--body-fg, #333); text-transform: none;
+    border-left: 6px solid #9e9e9e; background: rgba(127,127,127,.12);
+    color: inherit; text-transform: none;
   }
   .desk-section h2.tone-danger { border-left-color: #c62828; }
   .desk-section h2.tone-warn { border-left-color: #ef6c00; }
@@ -62,7 +64,7 @@
 {% endblock %}
 
 {% block content %}
-<div id="content-main">
+<div id="content-main" class="erp-page">
   <p class="desk-date">Today is <strong>{{ today|date:"l, j F Y" }}</strong>.
     <a href="{% url 'admin:realestate_cheque_changelist' %}">See all cheques</a>
     &middot; <a href="{% url 'admin:realestate_cheque_add' %}">Add a cheque</a>

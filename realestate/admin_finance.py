@@ -10,6 +10,8 @@ from django.shortcuts import get_object_or_404
 from django.template.response import TemplateResponse
 from django.urls import path, reverse
 from django.utils import timezone
+from unfold.admin import ModelAdmin as UnfoldModelAdmin
+from unfold.admin import TabularInline as UnfoldTabularInline
 
 from .admin import badge
 from .models import (
@@ -42,7 +44,7 @@ BEARER_COLORS = {"owner": "#1565c0", "company": "#6a1b9a", "tenant": "#ef6c00"}
 
 
 @admin.register(Vendor)
-class VendorAdmin(admin.ModelAdmin):
+class VendorAdmin(UnfoldModelAdmin):
     list_display = ("name", "trade", "contact_person", "phone", "is_active")
     list_filter = ("trade", "is_active")
     search_fields = ("name", "contact_person", "phone", "email", "trade_licence_number")
@@ -88,7 +90,7 @@ class ExpenseStatementFilter(admin.SimpleListFilter):
 
 
 @admin.register(Expense)
-class ExpenseAdmin(admin.ModelAdmin):
+class ExpenseAdmin(UnfoldModelAdmin):
     date_hierarchy = "expense_date"
     list_display = (
         "expense_date",
@@ -179,7 +181,7 @@ class ExpenseAdmin(admin.ModelAdmin):
 # ---------------------------------------------------------------------------
 
 
-class RequestExpenseInline(admin.TabularInline):
+class RequestExpenseInline(UnfoldTabularInline):
     """Add the costs of a job right on the request."""
 
     model = Expense
@@ -190,7 +192,7 @@ class RequestExpenseInline(admin.TabularInline):
 
 
 @admin.register(MaintenanceRequest)
-class MaintenanceRequestAdmin(admin.ModelAdmin):
+class MaintenanceRequestAdmin(UnfoldModelAdmin):
     date_hierarchy = "reported_on"
     list_display = (
         "reported_on",
@@ -333,7 +335,7 @@ def statement_sections(statement):
     return result
 
 
-class StatementLineInline(admin.TabularInline):
+class StatementLineInline(UnfoldTabularInline):
     model = StatementLine
     extra = 0
     can_delete = False
@@ -352,7 +354,7 @@ class StatementLineInline(admin.TabularInline):
 
 
 @admin.register(OwnerStatement)
-class OwnerStatementAdmin(admin.ModelAdmin):
+class OwnerStatementAdmin(UnfoldModelAdmin):
     change_form_template = "admin/realestate/ownerstatement/change_form.html"
     date_hierarchy = "period_end"
     list_display = (

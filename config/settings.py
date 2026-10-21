@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+from django.urls import reverse_lazy
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 # Development-only values. Before going live these must be replaced
@@ -11,6 +13,7 @@ DEBUG = True
 ALLOWED_HOSTS = []
 
 INSTALLED_APPS = [
+    "unfold",  # the admin theme: this line must stay ABOVE django.contrib.admin
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -76,3 +79,110 @@ MEDIA_URL = "media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+
+# ---------------------------------------------------------------------------
+# Admin look and feel (Unfold)
+# ---------------------------------------------------------------------------
+# The left menu is written out below. To add a page to it, copy one "items" line.
+# Icon names come from https://fonts.google.com/icons (Material Symbols).
+
+
+def _link(name):
+    return reverse_lazy(f"admin:{name}")
+
+
+UNFOLD = {
+    "SITE_TITLE": "Real Estate ERP",
+    "SITE_HEADER": "Real Estate ERP",
+    "SITE_SUBHEADER": "UAE property management",
+    "SITE_SYMBOL": "apartment",
+    "BORDER_RADIUS": "8px",
+    "COLORS": {
+        "primary": {
+            "50": "oklch(97% 0.014 254.604)",
+            "100": "oklch(93.2% 0.032 255.585)",
+            "200": "oklch(88.2% 0.059 254.128)",
+            "300": "oklch(80.9% 0.105 251.813)",
+            "400": "oklch(70.7% 0.165 254.624)",
+            "500": "oklch(62.3% 0.214 259.815)",
+            "600": "oklch(54.6% 0.245 262.881)",
+            "700": "oklch(48.8% 0.243 264.376)",
+            "800": "oklch(42.4% 0.199 265.638)",
+            "900": "oklch(37.9% 0.146 265.522)",
+            "950": "oklch(28.2% 0.091 267.935)",
+        },
+    },
+    "SIDEBAR": {
+        "show_search": True,
+        "show_all_applications": False,
+        "navigation": [
+            {
+                "title": "Overview",
+                "separator": False,
+                "items": [
+                    {"title": "Dashboard", "icon": "dashboard", "link": _link("index")},
+                    {
+                        "title": "Daily cheque desk",
+                        "icon": "event_available",
+                        "link": _link("realestate_cheque_desk"),
+                    },
+                ],
+            },
+            {
+                "title": "Daily work",
+                "separator": True,
+                "items": [
+                    {"title": "Cheques", "icon": "payments", "link": _link("realestate_cheque_changelist")},
+                    {
+                        "title": "Maintenance jobs",
+                        "icon": "construction",
+                        "link": _link("realestate_maintenancerequest_changelist"),
+                    },
+                    {"title": "Expenses", "icon": "receipt_long", "link": _link("realestate_expense_changelist")},
+                ],
+            },
+            {
+                "title": "Properties and people",
+                "separator": True,
+                "items": [
+                    {"title": "Properties", "icon": "domain", "link": _link("realestate_property_changelist")},
+                    {"title": "Units", "icon": "meeting_room", "link": _link("realestate_unit_changelist")},
+                    {"title": "Owners", "icon": "badge", "link": _link("realestate_owner_changelist")},
+                    {"title": "Tenants", "icon": "groups", "link": _link("realestate_tenant_changelist")},
+                ],
+            },
+            {
+                "title": "Contracts and payouts",
+                "separator": True,
+                "items": [
+                    {"title": "Leases", "icon": "description", "link": _link("realestate_lease_changelist")},
+                    {
+                        "title": "Owner statements",
+                        "icon": "request_quote",
+                        "link": _link("realestate_ownerstatement_changelist"),
+                    },
+                ],
+            },
+            {
+                "title": "Setup",
+                "separator": True,
+                "items": [
+                    {"title": "Vendors", "icon": "local_shipping", "link": _link("realestate_vendor_changelist")},
+                    {
+                        "title": "Users",
+                        "icon": "person",
+                        "link": _link("auth_user_changelist"),
+                        "permission": lambda request: request.user.is_superuser,
+                    },
+                    {
+                        "title": "Groups",
+                        "icon": "lock",
+                        "link": _link("auth_group_changelist"),
+                        "permission": lambda request: request.user.is_superuser,
+                    },
+                ],
+            },
+        ],
+    },
+}

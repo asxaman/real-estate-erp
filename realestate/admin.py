@@ -13,6 +13,8 @@ from django.utils import timezone
 from django.utils.html import format_html, format_html_join
 from django.utils.http import url_has_allowed_host_and_scheme
 from django.utils.safestring import mark_safe
+from unfold.admin import ModelAdmin as UnfoldModelAdmin
+from unfold.admin import TabularInline as UnfoldTabularInline
 
 from .models import (
     Cheque,
@@ -150,7 +152,7 @@ class DocumentExpiryFilter(admin.SimpleListFilter):
         return queryset.filter(condition)
 
 
-class DocumentInline(admin.TabularInline):
+class DocumentInline(UnfoldTabularInline):
     """Upload scans (Emirates ID, passport, contract...) on the record's page."""
 
     extra = 0
@@ -179,7 +181,13 @@ class LeaseDocumentInline(DocumentInline):
 
 
 @admin.register(Owner)
-class OwnerAdmin(admin.ModelAdmin):
+class OwnerAdmin(UnfoldModelAdmin):
+    # Company-only boxes appear only when the owner is a company.
+    conditional_fields = {
+        "trade_licence_number": "owner_type == 'company'",
+        "trade_licence_expiry": "owner_type == 'company'",
+        "trn": "owner_type == 'company'",
+    }
     compliance_date_fields = (
         "emirates_id_expiry",
         "passport_expiry",
@@ -243,9 +251,6 @@ class OwnerAdmin(admin.ModelAdmin):
         ("Notes & status", {"fields": ("notes", "is_active")}),
     )
 
-    class Media:
-        js = ("realestate/admin/party_form.js",)
-
     @admin.display(description="Documents")
     def documents_check(self, obj):
         return compliance_badge(obj)
@@ -260,7 +265,7 @@ class OwnerAdmin(admin.ModelAdmin):
 # ---------------------------------------------------------------------------
 
 
-class UnitInline(admin.TabularInline):
+class UnitInline(UnfoldTabularInline):
     """Lets you add and edit units directly on the property page."""
 
     model = Unit
@@ -284,7 +289,14 @@ class UnitInline(admin.TabularInline):
 
 
 @admin.register(Property)
-class PropertyAdmin(admin.ModelAdmin):
+class PropertyAdmin(UnfoldModelAdmin):
+    # Owner, fee and agreement dates appear only for third-party properties.
+    conditional_fields = {
+        "owner": "ownership_type == 'third_party'",
+        "management_fee_percent": "ownership_type == 'third_party'",
+        "management_start": "ownership_type == 'third_party'",
+        "management_end": "ownership_type == 'third_party'",
+    }
     list_display = (
         "name",
         "emirate",
@@ -351,10 +363,6 @@ class PropertyAdmin(admin.ModelAdmin):
         ("Notes & status", {"fields": ("notes", "is_active")}),
     )
 
-    class Media:
-        # Shows Owner, Fee and agreement dates only when "Third-party" is selected.
-        js = ("realestate/admin/property_form.js",)
-
     def get_queryset(self, request):
         return super().get_queryset(request).annotate(_unit_count=Count("units"))
 
@@ -382,7 +390,7 @@ class UnitStatusFilter(admin.SimpleListFilter):
 
 
 @admin.register(Unit)
-class UnitAdmin(admin.ModelAdmin):
+class UnitAdmin(UnfoldModelAdmin):
     list_display = ("property", "unit_number", "unit_type", "annual_rent", "unit_status")
     list_filter = (UnitStatusFilter, "unit_type", "furnishing", "property")
     search_fields = ("unit_number", "property__name", "dewa_number")
@@ -439,7 +447,7 @@ class UnitAdmin(admin.ModelAdmin):
 # ---------------------------------------------------------------------------
 
 
-class TenantLeaseInline(admin.TabularInline):
+class TenantLeaseInline(UnfoldTabularInline):
     """Shows a tenant's leases on the tenant page."""
 
     model = Lease
@@ -450,7 +458,14 @@ class TenantLeaseInline(admin.TabularInline):
 
 
 @admin.register(Tenant)
-class TenantAdmin(admin.ModelAdmin):
+class TenantAdmin(UnfoldModelAdmin):
+    # Company-only boxes appear only when the tenant is a company.
+    conditional_fields = {
+        "trade_licence_number": "tenant_type == 'company'",
+        "trade_licence_expiry": "tenant_type == 'company'",
+        "trn": "tenant_type == 'company'",
+        "authorised_signatory": "tenant_type == 'company'",
+    }
     compliance_date_fields = (
         "emirates_id_expiry",
         "passport_expiry",
@@ -526,9 +541,6 @@ class TenantAdmin(admin.ModelAdmin):
         ("Notes & status", {"fields": ("notes", "is_active")}),
     )
 
-    class Media:
-        js = ("realestate/admin/party_form.js",)
-
     def get_queryset(self, request):
         return super().get_queryset(request).annotate(
             _active_leases=Count(
@@ -565,7 +577,7 @@ class TenantAdmin(admin.ModelAdmin):
 # ---------------------------------------------------------------------------
 
 
-class ChequeInline(admin.TabularInline):
+class ChequeInline(UnfoldTabularInline):
     """The cheques given for this lease, entered right on the contract."""
 
     model = Cheque
@@ -627,7 +639,7 @@ class LeaseAdminForm(forms.ModelForm):
 
 
 @admin.register(Lease)
-class LeaseAdmin(admin.ModelAdmin):
+class LeaseAdmin(UnfoldModelAdmin):
     form = LeaseAdminForm
     list_display = (
         "unit",
@@ -871,7 +883,7 @@ class ChequeDueFilter(admin.SimpleListFilter):
         return queryset
 
 
-class ChequeEventInline(admin.TabularInline):
+class ChequeEventInline(UnfoldTabularInline):
     """Read-only history of the cheque."""
 
     model = ChequeEvent
@@ -885,8 +897,7 @@ class ChequeEventInline(admin.TabularInline):
 
 
 @admin.register(Cheque)
-class ChequeAdmin(admin.ModelAdmin):
-    change_list_template = "admin/realestate/cheque/change_list.html"
+class ChequeAdmin(UnfoldModelAdmin):
     date_hierarchy = "cheque_date"
     list_display = (
         "cheque_date",
@@ -1209,7 +1220,6 @@ admin.site.index = _dashboard_index
 admin.site.index_template = "realestate/dashboard.html"
 
 
-# Side menu grouped by kind of work.
-from .navigation import install as _install_navigation  # noqa: E402
 
-_install_navigation(admin.site)
+# Users and Groups in the same look.
+from . import admin_auth  # noqa: E402,F401
