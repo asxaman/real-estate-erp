@@ -22,6 +22,7 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "realestate",
+    "accounting",
 ]
 
 MIDDLEWARE = [
@@ -30,6 +31,7 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "accounting.context.CurrentUserMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
@@ -96,6 +98,11 @@ def _link(name):
 def _can(permission):
     """Show a menu item only to users who may open that page."""
     return lambda request: request.user.has_perm(f"realestate.{permission}")
+
+
+def _can_acc(permission):
+    """Same as _can, for the accounting module."""
+    return lambda request: request.user.has_perm(f"accounting.{permission}")
 
 
 UNFOLD = {
@@ -175,6 +182,19 @@ UNFOLD = {
                 ],
             },
             {
+                "title": "Accounting",
+                "separator": True,
+                "items": [
+                    {"title": "Accounting setup", "icon": "rule_settings", "link": _link("accounting_setup"), "permission": _can_acc("view_account")},
+                    {"title": "Daily postings", "icon": "published_with_changes", "link": _link("accounting_postings"), "permission": _can_acc("view_journalline")},
+                    {"title": "Lease invoices", "icon": "request_page", "link": _link("accounting_leaseinvoice_changelist"), "permission": _can_acc("view_leaseinvoice")},
+                    {"title": "Receipt vouchers", "icon": "receipt", "link": _link("accounting_receiptvoucher_changelist"), "permission": _can_acc("view_receiptvoucher")},
+                    {"title": "Journal entries", "icon": "menu_book", "link": _link("accounting_journalentry_changelist"), "permission": _can_acc("view_journalentry")},
+                    {"title": "Trial balance", "icon": "balance", "link": _link("accounting_account_trial_balance"), "permission": _can_acc("view_journalline")},
+                    {"title": "General ledger", "icon": "book", "link": _link("accounting_account_general_ledger"), "permission": _can_acc("view_journalline")},
+                ],
+            },
+            {
                 "title": "Setup",
                 "separator": True,
                 "items": [
@@ -190,6 +210,12 @@ UNFOLD = {
                         "title": "Groups",
                         "icon": "lock",
                         "link": _link("auth_group_changelist"),
+                        "permission": lambda request: request.user.is_superuser,
+                    },
+                    {
+                        "title": "Erase all data",
+                        "icon": "delete_forever",
+                        "link": _link("realestate_demorecord_erase"),
                         "permission": lambda request: request.user.is_superuser,
                     },
                     {

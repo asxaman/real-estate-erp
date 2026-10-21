@@ -1,0 +1,87 @@
+{% extends "admin/base_site.html" %}
+{% block extrastyle %}{{ block.super }}
+<style>
+  .acc-box { max-width: 1100px; }
+  .step { border:1px solid rgba(127,127,127,.4); border-radius:6px; padding:14px 18px; margin:0 0 16px; background:rgba(127,127,127,.06); }
+  .step h2 { margin:0 0 6px; font-size:15px; }
+  .acc-table { border-collapse:collapse; width:100%; }
+  .acc-table th, .acc-table td { padding:6px 10px; border-bottom:1px solid rgba(127,127,127,.3); text-align:left; vertical-align:middle; }
+  .acc-table th { font-size:12px; text-transform:uppercase; opacity:.85; }
+  .acc-table td.num { text-align:right; font-variant-numeric:tabular-nums; }
+  .done { color:#2e7d32; font-weight:700; }
+  .todo { color:#ef6c00; font-weight:700; }
+  .acc-err { padding:8px 12px; border-radius:4px; margin:0 0 14px; background:#ffebee; border:1px solid #c62828; color:#7f0000; }
+  .row { display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap; }
+  .row label { display:block; font-weight:600; font-size:12px; margin-bottom:2px; }
+  form.inline { display:flex; gap:8px; align-items:center; }
+</style>
+{% endblock %}
+{% block breadcrumbs %}<div class="breadcrumbs"><a href="{% url 'admin:index' %}">Home</a> &rsaquo; Daily postings</div>{% endblock %}
+{% block content %}
+<div class="acc-box">
+  {% if not info.cutover %}
+    <p class="acc-err"><b>Nothing is posted yet.</b> Set the cutover date first (the day your ledger starts). <a href="{{ settings_url }}">Open accounting settings</a></p>
+  {% else %}
+
+  <div class="step">
+    <h2>1. Leases waiting for an invoice
+      {% if rows %}<span class="todo">{{ rows|length }} to do</span>{% else %}<span class="done">&#10003; none</span>{% endif %}</h2>
+    <p>One invoice is issued for the whole contract. For company-owned units the rent is held as deferred revenue and released month by month. For third-party units it is held for the owner until each cheque clears. Cheques you already hold post by themselves once the invoice exists.</p>
+    {% if info.before_cutover %}<p>{{ info.before_cutover }} active lease(s) started before the cutover date. They come in with the opening balances, not as new invoices.</p>{% endif %}
+    {% if rows %}
+    <table class="acc-table">
+      <thead><tr><th>Tenant</th><th>Unit</th><th>Owned by</th><th>Starts</th><th class="num">Contract (AED)</th><th>Invoice date</th></tr></thead>
+      <tbody>{% for r in rows %}
+        <tr>
+          <td>{{ r.lease.tenant.name }}</td>
+          <td>{{ r.lease.unit }}</td>
+          <td>{{ r.lease.unit.property.get_ownership_type_display }}</td>
+          <td>{{ r.lease.start_date|date:"d M Y" }}</td>
+          <td class="num">{{ r.lease.contract_total|floatformat:2 }}</td>
+          <td>{% if can_invoice %}
+            <form method="post" class="inline">{% csrf_token %}
+              <input type="hidden" name="action" value="invoice"><input type="hidden" name="lease" value="{{ r.lease.pk }}">
+              <input type="date" name="date" value="{{ r.default_date|date:'Y-m-d' }}" required>
+              <button type="submit" class="default">Create invoice</button></form>
+            {% else %}no permission{% endif %}</td>
+        </tr>{% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+  </div>
+
+  <div class="step">
+    <h2>2. Payments waiting to be posted
+      {% if info.cheques %}<span class="todo">{{ info.cheques|length }} to do</span>{% else %}<span class="done">&#10003; up to date</span>{% endif %}</h2>
+    <p>Cheques and payments post by themselves when you change their status. Anything that could not be posted (for example the month is locked) waits here.</p>
+    {% if info.cheques %}
+    <table class="acc-table">
+      <thead><tr><th>Payment</th><th>Tenant</th><th class="num">Amount</th><th>Still to post</th></tr></thead>
+      <tbody>{% for item in info.cheques %}
+        <tr><td><a href="{% url 'admin:realestate_cheque_change' item.cheque.pk %}">{{ item.cheque }}</a></td>
+          <td>{{ item.cheque.lease.tenant.name }}</td><td class="num">{{ item.cheque.amount|floatformat:2 }}</td>
+          <td>{{ item.steps|join:", " }}</td></tr>{% endfor %}
+      </tbody>
+    </table>
+    {% if can_post %}<form method="post" style="margin-top:10px">{% csrf_token %}<input type="hidden" name="action" value="sync"><button type="submit" class="default">Post everything that is waiting</button></form>{% endif %}
+    {% endif %}
+    {% if info.other_purposes %}<p class="todo" style="margin-top:10px">{{ info.other_purposes }} payment(s) for deposits, commission, fees or penalties are not posted yet. They are covered in a later step.</p>{% endif %}
+  </div>
+
+  <div class="step">
+    <h2>3. Month end</h2>
+    <p>Releases the rent earned (exact days of the lease in the month) from deferred revenue to rent income, and marks VAT as due for instalments whose date has come. Safe to run again.</p>
+    {% if can_post %}
+    <form method="post"><input type="hidden" name="action" value="month_end">{% csrf_token %}
+      <div class="row">
+        <div><label for="month">Month</label>
+          <select id="month" name="month">{% for n, name in months %}<option value="{{ n }}" {% if n == default_month %}selected{% endif %}>{{ name }}</option>{% endfor %}</select></div>
+        <div><label for="year">Year</label><input type="number" id="year" name="year" value="{{ default_year }}" min="2000" max="2100" required></div>
+        <div><button type="submit" class="default">Run month end</button></div>
+      </div>
+    </form>
+    {% else %}<p>You do not have permission to run the month end.</p>{% endif %}
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

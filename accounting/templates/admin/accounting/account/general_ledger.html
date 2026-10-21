@@ -1,0 +1,61 @@
+{% extends "admin/base_site.html" %}
+{% block extrastyle %}{{ block.super }}
+<style>
+  .acc-box { max-width: 1100px; }
+  .acc-bar { display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end; margin:0 0 16px; }
+  .acc-bar label { display:block; font-weight:600; font-size:12px; margin-bottom:2px; }
+  .acc-table { border-collapse:collapse; width:100%; }
+  .acc-table th, .acc-table td { padding:6px 10px; border-bottom:1px solid rgba(127,127,127,.3); text-align:left; }
+  .acc-table th { font-size:12px; text-transform:uppercase; letter-spacing:.03em; opacity:.85; }
+  .acc-table td.num, .acc-table th.num { text-align:right; font-variant-numeric:tabular-nums; }
+  .acc-table tr.total td { border-top:2px solid #888; font-weight:700; }
+  .acc-table tr.head td { font-weight:700; background:rgba(127,127,127,.12); }
+  .acc-ok { color:#2e7d32; font-weight:700; }
+  .acc-bad { color:#c62828; font-weight:700; }
+  .acc-note { padding:8px 12px; border-radius:4px; margin:0 0 14px; border:1px solid rgba(127,127,127,.4); background:rgba(127,127,127,.08); }
+  .acc-err { padding:8px 12px; border-radius:4px; margin:0 0 14px; background:#ffebee; border:1px solid #c62828; color:#7f0000; }
+</style>
+{% endblock %}
+{% block breadcrumbs %}<div class="breadcrumbs"><a href="{% url 'admin:index' %}">Home</a> &rsaquo; General ledger</div>{% endblock %}
+{% block content %}
+<div class="acc-box">
+  <form method="get" class="acc-bar">
+    <div><label for="account">Account</label>
+      <select id="account" name="account">
+        <option value="">Choose an account...</option>
+        {% for a in accounts %}<option value="{{ a.pk }}" {% if account and a.pk == account.pk %}selected{% endif %}>{{ a.code }} {{ a.name }}</option>{% endfor %}
+      </select></div>
+    <div><label for="from">From</label><input type="date" id="from" name="from" value="{{ date_from|date:'Y-m-d' }}"></div>
+    <div><label for="to">To</label><input type="date" id="to" name="to" value="{{ date_to|date:'Y-m-d' }}"></div>
+    {% if party %}<input type="hidden" name="party" value="{{ party }}">{% endif %}
+    <div><button type="submit" class="default">Show</button></div>
+  </form>
+  {% if party %}<p class="acc-note">Showing only: <b>{{ party_label }}</b> (a statement for this party). <a href="?account={{ account.pk }}&from={{ date_from|date:'Y-m-d' }}&to={{ date_to|date:'Y-m-d' }}">Show everyone</a></p>{% endif %}
+  {% if report %}
+    <p><b>{{ account.code }} {{ account.name }}</b> &mdash; balances are shown on the {% if account.is_debit_normal %}debit{% else %}credit{% endif %} side.</p>
+    {% if report.truncated %}<p class="acc-err">Too many lines to show. Only the first 5,000 are listed. Narrow the dates.</p>{% endif %}
+    <table class="acc-table">
+      <thead><tr><th>Date</th><th>Entry</th><th>Narration</th><th>Party</th><th class="num">Debit</th><th class="num">Credit</th><th class="num">Balance</th></tr></thead>
+      <tbody>
+        <tr class="head"><td colspan="6">Opening balance</td><td class="num">{{ report.opening|floatformat:2 }}</td></tr>
+        {% for row in report.rows %}
+        <tr>
+          <td>{{ row.line.entry.date|date:"d M Y" }}</td>
+          <td><a href="{% url 'admin:accounting_journalentry_change' row.line.entry.pk %}">{{ row.line.entry.number }}</a></td>
+          <td>{{ row.line.description|default:row.line.entry.memo }}</td>
+          <td>{{ row.line.party|default_if_none:"" }}</td>
+          <td class="num">{% if row.line.debit %}{{ row.line.debit|floatformat:2 }}{% endif %}</td>
+          <td class="num">{% if row.line.credit %}{{ row.line.credit|floatformat:2 }}{% endif %}</td>
+          <td class="num">{{ row.balance|floatformat:2 }}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="7">No postings in this period.</td></tr>
+        {% endfor %}
+        <tr class="total"><td colspan="4">Totals / closing balance</td><td class="num">{{ report.total_debit|floatformat:2 }}</td><td class="num">{{ report.total_credit|floatformat:2 }}</td><td class="num">{{ report.closing|floatformat:2 }}</td></tr>
+      </tbody>
+    </table>
+  {% else %}
+    <p class="acc-note">Choose an account to see every posting on it.</p>
+  {% endif %}
+</div>
+{% endblock %}

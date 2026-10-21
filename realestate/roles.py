@@ -28,14 +28,34 @@ EVERYTHING = [
 ] + DOCUMENTS
 
 # Bump this when permissions are added, and list the new ones in INTRODUCED.
-ROLES_VERSION = 2
+ROLES_VERSION = 4
 INTRODUCED = {
+    4: {
+        "view_leaseinvoice", "add_leaseinvoice", "view_receiptvoucher",
+        "view_accountmapping", "change_accountmapping",
+    },
+    3: {
+        "view_account", "add_account", "change_account",
+        "view_fiscalperiod", "add_fiscalperiod", "change_fiscalperiod", "lock_fiscalperiod",
+        "view_journalentry", "post_journalentry", "reverse_journalentry",
+        "view_journalline", "view_auditlog",
+        "view_accountingsettings", "change_accountingsettings",
+    },
     2: {
         "view_owner_private",
         "view_propertyownership", "add_propertyownership",
         "change_propertyownership", "delete_propertyownership",
         "view_companysettings", "change_companysettings",
     },
+}
+
+
+# The accounting module (app "accounting"). Posting, reversing and locking a period
+# are separate permissions. Re-opening a locked period is for the superuser only.
+ACCOUNTING_VIEW = {
+    "account": VIEW, "fiscalperiod": VIEW, "journalentry": VIEW,
+    "journalline": VIEW, "auditlog": VIEW, "accountingsettings": VIEW,
+    "leaseinvoice": VIEW, "receiptvoucher": VIEW, "accountmapping": VIEW,
 }
 
 
@@ -57,10 +77,17 @@ ROLES = {
         "propertyownership": FULL,
         "owner_private": VIEW,
         "companysettings": CHANGE_ONLY,
+        **ACCOUNTING_VIEW,
     },
     "Accountant": _view_all(
         cheque=EDIT, expense=EDIT, ownerstatement=FULL, vendor=VIEW,
         owner_private=VIEW, companysettings=VIEW,
+        account=EDIT,
+        fiscalperiod=("view", "add", "change", "lock"),
+        journalentry=("view", "post", "reverse"),
+        journalline=VIEW, auditlog=VIEW,
+        accountingsettings=("view", "change"),
+        leaseinvoice=("view", "add"), receiptvoucher=VIEW, accountmapping=("view", "change"),
     ),
     "Leasing agent": _view_all(
         tenant=EDIT, lease=EDIT, unit=EDIT, cheque=EDIT,
@@ -98,7 +125,8 @@ def ensure_roles(reset=False):
     from .models import SystemState
 
     permissions = {
-        p.codename: p for p in Permission.objects.filter(content_type__app_label="realestate")
+        p.codename: p
+        for p in Permission.objects.filter(content_type__app_label__in=["realestate", "accounting"])
     }
     state, _ = SystemState.objects.get_or_create(key="roles_version", defaults={"value": "1"})
     try:
@@ -123,7 +151,15 @@ def ensure_roles(reset=False):
         if to_add:
             group.permissions.add(*to_add)
 
-    if stored != ROLES_VERSION:
+    # If some permissions of the new version do not exist yet (they are created a moment
+    # later in the same `migrate`), keep the old version so the next call adds them.
+    pending = {
+        code
+        for version in range(stored + 1, ROLES_VERSION + 1)
+        for code in INTRODUCED.get(version, set())
+        if code not in permissions
+    }
+    if stored != ROLES_VERSION and not pending:
         state.value = str(ROLES_VERSION)
         state.save()
     return changed

@@ -28,6 +28,48 @@ python manage.py runserver
 
 Then open http://127.0.0.1:8000/admin/
 
+## Accounting (general ledger)
+
+A double-entry general ledger lives in the `accounting` app (menu: Accounting). Step 1 is the foundation:
+
+- **Chart of accounts** (data, not code): add or rename accounts in the admin. `setup_accounting` creates a *starter* chart
+  built for this business (deferred rent, post-dated cheques, tenant/owner/vendor control accounts, separate operating and
+  owner-trust bank accounts). Have your UAE accountant review it before relying on it.
+- **Journal entries** are balanced (debits = credits), numbered without gaps (JV-2026-000001) and **never edited or deleted**:
+  you cancel a mistake with a reversing entry. This is enforced by the program and again by the database itself.
+- **Fiscal periods** (months of a year that ends 31 December) can be locked; nothing can be posted into a locked period.
+  A **cutover date** blocks postings before the ledger starts.
+- **Sub-ledgers:** every line on a tenant, owner or vendor control account must name that party, so the sub-ledger always
+  equals the control account. Menu: Accounting > Control accounts.
+- **Reports** (calculated only from the ledger): Trial balance, General ledger (also a statement for one tenant/owner/vendor).
+- **Permissions:** post manual journals, reverse entries and lock periods are separate permissions (Accountant role). Re-opening a
+  locked period is for the superuser only. Every posting, reversal, lock and unlock is written to the audit log.
+
+First-time setup is done inside the app: **Accounting > Accounting setup** has buttons for the starter chart,
+the monthly periods of a year and the integrity check, and links to your TRN and cutover date.
+(Developers can still use `python manage.py setup_accounting --years 2026` and `python manage.py check_ledger`.)
+
+```
+python manage.py makemigrations accounting
+python manage.py migrate
+```
+
+**Step 2: rent and cheques post by themselves (accrual basis).** Set your cutover date, then use Accounting > Daily postings:
+
+- **Lease invoice** (once per lease, printable, numbered INV-2026-000001, carries your TRN). Company-owned rent is held as
+  *deferred revenue* and the VAT as *output VAT not yet due*. Third-party rent is held for the owner, never as our income.
+- **Cheques post by themselves** when you change their status on the cheque desk: in hand (the tenant's balance drops and a
+  numbered receipt voucher is issued), deposited, cleared (money reaches the bank; for owners' rent it is credited to the owner and
+  our management fee and its VAT are taken), bounced (the tenant's balance is restored). Cash, card and transfer post when paid.
+  Owners' rent goes to the owner trust bank, company rent to the operating bank.
+- **Month end** (Daily postings > Month end): releases rent from deferred revenue to rent income by the exact days of the lease,
+  and moves VAT to "VAT payable" for instalments whose date has come.
+- If a posting cannot be made (for example the month is locked) the payment is still saved and the step waits on Daily postings.
+- Not posted yet (later steps): deposits, commission, fees, penalties, expenses, owner payouts, VAT return, financial statements.
+
+Next steps: vendor bills and payment vouchers, owner payouts and deposits, VAT return, income statement, balance sheet, ageing,
+bank reconciliation and year-end closing.
+
 ## Run the automatic tests
 
 ```

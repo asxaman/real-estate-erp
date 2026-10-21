@@ -1,0 +1,14 @@
+{% extends "admin/change_form.html" %}
+{% block content %}
+{% if reversed_by %}
+<p style="padding:8px 12px;border:1px solid #ef6c00;border-radius:4px;background:rgba(239,108,0,.12)">
+  This entry was reversed by
+  <a href="{% url 'admin:accounting_journalentry_change' reversed_by.pk %}">{{ reversed_by.number }}</a>.
+</p>
+{% endif %}
+{% if reverse_url %}
+<p><a class="button" href="{{ reverse_url }}">Reverse this entry...</a>
+  <small>Posted entries cannot be edited. A reversal cancels the entry and keeps the history.</small></p>
+{% endif %}
+{{ block.super }}
+{% endblock %}

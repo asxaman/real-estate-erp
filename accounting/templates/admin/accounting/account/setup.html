@@ -1,0 +1,75 @@
+{% extends "admin/base_site.html" %}
+{% block extrastyle %}{{ block.super }}
+<style>
+  .acc-box { max-width: 900px; }
+  .step { border:1px solid rgba(127,127,127,.4); border-radius:6px; padding:14px 18px; margin:0 0 16px; background:rgba(127,127,127,.06); }
+  .step h2 { margin:0 0 6px; font-size:15px; }
+  .step p { margin:4px 0 10px; }
+  .done { color:#2e7d32; font-weight:700; }
+  .todo { color:#ef6c00; font-weight:700; }
+  .bad { color:#c62828; font-weight:700; }
+  .row { display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap; }
+  .row label { display:block; font-weight:600; font-size:12px; margin-bottom:2px; }
+</style>
+{% endblock %}
+{% block breadcrumbs %}<div class="breadcrumbs"><a href="{% url 'admin:index' %}">Home</a> &rsaquo; Accounting setup</div>{% endblock %}
+{% block content %}
+<div class="acc-box">
+  <div class="step">
+    <h2>1. Company details and cutover date
+      {% if settings_obj.trn and settings_obj.cutover_date %}<span class="done">&#10003; done</span>{% else %}<span class="todo">to do</span>{% endif %}</h2>
+    <p>Your TRN is printed on every tax invoice and voucher. The cutover date is the day the ledger starts: nothing can be posted before it, and opening balances are posted on it.</p>
+    <p>TRN: <b>{{ settings_obj.trn|default:"not set" }}</b> &nbsp; Cutover date: <b>{{ settings_obj.cutover_date|date:"d M Y"|default:"not set" }}</b></p>
+    <a class="button" href="{{ settings_url }}">Open accounting settings</a>
+  </div>
+
+  <div class="step">
+    <h2>2. Chart of accounts
+      {% if account_count %}<span class="done">&#10003; {{ account_count }} accounts</span>{% else %}<span class="todo">to do</span>{% endif %}</h2>
+    <p>The starter chart is made for this business (deferred rent, post-dated cheques, tenant/owner/vendor accounts, separate company and owner-trust bank accounts). It only adds accounts that are missing and never changes yours. Have your accountant review it, then rename or add accounts under Chart of accounts.</p>
+    {% if can_chart %}
+    <form method="post">{% csrf_token %}<input type="hidden" name="action" value="chart">
+      <button type="submit" class="default">{% if account_count %}Add any missing starter accounts{% else %}Create the starter chart of accounts{% endif %}</button></form>
+    {% else %}<p>You do not have permission to create accounts.</p>{% endif %}
+  </div>
+
+  <div class="step">
+    <h2>2b. Posting accounts
+      {% if unmapped %}<span class="todo">to do</span>{% else %}<span class="done">&#10003; all set</span>{% endif %}</h2>
+    <p>Tells the system which account to use for each automatic posting (cheques in hand, deferred rent, VAT payable and so on). The starter chart fills this in for you. Change a choice only if your accountant renames or replaces an account.</p>
+    {% if unmapped %}<p class="todo">Missing: {{ unmapped|join:", " }}.</p>{% endif %}
+    {% if perms.accounting.view_accountmapping %}<a class="button" href="{% url 'admin:accounting_accountmapping_changelist' %}">Open posting accounts</a>{% endif %}
+  </div>
+
+  <div class="step">
+    <h2>3. Monthly periods
+      {% if period_count %}<span class="done">&#10003; {{ period_count }} periods ({{ period_years|join:", " }})</span>{% else %}<span class="todo">to do</span>{% endif %}</h2>
+    <p>The financial year ends on 31 December. Entries can only be posted into a month that exists and is not locked. Create each year before you need it.</p>
+    {% if can_periods %}
+    <form method="post">{% csrf_token %}<input type="hidden" name="action" value="periods">
+      <div class="row">
+        <div><label for="year">Year</label><input type="number" id="year" name="year" value="{{ year }}" min="2000" max="2100" required></div>
+        <div><button type="submit" class="default">Create the 12 months</button></div>
+      </div></form>
+    {% else %}<p>You do not have permission to create periods.</p>{% endif %}
+  </div>
+
+  <div class="step">
+    <h2>4. Health check
+      {% if problems %}<span class="bad">{{ problems|length }} problem(s)</span>{% else %}<span class="done">&#10003; healthy</span>{% endif %}</h2>
+    <p>{{ entry_count }} posted entr{{ entry_count|pluralize:"y,ies" }}. This checks that every entry balances, the tenant/owner/vendor sub-ledgers agree with their control accounts and the numbering has no gaps.</p>
+    {% if problems %}<ul>{% for p in problems %}<li class="bad">{{ p }}</li>{% endfor %}</ul>
+    <p>Tell your accountant before posting anything more.</p>{% endif %}
+  </div>
+
+  <div class="step">
+    <h2>More accounting pages</h2>
+    <p>
+      {% if perms.accounting.view_account %}<a href="{% url 'admin:accounting_account_changelist' %}">Chart of accounts</a> &middot;{% endif %}
+      {% if perms.accounting.view_fiscalperiod %}<a href="{% url 'admin:accounting_fiscalperiod_changelist' %}">Fiscal periods (lock a month)</a> &middot;{% endif %}
+      {% if perms.accounting.view_journalline %}<a href="{% url 'admin:accounting_account_reconciliation' %}">Control accounts</a> &middot;{% endif %}
+      {% if perms.accounting.view_auditlog %}<a href="{% url 'admin:accounting_auditlog_changelist' %}">Audit log</a>{% endif %}
+    </p>
+  </div>
+</div>
+{% endblock %}

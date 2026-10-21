@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>{% if invoice.is_tax_invoice %}Tax invoice{% else %}Invoice{% endif %} {{ invoice.number }}</title>
+<style>
+  body { font-family: Arial, Helvetica, sans-serif; color:#222; margin:30px auto; max-width:820px; font-size:13px; position:relative; }
+  h1 { font-size:24px; margin:0; letter-spacing:.02em; }
+  h2 { font-size:15px; margin:22px 0 6px; border-bottom:2px solid #333; padding-bottom:3px; }
+  table { width:100%; border-collapse:collapse; }
+  th, td { padding:5px 6px; text-align:left; border-bottom:1px solid #ddd; vertical-align:top; }
+  th { background:#f2f2f2; }
+  .num { text-align:right; white-space:nowrap; font-variant-numeric:tabular-nums; }
+  .head { display:flex; justify-content:space-between; align-items:flex-start; gap:20px; }
+  .meta td { border:0; padding:2px 8px 2px 0; }
+  .totals { width:55%; margin-left:auto; }
+  .totals tr.total td { border-top:2px solid #222; border-bottom:2px solid #222; font-weight:700; font-size:15px; }
+  .noprint { background:#fffbe6; border:1px solid #e0c200; padding:8px 12px; margin-bottom:18px; }
+  .warn { background:#ffebee; border:1px solid #c62828; color:#7f0000; padding:6px 10px; margin:8px 0; }
+  .void { position:absolute; top:160px; left:120px; font-size:90px; color:rgba(198,40,40,.25); transform:rotate(-20deg); font-weight:700; }
+  .sign { margin-top:60px; display:flex; gap:60px; }
+  .sign div { flex:1; border-top:1px solid #222; padding-top:4px; }
+  .muted { color:#666; }
+  @media print { .noprint { display:none; } body { margin:0; } }
+</style>
+</head><body>
+<div class="noprint">Press <strong>Ctrl + P</strong> to print, or choose "Save as PDF" as the printer. <a href="javascript:window.print()">Print now</a></div>
+<div class="head">
+  <div>
+    <h1>{% if invoice.is_tax_invoice %}TAX INVOICE{% else %}INVOICE{% endif %}</h1>
+    <div><strong>{{ company.legal_name|default:"(company name not set)" }}</strong></div>
+    <div class="muted">{{ company.address|linebreaksbr }}</div>
+    <div>TRN: <strong>{{ company.trn|default:"not set" }}</strong></div>
+  </div>
+  <table class="meta" style="width:auto;">
+    <tr><td class="muted">Invoice no.</td><td><strong>{{ invoice.number }}</strong></td></tr>
+    <tr><td class="muted">Date</td><td>{{ invoice.date|date:"d M Y" }}</td></tr>
+    {% if lease.contract_number %}<tr><td class="muted">Contract</td><td>{{ lease.contract_number }}</td></tr>{% endif %}
+    {% if lease.ejari_number %}<tr><td class="muted">Ejari / Tawtheeq</td><td>{{ lease.ejari_number }}</td></tr>{% endif %}
+  </table>
+</div>
+{% if invoice.is_tax_invoice and not company.trn %}<p class="warn">Your company TRN is not set. A tax invoice must carry it. Set it in Accounting settings and print again.</p>{% endif %}
+
+<h2>Billed to</h2>
+<table class="meta">
+  <tr><td class="muted">Tenant</td><td><strong>{{ lease.tenant.name }}</strong></td></tr>
+  {% if lease.tenant.address %}<tr><td class="muted">Address</td><td>{{ lease.tenant.address }}</td></tr>{% endif %}
+  <tr><td class="muted">Premises</td><td>Unit {{ lease.unit.unit_number }}, {{ lease.unit.property.name }}</td></tr>
+  <tr><td class="muted">Rental period</td><td>{{ lease.start_date|date:"d M Y" }} to {{ lease.end_date|date:"d M Y" }}</td></tr>
+</table>
+
+<h2>Details</h2>
+<table>
+  <tr><th>Description</th><th class="num">Amount (AED)</th></tr>
+  <tr><td>Rent for the period {{ lease.start_date|date:"d M Y" }} to {{ lease.end_date|date:"d M Y" }}</td><td class="num">{{ invoice.rent_amount|floatformat:"2g" }}</td></tr>
+</table>
+<table class="totals">
+  <tr><td>Total before VAT</td><td class="num">{{ invoice.rent_amount|floatformat:"2g" }}</td></tr>
+  <tr><td>VAT {{ invoice.vat_percent|floatformat:"-2" }}%</td><td class="num">{{ invoice.vat_amount|floatformat:"2g" }}</td></tr>
+  <tr class="total"><td>Total (AED)</td><td class="num">{{ invoice.total_amount|floatformat:"2g" }}</td></tr>
+</table>
+
+<h2>Payment schedule</h2>
+<table>
+  <tr><th>#</th><th>Due date</th><th>Cheque no.</th><th>Bank</th><th class="num">Amount (AED)</th></tr>
+  {% for c in schedule %}
+  <tr><td>{{ c.installment_no|default:forloop.counter }}</td><td>{{ c.cheque_date|date:"d M Y" }}</td><td>{{ c.cheque_number }}</td><td>{{ c.bank_name }}</td><td class="num">{{ c.amount|floatformat:"2g" }}</td></tr>
+  {% empty %}<tr><td colspan="5" class="muted">No payments scheduled yet.</td></tr>{% endfor %}
+</table>
+<div class="sign"><div>Issued by</div><div>Received by (tenant)</div></div>
+</body></html>

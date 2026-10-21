@@ -688,6 +688,23 @@ class ChequeInline(UnfoldTabularInline):
     ordering = ("cheque_date", "id")
     verbose_name_plural = "Payments & cheques for this lease"
 
+    def get_fields(self, request, obj=None):
+        fields = list(super().get_fields(request, obj))
+        if obj is None:
+            # A brand-new lease only collects cheques: nothing can have bounced yet.
+            fields = [f for f in fields if f != "return_reason"]
+        return fields
+
+    def get_formset(self, request, obj=None, **kwargs):
+        request._adding_lease = obj is None
+        return super().get_formset(request, obj, **kwargs)
+
+    def formfield_for_choice_field(self, db_field, request, **kwargs):
+        if db_field.name == "status" and getattr(request, "_adding_lease", False):
+            allowed = (Cheque.Status.PENDING, Cheque.Status.RECEIVED)
+            kwargs["choices"] = [c for c in db_field.choices if c[0] in allowed]
+        return super().formfield_for_choice_field(db_field, request, **kwargs)
+
 
 class ExpiryFilter(admin.SimpleListFilter):
     title = "expiry"

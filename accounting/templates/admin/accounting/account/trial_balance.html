@@ -1,0 +1,50 @@
+{% extends "admin/base_site.html" %}
+{% block extrastyle %}{{ block.super }}
+<style>
+  .acc-box { max-width: 1100px; }
+  .acc-bar { display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end; margin:0 0 16px; }
+  .acc-bar label { display:block; font-weight:600; font-size:12px; margin-bottom:2px; }
+  .acc-table { border-collapse:collapse; width:100%; }
+  .acc-table th, .acc-table td { padding:6px 10px; border-bottom:1px solid rgba(127,127,127,.3); text-align:left; }
+  .acc-table th { font-size:12px; text-transform:uppercase; letter-spacing:.03em; opacity:.85; }
+  .acc-table td.num, .acc-table th.num { text-align:right; font-variant-numeric:tabular-nums; }
+  .acc-table tr.total td { border-top:2px solid #888; font-weight:700; }
+  .acc-table tr.head td { font-weight:700; background:rgba(127,127,127,.12); }
+  .acc-ok { color:#2e7d32; font-weight:700; }
+  .acc-bad { color:#c62828; font-weight:700; }
+  .acc-note { padding:8px 12px; border-radius:4px; margin:0 0 14px; border:1px solid rgba(127,127,127,.4); background:rgba(127,127,127,.08); }
+  .acc-err { padding:8px 12px; border-radius:4px; margin:0 0 14px; background:#ffebee; border:1px solid #c62828; color:#7f0000; }
+</style>
+{% endblock %}
+{% block breadcrumbs %}<div class="breadcrumbs"><a href="{% url 'admin:index' %}">Home</a> &rsaquo; Trial balance</div>{% endblock %}
+{% block content %}
+<div class="acc-box">
+  <form method="get" class="acc-bar">
+    <div><label for="as_of">As at</label><input type="date" id="as_of" name="as_of" value="{{ report.as_of|date:'Y-m-d' }}"></div>
+    <div><label><input type="checkbox" name="zero" value="1" {% if include_zero %}checked{% endif %}> Show accounts with no balance</label></div>
+    <div><button type="submit" class="default">Show</button></div>
+  </form>
+  {% if report.balanced %}
+    <p class="acc-note"><span class="acc-ok">Balanced.</span> Total debits equal total credits.</p>
+  {% else %}
+    <p class="acc-err"><b>OUT OF BALANCE by {{ report.difference }}.</b> This should never happen. Run <code>python manage.py check_ledger</code> and tell your accountant.</p>
+  {% endif %}
+  <table class="acc-table">
+    <thead><tr><th>Code</th><th>Account</th><th>Type</th><th class="num">Debit (AED)</th><th class="num">Credit (AED)</th></tr></thead>
+    <tbody>
+    {% for row in report.rows %}
+      <tr>
+        <td>{{ row.account.code }}</td>
+        <td><a href="{% url 'admin:accounting_account_general_ledger' %}?account={{ row.account.pk }}">{{ row.account.name }}</a></td>
+        <td>{{ row.account.get_account_type_display }}</td>
+        <td class="num">{% if row.debit %}{{ row.debit|floatformat:2 }}{% endif %}</td>
+        <td class="num">{% if row.credit %}{{ row.credit|floatformat:2 }}{% endif %}</td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="5">Nothing has been posted yet.</td></tr>
+    {% endfor %}
+      <tr class="total"><td colspan="3">Total</td><td class="num">{{ report.total_debit|floatformat:2 }}</td><td class="num">{{ report.total_credit|floatformat:2 }}</td></tr>
+    </tbody>
+  </table>
+</div>
+{% endblock %}
