@@ -6,7 +6,7 @@ from datetime import date
 
 from django.core.exceptions import ValidationError
 
-from .utils import iban_is_valid, normalize_passport
+from .utils import iban_is_valid, normalize_iban, normalize_passport
 
 MAX_UPLOAD_MB = 10
 ALLOWED_UPLOAD_EXTENSIONS = {".pdf", ".jpg", ".jpeg", ".png"}
@@ -28,11 +28,20 @@ def validate_emirates_id(value):
 def validate_iban(value):
     if not value:
         return
-    if not iban_is_valid(value):
+    if iban_is_valid(value):
+        return
+    iban = normalize_iban(value)
+    if re.fullmatch(r"AE\d{21}", iban):
+        # The shape is right, so the check digits (the 2 digits after AE) are what failed.
         raise ValidationError(
-            "This IBAN is not valid. A UAE IBAN has 23 characters: AE followed by "
-            "21 digits (example: AE07 0331 2345 6789 0123 456)."
+            "The length is right, but the check digits (the 2 digits after AE) do not "
+            "match the rest of the number, so one digit is probably mistyped. Compare it "
+            "with the IBAN letter from the bank. Every real IBAN passes this check."
         )
+    raise ValidationError(
+        "This IBAN is not valid. A UAE IBAN has 23 characters: AE followed by "
+        "21 digits (example: AE07 0331 2345 6789 0123 456)."
+    )
 
 
 def validate_passport(value):
