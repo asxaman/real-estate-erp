@@ -1187,3 +1187,7 @@ class ChequeAdmin(admin.ModelAdmin):
         ):
             next_url = reverse("admin:realestate_cheque_desk")
         return HttpResponseRedirect(next_url)
+
+
+# Expenses, maintenance and owner statements live in their own file.
+from . import admin_finance  # noqa: E402,F401

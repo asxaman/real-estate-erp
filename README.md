@@ -8,6 +8,8 @@ Manages company-owned and third-party-owned properties:
 - Properties (title deed, Makani, DEWA) and units
 - Tenancy contracts (Ejari / Tawtheeq, VAT, deposit, commission) with their cheques
 - Cheque workflow: expected, in hand, deposited, cleared, bounced, replaced, plus a daily cheque desk
+- Vendors, maintenance requests and expenses (who pays: owner, company or tenant), with receipts
+- Owner statements: cleared rent minus management fee (and its VAT) minus owner expenses = payout, with approval, payment record and a printable page
 
 ## Run it locally (Windows PowerShell)
 

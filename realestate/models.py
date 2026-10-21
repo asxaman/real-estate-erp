@@ -8,13 +8,17 @@ from django.db.models import Case, CharField, Exists, OuterRef, Q, Sum, Value, W
 from django.utils import timezone
 
 from .fields import EmiratesIDField, IBANField, PassportField
-from .utils import add_months, split_amount
+from .utils import add_months, percent_of, split_amount, split_vat
 from .validators import (
     validate_document_file,
     validate_makani,
     validate_phone,
     validate_trn,
 )
+
+# A few models below have a field called `property`, which hides Python's own
+# `property` inside those classes. They use `_property` for the decorator instead.
+_property = property
 
 # Documents (Emirates ID, passport...) that expire within this many days
 # are flagged "Expiring soon".
@@ -1092,3 +1096,673 @@ class ChequeEvent(models.Model):
 
     def __str__(self):
         return f"{self.cheque_id}: {self.from_status or 'new'} -> {self.to_status}"
+
+
+# ---------------------------------------------------------------------------
+# Expenses and maintenance
+# ---------------------------------------------------------------------------
+
+
+class ExpenseCategory(models.TextChoices):
+    REPAIR = "repair", "General repair / maintenance"
+    PLUMBING = "plumbing", "Plumbing"
+    ELECTRICAL = "electrical", "Electrical"
+    AC = "ac", "AC / chiller"
+    CLEANING = "cleaning", "Cleaning"
+    PEST = "pest", "Pest control"
+    PAINTING = "painting", "Painting / fit-out"
+    SECURITY = "security", "Security"
+    UTILITIES = "utilities", "Utilities (DEWA, chilled water, gas...)"
+    INSURANCE = "insurance", "Insurance"
+    GOVERNMENT = "government", "Government / municipality fees"
+    LEGAL = "legal", "Legal / eviction / RERA case"
+    MARKETING = "marketing", "Marketing / listing"
+    OTHER = "other", "Other"
+
+
+class Vendor(models.Model):
+    """A contractor or supplier: plumber, AC company, cleaning company..."""
+
+    name = models.CharField(max_length=255)
+    trade = models.CharField(
+        "main service",
+        max_length=20,
+        choices=ExpenseCategory.choices,
+        default=ExpenseCategory.REPAIR,
+    )
+    contact_person = models.CharField(max_length=255, blank=True)
+    phone = models.CharField(max_length=30, blank=True, validators=[validate_phone])
+    email = models.EmailField(blank=True)
+    trade_licence_number = models.CharField(max_length=100, blank=True)
+    trn = models.CharField(
+        "VAT TRN", max_length=15, blank=True, validators=[validate_trn]
+    )
+    address = models.CharField(max_length=255, blank=True)
+    notes = models.TextField(blank=True)
+    is_active = models.BooleanField("active", default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["name"]
+
+    def __str__(self):
+        return self.name
+
+
+class MaintenanceRequest(models.Model):
+    """A repair or job reported for a property or a unit."""
+
+    class Priority(models.TextChoices):
+        LOW = "low", "Low"
+        NORMAL = "normal", "Normal"
+        URGENT = "urgent", "Urgent"
+        EMERGENCY = "emergency", "Emergency (leak, no power...)"
+
+    class Status(models.TextChoices):
+        OPEN = "open", "Open"
+        IN_PROGRESS = "in_progress", "In progress"
+        COMPLETED = "completed", "Completed"
+        CANCELLED = "cancelled", "Cancelled"
+
+    property = models.ForeignKey(
+        "Property", on_delete=models.PROTECT, related_name="maintenance_requests"
+    )
+    unit = models.ForeignKey(
+        "Unit",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="maintenance_requests",
+        help_text="Leave empty for common areas or the whole building.",
+    )
+    tenant = models.ForeignKey(
+        "Tenant",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="maintenance_requests",
+        help_text="Who reported it, if a tenant did.",
+    )
+    title = models.CharField(max_length=255)
+    description = models.TextField(blank=True)
+    category = models.CharField(
+        max_length=20, choices=ExpenseCategory.choices, default=ExpenseCategory.REPAIR
+    )
+    priority = models.CharField(
+        max_length=12, choices=Priority.choices, default=Priority.NORMAL
+    )
+    status = models.CharField(
+        max_length=12, choices=Status.choices, default=Status.OPEN
+    )
+    reported_on = models.DateField(default=timezone.localdate)
+    scheduled_for = models.DateField(null=True, blank=True)
+    completed_on = models.DateField(null=True, blank=True)
+    vendor = models.ForeignKey(
+        Vendor,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="maintenance_requests",
+    )
+    estimated_cost = models.DecimalField(
+        "estimated cost (AED)",
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(0)],
+    )
+    notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-reported_on", "-id"]
+
+    def __str__(self):
+        return f"{self.title} ({self.property})"
+
+    @_property
+    def is_open(self):
+        return self.status in (self.Status.OPEN, self.Status.IN_PROGRESS)
+
+    @_property
+    def total_cost(self):
+        total = self.expenses.aggregate(total=Sum("amount"))["total"]
+        return total or Decimal("0.00")
+
+    def clean(self):
+        errors = {}
+        if self.unit_id and self.property_id and self.unit.property_id != self.property_id:
+            errors["unit"] = "This unit does not belong to the selected property."
+        if self.completed_on and self.reported_on and self.completed_on < self.reported_on:
+            errors["completed_on"] = "Completion cannot be before the report date."
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        if self.status == self.Status.COMPLETED and not self.completed_on:
+            self.completed_on = timezone.localdate()
+        if self.status != self.Status.COMPLETED:
+            self.completed_on = None
+        super().save(*args, **kwargs)
+
+
+class Expense(models.Model):
+    """Money spent on a property. `bearer` says who finally pays for it."""
+
+    Category = ExpenseCategory
+
+    class Bearer(models.TextChoices):
+        OWNER = "owner", "Owner (deducted from the owner statement)"
+        COMPANY = "company", "Our company"
+        TENANT = "tenant", "Tenant (charge back to the tenant)"
+
+    property = models.ForeignKey(
+        "Property", on_delete=models.PROTECT, related_name="expenses"
+    )
+    unit = models.ForeignKey(
+        "Unit",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="expenses",
+        help_text="Leave empty for common areas or the whole building.",
+    )
+    maintenance_request = models.ForeignKey(
+        MaintenanceRequest,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="expenses",
+    )
+    vendor = models.ForeignKey(
+        Vendor,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="expenses",
+    )
+    category = models.CharField(
+        max_length=20, choices=ExpenseCategory.choices, default=ExpenseCategory.REPAIR
+    )
+    description = models.CharField(max_length=255)
+    expense_date = models.DateField(default=timezone.localdate)
+    invoice_number = models.CharField(max_length=60, blank=True)
+    amount = models.DecimalField(
+        "total paid (AED)",
+        max_digits=12,
+        decimal_places=2,
+        validators=[MinValueValidator(0)],
+        help_text="The full amount including VAT.",
+    )
+    vat_amount = models.DecimalField(
+        "of which VAT (AED)",
+        max_digits=12,
+        decimal_places=2,
+        default=Decimal("0.00"),
+        validators=[MinValueValidator(0)],
+        help_text="For your records. Leave 0 if there is no VAT.",
+    )
+    bearer = models.CharField(
+        "who pays?", max_length=10, choices=Bearer.choices, default=Bearer.OWNER
+    )
+    receipt = models.FileField(
+        upload_to=document_upload_path,
+        blank=True,
+        validators=[validate_document_file],
+        help_text="Invoice or receipt: PDF, JPG or PNG, up to 10 MB.",
+    )
+    notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-expense_date", "-id"]
+        indexes = [models.Index(fields=["bearer", "expense_date"])]
+
+    def __str__(self):
+        return f"{self.description} - AED {self.amount:,.2f}" if self.amount is not None else self.description
+
+    @_property
+    def statement_status(self):
+        """None if not on any owner statement, else the status of that statement."""
+        line = getattr(self, "statement_line", None)
+        return line.statement.status if line else None
+
+    @_property
+    def is_locked(self):
+        """True once an approved or paid owner statement includes this expense."""
+        status = self.statement_status
+        return status is not None and status != OwnerStatement.Status.DRAFT
+
+    def clean(self):
+        errors = {}
+        if self.amount is not None and self.amount <= 0:
+            errors["amount"] = "The amount must be more than zero."
+        if (
+            self.amount is not None
+            and self.vat_amount is not None
+            and self.vat_amount > self.amount
+        ):
+            errors["vat_amount"] = "VAT cannot be more than the total."
+
+        if self.property_id:
+            if self.unit_id and self.unit.property_id != self.property_id:
+                errors["unit"] = "This unit does not belong to the selected property."
+            if (
+                self.bearer == self.Bearer.OWNER
+                and self.property.ownership_type != Property.Ownership.THIRD_PARTY
+            ):
+                errors["bearer"] = (
+                    "This property belongs to your company, so there is no owner to "
+                    "charge. Choose 'Our company' or 'Tenant'."
+                )
+
+        if self.pk and self.is_locked:
+            errors["__all__"] = (
+                "This expense is on an approved owner statement and cannot be "
+                "changed. Reopen the statement first."
+            )
+        if errors:
+            raise ValidationError(errors)
+
+
+# ---------------------------------------------------------------------------
+# Owner statements and payouts
+# ---------------------------------------------------------------------------
+
+
+class OwnerStatement(models.Model):
+    """What we collected for a landlord, what we deduct, and what we pay them.
+
+    While DRAFT the lines can be recalculated from the cleared cheques and
+    expenses. APPROVED freezes it. PAID records when and how the owner was paid.
+    """
+
+    class Status(models.TextChoices):
+        DRAFT = "draft", "Draft"
+        APPROVED = "approved", "Approved (ready to pay)"
+        PAID = "paid", "Paid"
+
+    class PayMethod(models.TextChoices):
+        BANK = "bank_transfer", "Bank transfer"
+        CHEQUE = "cheque", "Cheque"
+        CASH = "cash", "Cash"
+
+    number = models.CharField(max_length=30, unique=True, null=True, blank=True, editable=False)
+    owner = models.ForeignKey(Owner, on_delete=models.PROTECT, related_name="statements")
+    period_start = models.DateField()
+    period_end = models.DateField()
+    status = models.CharField(
+        max_length=10, choices=Status.choices, default=Status.DRAFT
+    )
+    fee_vat_percent = models.DecimalField(
+        "VAT on our management fee (%)",
+        max_digits=5,
+        decimal_places=2,
+        default=Decimal("5.00"),
+        validators=[MinValueValidator(0), MaxValueValidator(100)],
+        help_text="Management fees are normally subject to 5% VAT. "
+        "Confirm with your accountant.",
+    )
+    pay_vat_to_owner = models.BooleanField(
+        "pay the VAT collected on rent to the owner",
+        default=True,
+        help_text="Tick if the owner is the VAT-registered party and files the VAT "
+        "return. Untick if you keep the VAT to pay the tax authority yourselves.",
+    )
+    brought_forward = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=Decimal("0.00"),
+        editable=False,
+        help_text="A negative balance from the previous statement.",
+    )
+    notes = models.TextField(blank=True)
+
+    approved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+        editable=False,
+    )
+    approved_at = models.DateTimeField(null=True, blank=True, editable=False)
+
+    paid_on = models.DateField(null=True, blank=True)
+    pay_method = models.CharField(
+        "payment method", max_length=15, choices=PayMethod.choices, blank=True
+    )
+    pay_reference = models.CharField(
+        "payment reference",
+        max_length=100,
+        blank=True,
+        help_text="Bank transfer reference or cheque number.",
+    )
+    paid_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+        editable=False,
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-period_end", "-id"]
+
+    def __str__(self):
+        return self.number or f"Statement for {self.owner}"
+
+    @property
+    def is_draft(self):
+        return self.status == self.Status.DRAFT
+
+    # --- numbers -----------------------------------------------------------
+
+    def totals(self):
+        zero = Decimal("0.00")
+        result = {
+            "rent": zero,
+            "rent_vat": zero,
+            "fee": zero,
+            "fee_vat": zero,
+            "expenses": zero,
+        }
+        keys = {
+            StatementLine.Kind.RENT: ("rent", "rent_vat"),
+            StatementLine.Kind.FEE: ("fee", "fee_vat"),
+            StatementLine.Kind.EXPENSE: ("expenses", None),
+        }
+        for line in self.lines.all():
+            amount_key, vat_key = keys[line.kind]
+            result[amount_key] += line.amount
+            if vat_key:
+                result[vat_key] += line.vat_amount
+        vat_to_owner = result["rent_vat"] if self.pay_vat_to_owner else zero
+        result["vat_to_owner"] = vat_to_owner
+        result["vat_held"] = result["rent_vat"] - vat_to_owner
+        result["brought_forward"] = self.brought_forward
+        result["net_payout"] = (
+            result["rent"]
+            + vat_to_owner
+            - result["fee"]
+            - result["fee_vat"]
+            - result["expenses"]
+            + self.brought_forward
+        )
+        return result
+
+    @property
+    def net_payout(self):
+        return self.totals()["net_payout"]
+
+    # --- checks ------------------------------------------------------------
+
+    def clean(self):
+        errors = {}
+        if self.period_start and self.period_end and self.period_end < self.period_start:
+            errors["period_end"] = "The end date cannot be before the start date."
+        elif self.owner_id and self.period_start and self.period_end:
+            overlapping = OwnerStatement.objects.filter(
+                owner_id=self.owner_id,
+                period_start__lte=self.period_end,
+                period_end__gte=self.period_start,
+            ).exclude(pk=self.pk)
+            if overlapping.exists():
+                errors["period_start"] = (
+                    "This owner already has a statement that overlaps these dates."
+                )
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        if not self.number:
+            self.number = f"OS-{self.period_end.year}-{self.pk:05d}"
+            OwnerStatement.objects.filter(pk=self.pk).update(number=self.number)
+
+    def delete(self, *args, **kwargs):
+        if not self.is_draft:
+            raise ValidationError(
+                "Only a draft statement can be deleted. Reopen it first."
+            )
+        return super().delete(*args, **kwargs)
+
+    # --- workflow ----------------------------------------------------------
+
+    def _require(self, status, message):
+        if self.status != status:
+            raise ValidationError(message)
+
+    def recalculate(self):
+        """Rebuild the lines from cleared rent cheques and owner-paid expenses."""
+        self._require(self.Status.DRAFT, "Only a draft statement can be recalculated.")
+        S = Cheque.Status
+        properties = list(
+            Property.objects.filter(
+                owner_id=self.owner_id, ownership_type=Property.Ownership.THIRD_PARTY
+            ).select_related("owner")
+        )
+        with transaction.atomic():
+            self.lines.all().delete()
+            lines = []
+            rent_by_property = {}
+
+            cheques = (
+                Cheque.objects.filter(
+                    purpose=Cheque.Purpose.RENT,
+                    status=S.CLEARED,
+                    cleared_date__range=(self.period_start, self.period_end),
+                    lease__unit__property__in=properties,
+                    statement_line__isnull=True,
+                )
+                .select_related("lease__tenant", "lease__unit__property")
+                .order_by("cleared_date", "id")
+            )
+            for cheque in cheques:
+                lease = cheque.lease
+                prop = lease.unit.property
+                net, vat = split_vat(cheque.amount, lease.vat_percent)
+                rent_by_property[prop.pk] = rent_by_property.get(prop.pk, Decimal("0.00")) + net
+                number = f" - cheque {cheque.cheque_number}" if cheque.cheque_number else ""
+                lines.append(
+                    StatementLine(
+                        statement=self,
+                        kind=StatementLine.Kind.RENT,
+                        property=prop,
+                        date=cheque.cleared_date,
+                        description=f"Rent - {lease.tenant.name} - unit {lease.unit.unit_number}{number}",
+                        amount=net,
+                        vat_amount=vat,
+                        cheque=cheque,
+                    )
+                )
+
+            for prop in properties:
+                base = rent_by_property.get(prop.pk, Decimal("0.00"))
+                percent = prop.effective_fee_percent or Decimal("0")
+                fee = percent_of(base, percent)
+                if fee > 0:
+                    lines.append(
+                        StatementLine(
+                            statement=self,
+                            kind=StatementLine.Kind.FEE,
+                            property=prop,
+                            date=self.period_end,
+                            description=f"Management fee {percent.normalize():f}% of AED {base:,.2f} rent",
+                            amount=fee,
+                            vat_amount=percent_of(fee, self.fee_vat_percent),
+                        )
+                    )
+
+            expenses = (
+                Expense.objects.filter(
+                    bearer=Expense.Bearer.OWNER,
+                    property__in=properties,
+                    expense_date__range=(self.period_start, self.period_end),
+                    statement_line__isnull=True,
+                )
+                .select_related("property", "unit", "vendor")
+                .order_by("expense_date", "id")
+            )
+            for expense in expenses:
+                where = f" - unit {expense.unit.unit_number}" if expense.unit_id else ""
+                lines.append(
+                    StatementLine(
+                        statement=self,
+                        kind=StatementLine.Kind.EXPENSE,
+                        property=expense.property,
+                        date=expense.expense_date,
+                        description=f"{expense.description}{where}",
+                        amount=expense.amount,
+                        expense=expense,
+                    )
+                )
+            StatementLine.objects.bulk_create(lines)
+
+            previous = (
+                OwnerStatement.objects.filter(
+                    owner_id=self.owner_id, period_end__lt=self.period_start
+                )
+                .exclude(status=self.Status.DRAFT)
+                .order_by("-period_end")
+                .first()
+            )
+            carried = Decimal("0.00")
+            if previous:
+                previous_net = previous.net_payout
+                if previous_net < 0:
+                    carried = previous_net
+            self.brought_forward = carried
+            self.save()
+        return len(lines)
+
+    def _count_unstatemented(self, **date_filters):
+        """Cleared rent cheques and owner expenses, on no statement, matching the date filters.
+
+        `date_filters` use the names "cheque_date" and "expense_date" as keys with
+        a lookup suffix, e.g. cleared_date__lt / expense_date__lt.
+        """
+        properties = Property.objects.filter(
+            owner_id=self.owner_id, ownership_type=Property.Ownership.THIRD_PARTY
+        )
+        cheque_filter = {k: v for k, v in date_filters.items() if k.startswith("cleared_date")}
+        expense_filter = {k: v for k, v in date_filters.items() if k.startswith("expense_date")}
+        cheques = Cheque.objects.filter(
+            purpose=Cheque.Purpose.RENT,
+            status=Cheque.Status.CLEARED,
+            lease__unit__property__in=properties,
+            statement_line__isnull=True,
+            **cheque_filter,
+        ).count()
+        expenses = Expense.objects.filter(
+            bearer=Expense.Bearer.OWNER,
+            property__in=properties,
+            statement_line__isnull=True,
+            **expense_filter,
+        ).count()
+        return {"cheques": cheques, "expenses": expenses}
+
+    def uncovered_items(self):
+        """Items dated BEFORE this period that are on no statement (easy to miss)."""
+        return self._count_unstatemented(
+            cleared_date__lt=self.period_start, expense_date__lt=self.period_start
+        )
+
+    def new_items(self):
+        """Items INSIDE this period that are not on the statement yet."""
+        return self._count_unstatemented(
+            cleared_date__range=(self.period_start, self.period_end),
+            expense_date__range=(self.period_start, self.period_end),
+        )
+
+    def approve(self, user=None):
+        self._require(self.Status.DRAFT, "Only a draft statement can be approved.")
+        new = self.new_items()
+        if new["cheques"] or new["expenses"]:
+            raise ValidationError(
+                f"{new['cheques']} cheque(s) and {new['expenses']} expense(s) in this "
+                "period are not on the statement yet. Click Recalculate and check the "
+                "numbers again."
+            )
+        if not self.lines.exists() and not self.brought_forward:
+            raise ValidationError(
+                "There is nothing on this statement. Click Recalculate first."
+            )
+        self.status = self.Status.APPROVED
+        self.approved_by = user
+        self.approved_at = timezone.now()
+        self.save()
+
+    def reopen(self):
+        self._require(
+            self.Status.APPROVED, "Only an approved (unpaid) statement can be reopened."
+        )
+        self.status = self.Status.DRAFT
+        self.approved_by = None
+        self.approved_at = None
+        self.save()
+
+    def mark_paid(self, on=None, method="", reference="", user=None):
+        self._require(self.Status.APPROVED, "Approve the statement before paying it.")
+        if self.net_payout <= 0:
+            raise ValidationError("There is nothing to pay on this statement.")
+        if method not in self.PayMethod.values:
+            raise ValidationError("Choose how the owner was paid.")
+        reference = (reference or "").strip()
+        if method != self.PayMethod.CASH and not reference:
+            raise ValidationError("Enter the bank transfer reference or cheque number.")
+        self.paid_on = on or timezone.localdate()
+        self.pay_method = method
+        self.pay_reference = reference
+        self.paid_by = user
+        self.status = self.Status.PAID
+        self.save()
+
+
+class StatementLine(models.Model):
+    """One row on an owner statement. A snapshot taken when it was calculated."""
+
+    class Kind(models.TextChoices):
+        RENT = "rent", "Rent collected"
+        FEE = "fee", "Management fee"
+        EXPENSE = "expense", "Expense"
+
+    statement = models.ForeignKey(
+        OwnerStatement, on_delete=models.CASCADE, related_name="lines"
+    )
+    kind = models.CharField(max_length=10, choices=Kind.choices)
+    property = models.ForeignKey(
+        Property, null=True, blank=True, on_delete=models.PROTECT, related_name="+"
+    )
+    date = models.DateField()
+    description = models.CharField(max_length=255)
+    amount = models.DecimalField(
+        max_digits=12, decimal_places=2, help_text="Always positive; the kind decides the direction."
+    )
+    vat_amount = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    cheque = models.OneToOneField(
+        Cheque,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="statement_line",
+    )
+    expense = models.OneToOneField(
+        Expense,
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="statement_line",
+    )
+
+    class Meta:
+        ordering = ["property__name", "kind", "date", "id"]
+
+    def __str__(self):
+        return f"{self.get_kind_display()}: {self.description}"

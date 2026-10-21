@@ -3,7 +3,7 @@
 import calendar
 import re
 from datetime import date
-from decimal import ROUND_DOWN, Decimal
+from decimal import ROUND_DOWN, ROUND_HALF_UP, Decimal
 
 
 def add_months(d, months):
@@ -60,3 +60,24 @@ def iban_is_valid(value):
     rearranged = iban[4:] + iban[:4]
     numeric = "".join(str(int(ch, 36)) for ch in rearranged)
     return int(numeric) % 97 == 1
+
+
+CENT = Decimal("0.01")
+
+
+def split_vat(gross, vat_percent):
+    """Split an amount that includes VAT into (amount without VAT, VAT).
+
+    split_vat(1050, 5) -> (1000.00, 50.00). The two always add up to `gross`.
+    """
+    gross = Decimal(gross).quantize(CENT, ROUND_HALF_UP)
+    percent = Decimal(vat_percent or 0)
+    if percent <= 0:
+        return gross, Decimal("0.00")
+    net = (gross * 100 / (100 + percent)).quantize(CENT, ROUND_HALF_UP)
+    return net, gross - net
+
+
+def percent_of(amount, percent):
+    """`percent` % of `amount`, rounded to fils (0.01)."""
+    return (Decimal(amount) * Decimal(percent or 0) / 100).quantize(CENT, ROUND_HALF_UP)

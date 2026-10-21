@@ -1,0 +1,89 @@
+{% extends "admin/change_form.html" %}
+
+{% block content %}
+{% if statement %}
+<style>
+  .os-panel { border:1px solid var(--hairline-color,#ddd); border-radius:6px; padding:14px 18px; margin:0 0 18px; background:var(--darkened-bg,#f8f8f8); }
+  .os-panel h2 { margin:0 0 10px; font-size:15px; }
+  .os-grid { display:flex; gap:24px; flex-wrap:wrap; align-items:flex-start; }
+  .os-table td { padding:3px 14px 3px 0; }
+  .os-table td.num { text-align:right; font-variant-numeric:tabular-nums; }
+  .os-total td { border-top:2px solid #888; font-weight:700; padding-top:6px; }
+  .os-buttons form { display:inline-block; margin:0 8px 8px 0; vertical-align:top; }
+  .os-buttons .pay-form { display:block; margin-top:10px; }
+  .os-buttons .pay-form label { margin-right:6px; }
+  .os-warn { background:#fff3e0; border:1px solid #ef6c00; color:#7a3b00; padding:8px 12px; border-radius:4px; margin-bottom:10px; }
+  .os-ok { color:#2e7d32; font-weight:600; }
+</style>
+
+<div class="os-panel">
+  <h2>Statement {{ statement.number }}: {{ statement.owner }}
+    ({{ statement.period_start|date:"d M Y" }} to {{ statement.period_end|date:"d M Y" }})
+    &mdash; {{ statement.get_status_display }}</h2>
+
+  {% if new_items and new_items.cheques or new_items and new_items.expenses %}
+    <div class="os-warn">
+      {{ new_items.cheques }} cleared cheque(s) and {{ new_items.expenses }} expense(s) in these dates
+      are <strong>not on the statement yet</strong>. Click <strong>Recalculate</strong> to add them.
+    </div>
+  {% endif %}
+  {% if uncovered and uncovered.cheques or uncovered and uncovered.expenses %}
+    <div class="os-warn">
+      Before {{ statement.period_start|date:"d M Y" }} there are {{ uncovered.cheques }} cleared rent cheque(s)
+      and {{ uncovered.expenses }} owner expense(s) that are on <strong>no statement</strong>.
+      Create a statement that covers their dates so the owner is not short-paid.
+    </div>
+  {% endif %}
+
+  <div class="os-grid">
+    <table class="os-table">
+      <tr><td>Rent collected (without VAT)</td><td class="num">AED {{ totals.rent|floatformat:"2g" }}</td></tr>
+      <tr><td>VAT collected on rent</td><td class="num">AED {{ totals.rent_vat|floatformat:"2g" }}
+        {% if statement.pay_vat_to_owner %}<small>(paid to owner)</small>{% else %}<small>(kept by us)</small>{% endif %}</td></tr>
+      <tr><td>Less management fee</td><td class="num">- AED {{ totals.fee|floatformat:"2g" }}</td></tr>
+      <tr><td>Less VAT on fee</td><td class="num">- AED {{ totals.fee_vat|floatformat:"2g" }}</td></tr>
+      <tr><td>Less expenses</td><td class="num">- AED {{ totals.expenses|floatformat:"2g" }}</td></tr>
+      {% if totals.brought_forward %}
+      <tr><td>Balance brought forward</td><td class="num">AED {{ totals.brought_forward|floatformat:"2g" }}</td></tr>
+      {% endif %}
+      <tr class="os-total"><td>To pay the owner</td><td class="num">AED {{ totals.net_payout|floatformat:"2g" }}</td></tr>
+    </table>
+
+    <div class="os-buttons">
+      {% if can_change %}
+        {% if statement.status == "draft" %}
+          <form method="post" action="{% url 'admin:realestate_ownerstatement_action' statement.pk 'recalculate' %}">{% csrf_token %}
+            <button type="submit" class="button">Recalculate</button></form>
+          <form method="post" action="{% url 'admin:realestate_ownerstatement_action' statement.pk 'approve' %}"
+                onsubmit="return confirm('Approve this statement? It will be locked.');">{% csrf_token %}
+            <button type="submit" class="default">Approve</button></form>
+        {% elif statement.status == "approved" %}
+          <form method="post" action="{% url 'admin:realestate_ownerstatement_action' statement.pk 'reopen' %}"
+                onsubmit="return confirm('Reopen this statement as a draft?');">{% csrf_token %}
+            <button type="submit" class="button">Reopen</button></form>
+          {% if totals.net_payout > 0 %}
+          <form method="post" class="pay-form" action="{% url 'admin:realestate_ownerstatement_action' statement.pk 'pay' %}">{% csrf_token %}
+            <label>Paid on <input type="date" name="paid_on" value="{{ today }}" required></label>
+            <label>How
+              <select name="pay_method">
+                {% for value, label in pay_methods %}<option value="{{ value }}">{{ label }}</option>{% endfor %}
+              </select></label>
+            <label>Reference <input type="text" name="pay_reference" maxlength="100" placeholder="transfer ref / cheque no."></label>
+            <button type="submit" class="default">Mark as paid</button>
+          </form>
+          {% else %}
+            <p>Nothing to pay on this statement. The balance carries into the owner's next statement.</p>
+          {% endif %}
+        {% else %}
+          <p class="os-ok">Paid on {{ statement.paid_on|date:"d M Y" }} by {{ statement.get_pay_method_display }}
+            {% if statement.pay_reference %}({{ statement.pay_reference }}){% endif %}.</p>
+        {% endif %}
+      {% endif %}
+      <p><a href="{% url 'admin:realestate_ownerstatement_print' statement.pk %}" target="_blank">Open printable statement</a>
+        <small>(then choose Print, and "Save as PDF" if you want a PDF)</small></p>
+    </div>
+  </div>
+</div>
+{% endif %}
+{{ block.super }}
+{% endblock %}
