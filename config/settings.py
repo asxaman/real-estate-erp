@@ -70,4 +70,9 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 
+# Uploaded documents (Emirates ID scans, contracts...) are saved in this folder.
+# It is listed in .gitignore, so these files never go to GitHub.
+MEDIA_URL = "media/"
+MEDIA_ROOT = BASE_DIR / "media"
+
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"

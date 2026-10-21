@@ -10,6 +10,9 @@ venv/
 db.sqlite3
 .env
 
+# Uploaded documents: Emirates IDs, passports, contracts... NEVER upload these
+media/
+
 # Editor
 .vscode/
 .idea/

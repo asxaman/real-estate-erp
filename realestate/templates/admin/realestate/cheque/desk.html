@@ -1,0 +1,156 @@
+{% extends "admin/base_site.html" %}
+
+{% block extrastyle %}
+{{ block.super }}
+<style>
+  .desk-date { margin: 0 0 14px; font-size: 14px; }
+  .tiles { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 26px; }
+  .tile {
+    display: flex; flex-direction: column; min-width: 150px; padding: 10px 14px;
+    border: 1px solid var(--border-color, #ccc); border-left-width: 6px;
+    border-radius: 6px; background: var(--body-bg, #fff); color: var(--body-fg, #333);
+    text-decoration: none;
+  }
+  .tile:hover { text-decoration: none; background: var(--darkened-bg, #f8f8f8); }
+  .tile-count { font-size: 26px; font-weight: 700; line-height: 1.1; }
+  .tile-title { font-size: 12px; text-transform: uppercase; letter-spacing: .03em; opacity: .8; }
+  .tile-total { font-size: 12px; margin-top: 2px; opacity: .8; }
+
+  .tone-danger { border-left-color: #c62828; }
+  .tone-warn { border-left-color: #ef6c00; }
+  .tone-primary { border-left-color: #1565c0; }
+  .tone-info { border-left-color: #00838f; }
+  .tone-good { border-left-color: #2e7d32; }
+  .tone-muted { border-left-color: #9e9e9e; }
+
+  .desk-section { margin-bottom: 30px; }
+  .desk-section h2 {
+    margin: 0 0 4px; padding: 6px 10px; font-size: 15px; font-weight: 700;
+    border-left: 6px solid #9e9e9e; background: var(--darkened-bg, #f3f3f3);
+    color: var(--body-fg, #333); text-transform: none;
+  }
+  .desk-section h2.tone-danger { border-left-color: #c62828; }
+  .desk-section h2.tone-warn { border-left-color: #ef6c00; }
+  .desk-section h2.tone-primary { border-left-color: #1565c0; }
+  .desk-section h2.tone-info { border-left-color: #00838f; }
+  .desk-section h2.tone-good { border-left-color: #2e7d32; }
+  .pill {
+    display: inline-block; margin-left: 6px; padding: 0 8px; border-radius: 10px;
+    background: #616161; color: #fff; font-size: 12px;
+  }
+  .desk-note { margin: 4px 0 8px; font-size: 12px; opacity: .8; }
+  .desk-empty { margin: 6px 0; font-size: 13px; opacity: .7; }
+  .desk-section table { width: 100%; }
+  .desk-section td.num, .desk-section th.num { text-align: right; white-space: nowrap; }
+  .desk-section td.actions { white-space: nowrap; }
+  .desk-section td.actions form { display: inline-block; margin: 0 4px 2px 0; }
+  .desk-section td.actions select { max-width: 150px; }
+  .btn-good { background: #2e7d32; color: #fff; }
+  .btn-bad { background: #c62828; color: #fff; }
+  .btn-main { background: #1565c0; color: #fff; }
+  .btn-good, .btn-bad, .btn-main { border: 0; border-radius: 4px; padding: 5px 10px; cursor: pointer; }
+</style>
+{% endblock %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+  <a href="{% url 'admin:index' %}">Home</a>
+  &rsaquo; <a href="{% url 'admin:app_list' app_label='realestate' %}">Property Management</a>
+  &rsaquo; <a href="{% url 'admin:realestate_cheque_changelist' %}">Cheques</a>
+  &rsaquo; Daily cheque desk
+</div>
+{% endblock %}
+
+{% block content %}
+<div id="content-main">
+  <p class="desk-date">Today is <strong>{{ today|date:"l, j F Y" }}</strong>.
+    <a href="{% url 'admin:realestate_cheque_changelist' %}">See all cheques</a>
+    &middot; <a href="{% url 'admin:realestate_cheque_add' %}">Add a cheque</a>
+  </p>
+
+  <div class="tiles">
+    {% for s in sections %}
+      <a class="tile tone-{{ s.tone }}" href="#sec-{{ s.key }}">
+        <span class="tile-count">{{ s.count }}{% if s.capped %}+{% endif %}</span>
+        <span class="tile-title">{{ s.short }}</span>
+        <span class="tile-total">AED {{ s.total|floatformat:"2g" }}</span>
+      </a>
+    {% endfor %}
+  </div>
+
+  {% for s in sections %}
+    <section class="desk-section" id="sec-{{ s.key }}">
+      <h2 class="tone-{{ s.tone }}">{{ s.title }} <span class="pill">{{ s.count }}</span></h2>
+      <p class="desk-note">{{ s.note }}</p>
+
+      {% if s.cheques %}
+        <table>
+          <thead>
+            <tr>
+              <th>Cheque date</th>
+              <th>Tenant</th>
+              <th>Unit</th>
+              <th>Cheque / bank</th>
+              <th>For</th>
+              <th class="num">Amount (AED)</th>
+              <th>What to do</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for c in s.cheques %}
+              <tr>
+                <td>{{ c.cheque_date|date:"d M Y" }}</td>
+                <td>{{ c.lease.tenant }}</td>
+                <td>{{ c.lease.unit }}</td>
+                <td>
+                  {% if c.cheque_number %}{{ c.cheque_number }}{% else %}<em>no number yet</em>{% endif %}
+                  {% if c.bank_name %}<br><small>{{ c.bank_name }}</small>{% endif %}
+                </td>
+                <td>
+                  {{ c.get_purpose_display }}{% if c.installment_no %} #{{ c.installment_no }}{% endif %}
+                  {% if c.status == "returned" %}<br><small>{{ c.get_return_reason_display }}</small>{% endif %}
+                </td>
+                <td class="num">{{ c.amount|floatformat:"2g" }}</td>
+                <td class="actions">
+                  {% if can_change %}
+                    {% if c.status == "received" %}
+                      <form method="post" action="{% url 'admin:realestate_cheque_workflow' c.pk %}">
+                        {% csrf_token %}<input type="hidden" name="next" value="{{ request.get_full_path }}">
+                        <button type="submit" name="action" value="deposit" class="btn-main">Deposit</button>
+                        <button type="submit" name="action" value="clear" class="btn-good">Cleared</button>
+                      </form>
+                    {% elif c.status == "deposited" %}
+                      <form method="post" action="{% url 'admin:realestate_cheque_workflow' c.pk %}">
+                        {% csrf_token %}<input type="hidden" name="next" value="{{ request.get_full_path }}">
+                        <button type="submit" name="action" value="clear" class="btn-good">Cleared</button>
+                      </form>
+                      <form method="post" action="{% url 'admin:realestate_cheque_workflow' c.pk %}">
+                        {% csrf_token %}<input type="hidden" name="next" value="{{ request.get_full_path }}">
+                        <select name="reason" aria-label="Why was it returned?">
+                          {% for value, label in return_reasons %}
+                            <option value="{{ value }}">{{ label }}</option>
+                          {% endfor %}
+                        </select>
+                        <button type="submit" name="action" value="return" class="btn-bad">Bounced</button>
+                      </form>
+                    {% elif c.status == "returned" %}
+                      <form method="post" action="{% url 'admin:realestate_cheque_workflow' c.pk %}">
+                        {% csrf_token %}<input type="hidden" name="next" value="{{ request.get_full_path }}">
+                        <button type="submit" name="action" value="replace" class="btn-main">Create replacement</button>
+                      </form>
+                    {% endif %}
+                  {% endif %}
+                  <a href="{% url 'admin:realestate_cheque_change' c.pk %}">Open</a>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% if s.capped %}<p class="desk-note">Showing the first {{ s.count }} cheques only.</p>{% endif %}
+      {% else %}
+        <p class="desk-empty">Nothing here.</p>
+      {% endif %}
+    </section>
+  {% endfor %}
+</div>
+{% endblock %}
