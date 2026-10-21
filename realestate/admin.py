@@ -3,6 +3,8 @@ from decimal import Decimal
 
 from django import forms
 from django.contrib import admin, messages
+from django.contrib.admin.models import CHANGE, LogEntry
+from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db.models import Count, Q
 from django.http import HttpResponseNotAllowed, HttpResponseRedirect
@@ -19,17 +21,36 @@ from unfold.admin import TabularInline as UnfoldTabularInline
 from .models import (
     Cheque,
     ChequeEvent,
+    CompanySettings,
     Lease,
     LeaseDocument,
     Owner,
     OwnerDocument,
     Property,
     PropertyDocument,
+    PropertyOwnership,
     Tenant,
     TenantDocument,
     Unit,
 )
 from .utils import add_months
+
+
+def log_change(request, obj, message):
+    """Write a line into the object's History page (who did what, and when)."""
+    LogEntry.objects.log_action(
+        user_id=request.user.pk,
+        content_type_id=ContentType.objects.get_for_model(obj).pk,
+        object_id=obj.pk,
+        object_repr=str(obj)[:200],
+        action_flag=CHANGE,
+        change_message=message,
+    )
+
+
+def can_see_owner_private(request):
+    """May this user see owners' bank, ID and KYC details?"""
+    return request.user.has_perm("realestate.view_owner_private")
 
 admin.site.site_header = "Real Estate ERP"
 admin.site.site_title = "Real Estate ERP"
@@ -44,6 +65,7 @@ UNIT_STATUS_COLORS = {
     "vacant": "#2e7d32",
     "reserved": "#ef6c00",
     "occupied": "#1565c0",
+    "holdover": "#c62828",
     "maintenance": "#8d6e63",
 }
 
@@ -259,6 +281,61 @@ class OwnerAdmin(UnfoldModelAdmin):
     def compliance_check(self, obj):
         return compliance_report(obj)
 
+    # --- privacy: only users with "view_owner_private" see IDs and bank details
+
+    PRIVATE_SECTIONS = ("Identification", "KYC review")
+
+    def get_fieldsets(self, request, obj=None):
+        fieldsets = super().get_fieldsets(request, obj)
+        if can_see_owner_private(request):
+            return fieldsets
+        shown = []
+        for name, options in fieldsets:
+            if name in self.PRIVATE_SECTIONS:
+                continue
+            if name == "Banking & management fee":
+                shown.append(("Management fee", {"fields": ("management_fee_percent",)}))
+                continue
+            shown.append((name, options))
+        return shown
+
+    def get_inlines(self, request, obj):
+        return super().get_inlines(request, obj) if can_see_owner_private(request) else []
+
+    def get_list_display(self, request):
+        columns = super().get_list_display(request)
+        if can_see_owner_private(request):
+            return columns
+        return [c for c in columns if c not in ("kyc_status", "documents_check")]
+
+    def get_list_filter(self, request):
+        filters = super().get_list_filter(request)
+        if can_see_owner_private(request):
+            return filters
+        return [f for f in filters if f not in ("kyc_status", DocumentExpiryFilter)]
+
+    def get_search_fields(self, request):
+        if can_see_owner_private(request):
+            return super().get_search_fields(request)
+        return ("name", "email", "phone")
+
+    def has_add_permission(self, request):
+        # A new owner needs an Emirates ID / passport / licence, so only people
+        # who may handle those can add one.
+        return super().has_add_permission(request) and can_see_owner_private(request)
+
+    def get_form(self, request, obj=None, change=False, **kwargs):
+        form = super().get_form(request, obj, change=change, **kwargs)
+        if can_see_owner_private(request):
+            return form
+
+        class LimitedOwnerForm(form):
+            def __init__(self, *args, **kw):
+                super().__init__(*args, **kw)
+                self.instance._skip_identity_checks = True
+
+        return LimitedOwnerForm
+
 
 # ---------------------------------------------------------------------------
 # Properties and units
@@ -286,6 +363,17 @@ class UnitInline(UnfoldTabularInline):
         if obj is None or not obj.pk:
             return "-"
         return status_badge(obj.get_status())
+
+
+class PropertyOwnershipInline(UnfoldTabularInline):
+    """Who owned this property before. Filled in automatically when you change
+    the owner; correct the dates here if needed."""
+
+    model = PropertyOwnership
+    extra = 0
+    fields = ("owner", "from_date", "to_date")
+    autocomplete_fields = ("owner",)
+    verbose_name_plural = "Previous owners (rent before the change goes to them)"
 
 
 @admin.register(Property)
@@ -319,7 +407,7 @@ class PropertyAdmin(UnfoldModelAdmin):
         "owner__name",
     )
     autocomplete_fields = ("owner",)
-    inlines = [UnitInline, PropertyDocumentInline]
+    inlines = [UnitInline, PropertyOwnershipInline, PropertyDocumentInline]
     fieldsets = (
         (
             "Property details",
@@ -578,22 +666,27 @@ class TenantAdmin(UnfoldModelAdmin):
 
 
 class ChequeInline(UnfoldTabularInline):
-    """The cheques given for this lease, entered right on the contract."""
+    """The payments (cheques, cash, card, transfers) for this lease."""
 
     model = Cheque
     fk_name = "lease"
     extra = 0
+    can_delete = False  # payments are cancelled, never deleted
     fields = (
         "purpose",
+        "method",
         "installment_no",
         "cheque_number",
         "bank_name",
+        "reference",
         "cheque_date",
         "amount",
         "status",
+        "return_reason",
     )
     show_change_link = True
     ordering = ("cheque_date", "id")
+    verbose_name_plural = "Payments & cheques for this lease"
 
 
 class ExpiryFilter(admin.SimpleListFilter):
@@ -625,17 +718,55 @@ class ExpiryFilter(admin.SimpleListFilter):
 class LeaseAdminForm(forms.ModelForm):
     create_cheque_schedule = forms.BooleanField(
         required=False,
-        label="Create the cheque schedule automatically",
+        label="Create the payment schedule automatically",
         help_text=(
-            "Tick to add one empty 'Expected' rent cheque for every installment, "
+            "Tick to add one empty 'Expected' rent payment for every installment, "
             "with the right dates and amounts. Fill in the cheque numbers later. "
-            "Ignored if the lease already has rent cheques."
+            "Ignored if the lease already has rent payments."
         ),
     )
 
     class Meta:
         model = Lease
         fields = "__all__"
+
+
+class TerminateForm(forms.Form):
+    """The 'Terminate early' page. Follows how UAE tenancy exits normally work."""
+
+    notice_given_on = forms.DateField(
+        required=False,
+        label="Written notice given on",
+        widget=forms.DateInput(attrs={"type": "date"}),
+        help_text="The date the tenant (or landlord) gave formal written notice.",
+    )
+    notice_days = forms.IntegerField(
+        min_value=0,
+        max_value=365,
+        required=False,
+        label="Notice period (days)",
+        help_text="Usually 60 to 90 days in the contract. Rent is payable through it.",
+    )
+    exit_date = forms.DateField(
+        label="Last day of the tenancy (exit date)",
+        widget=forms.DateInput(attrs={"type": "date"}),
+    )
+    by_mutual_agreement = forms.BooleanField(
+        required=False,
+        label="Agreed with the tenant (mutual agreement)",
+        help_text="Tick if both sides agreed an exit date, even if it is shorter than "
+        "the notice period.",
+    )
+    penalty = forms.DecimalField(
+        min_value=0,
+        max_digits=12,
+        decimal_places=2,
+        initial=0,
+        label="Early-exit penalty (AED)",
+        help_text="From the contract's early-termination clause (usually 1 to 2 months "
+        "of rent). Enter 0 if there is none. It is NOT taken from the deposit.",
+    )
+    reason = forms.CharField(max_length=255, required=False, label="Reason (for the record)")
 
 
 @admin.register(Lease)
@@ -661,9 +792,8 @@ class LeaseAdmin(UnfoldModelAdmin):
         "contract_number",
     )
     autocomplete_fields = ("tenant", "unit", "renewal_of")
-    readonly_fields = ("financial_summary",)
     inlines = [ChequeInline, LeaseDocumentInline]
-    actions = ["mark_expired", "generate_schedule", "create_renewal"]
+    actions = ["mark_expired", "generate_schedule", "rebuild_unreceived", "create_renewal"]
     fieldsets = (
         (
             "Who and what",
@@ -678,7 +808,14 @@ class LeaseAdmin(UnfoldModelAdmin):
                 )
             },
         ),
-        ("Period", {"fields": ("start_date", "end_date")}),
+        (
+            "Period",
+            {
+                "description": "Any length works: 6 months, 18 months, 3 years... "
+                "The rent below is a yearly figure and is pro-rated to the lease length.",
+                "fields": ("start_date", "end_date"),
+            },
+        ),
         (
             "Rent & fees",
             {
@@ -686,7 +823,7 @@ class LeaseAdmin(UnfoldModelAdmin):
                     "annual_rent",
                     "vat_percent",
                     "number_of_payments",
-                    "security_deposit",
+                    "payment_method",
                     "agency_commission",
                     "registration_fee",
                     "financial_summary",
@@ -694,8 +831,35 @@ class LeaseAdmin(UnfoldModelAdmin):
                 )
             },
         ),
-        ("Status & notes", {"fields": ("status", "notes")}),
+        (
+            "Security deposit",
+            {
+                "description": "Record the deposit itself as a payment with purpose "
+                "'Security deposit'. Refunding is done with the button below.",
+                "fields": (
+                    "security_deposit",
+                    "deposit_carried_over",
+                    "handover_date",
+                    "deposit_deductions",
+                    "deposit_deduction_notes",
+                    "deposit_panel",
+                ),
+            },
+        ),
+        ("Ending the lease", {"fields": ("status", "ending_panel")}),
+        ("Notes", {"fields": ("notes",)}),
     )
+
+    def get_readonly_fields(self, request, obj=None):
+        fixed = ["financial_summary", "deposit_panel", "ending_panel", "status"]
+        if obj is not None and obj.deposit_refunded_on:
+            fixed += [
+                "deposit_carried_over",
+                "handover_date",
+                "deposit_deductions",
+                "deposit_deduction_notes",
+            ]
+        return fixed
 
     def get_queryset(self, request):
         return super().get_queryset(request).prefetch_related("cheques")
@@ -713,34 +877,51 @@ class LeaseAdmin(UnfoldModelAdmin):
         days = (obj.end_date - timezone.localdate()).days
         return "Overdue" if days < 0 else days
 
-    @admin.display(description="Cheques")
+    @admin.display(description="Payments")
     def cheque_progress(self, obj):
         S = Cheque.Status
-        live = [c for c in obj.cheques.all() if c.status not in (S.CANCELLED, S.REPLACED)]
+        live = [
+            c
+            for c in obj.cheques.all()
+            if c.status not in (S.CANCELLED, S.REPLACED) and c.purpose == Cheque.Purpose.RENT
+        ]
         if not live:
             return "-"
         cleared = sum(1 for c in live if c.status == S.CLEARED)
         bounced = sum(1 for c in live if c.status == S.RETURNED)
-        text = f"{cleared} of {len(live)} cleared"
+        text = f"{cleared} of {len(live)} paid"
         if bounced:
             return format_html(
                 '{} <strong style="color:#c62828;">- {} bounced</strong>', text, bounced
             )
         return text
 
-    @admin.display(description="Cheque summary")
+    # --- panels on the lease page -----------------------------------------
+
+    def _action_button(self, obj, action, label, confirm):
+        # A submit button that posts to our page. (Forms cannot be nested.)
+        return format_html(
+            '<button type="submit" formmethod="post" formnovalidate '
+            'formaction="{}" class="button" style="margin:2px 8px 2px 0;" '
+            "onclick=\"return confirm('{}');\">{}</button>",
+            reverse("admin:realestate_lease_do", args=[obj.pk, action]),
+            confirm,
+            label,
+        )
+
+    @admin.display(description="Rent summary")
     def financial_summary(self, obj):
         if obj is None or not obj.pk:
             return "Save the lease to see the totals."
         totals = obj.cheque_totals()
-        gap = max(obj.contract_total - totals["scheduled"], Decimal("0"))
+        gap = obj.schedule_gap()
         rows = [
-            ("Contract total (rent + VAT)", obj.contract_total),
-            ("Rent cheques recorded", totals["scheduled"]),
-            ("Cleared (cashed)", totals["cleared"]),
+            (f"Contract total for {obj.term_months} months (rent + VAT)", obj.contract_total),
+            ("Rent payments recorded", totals["scheduled"]),
+            ("Paid (cleared)", totals["cleared"]),
             ("Deposited, waiting to clear", totals["deposited"]),
             ("Bounced, not yet replaced", totals["returned"]),
-            ("Not yet covered by a cheque", gap),
+            ("Not yet covered by a payment" if gap >= 0 else "Recorded MORE than the contract", abs(gap)),
         ]
         body = format_html_join(
             "",
@@ -748,38 +929,315 @@ class LeaseAdmin(UnfoldModelAdmin):
             '<td style="text-align:right;"><strong>{}</strong></td></tr>',
             ((label, aed(value)) for label, value in rows),
         )
-        return format_html("<table>{}</table>", body)
+        extra = ""
+        if totals["scheduled"] and gap != 0 and obj.status == Lease.Status.ACTIVE:
+            extra = format_html(
+                '<p style="color:#c62828;margin:8px 0 0;"><strong>The rent payments do not '
+                "match the contract total.</strong> If you changed the rent or the dates, "
+                "rebuild the payments that are not received yet: {}</p>",
+                self._action_button(
+                    obj,
+                    "rebuild",
+                    "Rebuild unreceived payments",
+                    "Delete the expected (not received) rent payments and recreate them "
+                    "from the current rent and dates?",
+                ),
+            )
+        return format_html("<table>{}</table>{}", body, extra)
+
+    @admin.display(description="Deposit")
+    def deposit_panel(self, obj):
+        if obj is None or not obj.pk:
+            return "Save the lease first."
+        rows = [
+            ("Deposit held", obj.deposit_received()),
+            ("Deductions (damage / utilities only)", obj.deposit_deductions or 0),
+            ("To refund to the tenant", obj.deposit_refundable()),
+        ]
+        body = format_html_join(
+            "",
+            '<tr><td style="padding:2px 18px 2px 0;">{}</td>'
+            '<td style="text-align:right;"><strong>{}</strong></td></tr>',
+            ((label, aed(value)) for label, value in rows),
+        )
+        if obj.deposit_refunded_on:
+            note = format_html(
+                '<p style="color:#2e7d32;"><strong>Refunded {} on {}.</strong></p>',
+                aed(obj.deposit_refund_amount or 0),
+                obj.deposit_refunded_on.strftime("%d %b %Y"),
+            )
+        elif obj.status == Lease.Status.ACTIVE:
+            note = format_html("<p>The deposit is refunded after the lease ends.</p>")
+        else:
+            problems = obj.deposit_refund_problems()
+            if problems:
+                items = format_html_join("", "<li>{}</li>", ((p,) for p in problems))
+                note = format_html(
+                    '<p style="margin:8px 0 2px;"><strong>Not ready to refund:</strong></p>'
+                    '<ul style="margin:0;padding-left:18px;">{}</ul>',
+                    items,
+                )
+            else:
+                note = self._action_button(
+                    obj,
+                    "refund",
+                    "Record deposit refund",
+                    "Record that the deposit was refunded to the tenant? Save any "
+                    "changes to this form first.",
+                )
+        return format_html("<table>{}</table>{}", body, note)
+
+    @admin.display(description="Lease ending")
+    def ending_panel(self, obj):
+        if obj is None or not obj.pk:
+            return "Save the lease first."
+        if obj.status == Lease.Status.ACTIVE:
+            parts = [
+                format_html(
+                    '<a class="button" style="margin:2px 8px 2px 0;" href="{}">Terminate early...</a>',
+                    reverse("admin:realestate_lease_terminate", args=[obj.pk]),
+                )
+            ]
+            if obj.end_date < timezone.localdate():
+                parts.append(
+                    self._action_button(
+                        obj,
+                        "expire",
+                        "Mark as expired",
+                        "The lease has ended. Mark it as expired? Save any changes first.",
+                    )
+                )
+            return format_html_join("", "{}", ((p,) for p in parts))
+        if obj.status == Lease.Status.EXPIRED:
+            return "This lease ended on its end date."
+        lines = [
+            f"Terminated early. Last day of the tenancy: {obj.exit_date:%d %b %Y}."
+            if obj.exit_date
+            else "Terminated early.",
+        ]
+        if obj.by_mutual_agreement:
+            lines.append("Agreed with the tenant (mutual agreement).")
+        elif obj.notice_given_on:
+            lines.append(
+                f"Notice given {obj.notice_given_on:%d %b %Y}, {obj.notice_days or 0} days."
+            )
+        if obj.termination_penalty:
+            lines.append(
+                f"Penalty {aed(obj.termination_penalty)} "
+                f"(collected so far: {aed(obj.penalty_collected())})."
+            )
+        if obj.termination_reason:
+            lines.append(f"Reason: {obj.termination_reason}")
+        return format_html_join("", "<div>{}</div>", ((line,) for line in lines))
 
     # --- saving ------------------------------------------------------------
 
+    def save_model(self, request, obj, form, change):
+        super().save_model(request, obj, form, change)
+        state = obj.tenant.compliance_state
+        if state in ("expired", "missing"):
+            self.message_user(
+                request,
+                f"Warning: {obj.tenant.name} has expired or incomplete papers "
+                f"({'; '.join(m for _, m in obj.tenant.compliance_issues())}). "
+                "Ask for updated documents.",
+                messages.WARNING,
+            )
+        elif obj.tenant.kyc_status != "verified":
+            self.message_user(
+                request,
+                f"Note: {obj.tenant.name} is not marked KYC verified yet.",
+                messages.WARNING,
+            )
+
     def save_related(self, request, form, formsets, change):
         super().save_related(request, form, formsets, change)
+        lease = form.instance
         if form.cleaned_data.get("create_cheque_schedule"):
-            created = form.instance.generate_cheque_schedule()
+            created = lease.generate_cheque_schedule()
             if created:
                 self.message_user(
                     request,
-                    f"{created} expected rent cheques were created. "
+                    f"{created} expected rent payments were created. "
                     "Open the lease to fill in the cheque numbers.",
                     messages.SUCCESS,
                 )
             else:
                 self.message_user(
                     request,
-                    "No schedule was created because this lease already has rent cheques.",
+                    "No schedule was created because this lease already has rent payments.",
+                    messages.WARNING,
+                )
+        elif lease.status == Lease.Status.ACTIVE and lease.cheque_totals()["scheduled"]:
+            gap = lease.schedule_gap()
+            if gap != 0:
+                word = "less" if gap > 0 else "more"
+                self.message_user(
+                    request,
+                    f"The rent payments on file are {aed(abs(gap))} {word} than the "
+                    f"contract total of {aed(lease.contract_total)}. Use 'Rebuild "
+                    "unreceived payments' if the rent or the dates changed.",
                     messages.WARNING,
                 )
 
+    # --- our own pages -----------------------------------------------------
+
+    def get_urls(self):
+        custom = [
+            path(
+                "<int:pk>/terminate/",
+                self.admin_site.admin_view(self.terminate_view),
+                name="realestate_lease_terminate",
+            ),
+            path(
+                "<int:pk>/do/<str:action>/",
+                self.admin_site.admin_view(self.action_view),
+                name="realestate_lease_do",
+            ),
+        ]
+        return custom + super().get_urls()
+
+    def _back(self, lease):
+        return HttpResponseRedirect(reverse("admin:realestate_lease_change", args=[lease.pk]))
+
+    def action_view(self, request, pk, action):
+        if request.method != "POST":
+            return HttpResponseNotAllowed(["POST"])
+        lease = get_object_or_404(Lease, pk=pk)
+        if not self.has_change_permission(request, lease):
+            raise PermissionDenied
+        try:
+            if action == "expire":
+                unpaid = lease.mark_expired(user=request.user)
+                log_change(request, lease, "Marked as expired.")
+                messages.success(request, "The lease was marked as expired.")
+                if unpaid:
+                    messages.warning(
+                        request,
+                        f"{unpaid} payment(s) for this lease are still unpaid. They stay on "
+                        "the cheque desk until collected or cancelled.",
+                    )
+            elif action == "rebuild":
+                removed, created = lease.rebuild_schedule()
+                log_change(request, lease, f"Payment schedule rebuilt ({removed} removed, {created} created).")
+                messages.success(
+                    request,
+                    f"Rebuilt: {removed} expected payment(s) removed, {created} created.",
+                )
+            elif action == "refund":
+                amount = lease.refund_deposit(user=request.user)
+                log_change(request, lease, f"Deposit refund recorded: AED {amount}.")
+                messages.success(request, f"Deposit refund of {aed(amount)} recorded.")
+            else:
+                messages.error(request, "Unknown action.")
+        except ValidationError as error:
+            messages.error(request, " ".join(error.messages))
+        return self._back(lease)
+
+    def terminate_view(self, request, pk):
+        lease = get_object_or_404(Lease.objects.select_related("tenant", "unit__property"), pk=pk)
+        if not self.has_change_permission(request, lease):
+            raise PermissionDenied
+        if lease.status != Lease.Status.ACTIVE:
+            messages.error(request, "Only an active lease can be terminated.")
+            return self._back(lease)
+
+        settings_ = CompanySettings.load()
+        suggested_penalty = (lease.monthly_rent * settings_.penalty_months).quantize(Decimal("0.01"))
+        if request.method == "POST":
+            form = TerminateForm(request.POST)
+            if form.is_valid():
+                data = form.cleaned_data
+                try:
+                    summary = lease.terminate(
+                        exit_date=data["exit_date"],
+                        notice_given_on=data["notice_given_on"],
+                        notice_days=data["notice_days"],
+                        penalty=data["penalty"],
+                        reason=data["reason"],
+                        by_mutual_agreement=data["by_mutual_agreement"],
+                        user=request.user,
+                    )
+                except ValidationError as error:
+                    form.add_error(None, error)
+                else:
+                    log_change(
+                        request,
+                        lease,
+                        f"Terminated early, exit {data['exit_date']:%d %b %Y}. "
+                        f"Penalty AED {data['penalty']}.",
+                    )
+                    messages.success(
+                        request,
+                        f"Lease terminated. Last day of the tenancy: {data['exit_date']:%d %b %Y}.",
+                    )
+                    if summary["cancelled"]:
+                        messages.info(
+                            request,
+                            f"{summary['cancelled']} expected payment(s) after the exit date were cancelled.",
+                        )
+                    if summary["returned_to_tenant"]:
+                        messages.warning(
+                            request,
+                            f"{summary['returned_to_tenant']} uncashed cheque(s) dated after the "
+                            "exit must be handed back to the tenant. See the lease's payments.",
+                        )
+                    if summary["prorated"]:
+                        messages.info(
+                            request,
+                            "The rent payment covering the exit date was reduced to the days used.",
+                        )
+                    if summary["needs_review"]:
+                        messages.warning(
+                            request,
+                            f"{summary['needs_review']} payment(s) already deposited or cleared cover "
+                            "time after the exit date. Check them and refund any overpayment.",
+                        )
+                    if summary["penalty_payment"]:
+                        messages.info(
+                            request,
+                            "A payment for the penalty was added. Collect it like any other payment.",
+                        )
+                    return self._back(lease)
+        else:
+            form = TerminateForm(
+                initial={
+                    "notice_given_on": timezone.localdate(),
+                    "notice_days": settings_.default_notice_days,
+                    "exit_date": timezone.localdate() + timedelta(days=settings_.default_notice_days),
+                    "penalty": suggested_penalty,
+                }
+            )
+        context = {
+            **self.admin_site.each_context(request),
+            "title": "Terminate lease early",
+            "opts": self.model._meta,
+            "lease": lease,
+            "form": form,
+            "suggested_penalty": suggested_penalty,
+            "penalty_months": settings_.penalty_months,
+        }
+        return TemplateResponse(request, "admin/realestate/lease/terminate.html", context)
+
     # --- actions -----------------------------------------------------------
 
-    @admin.action(description="Mark selected active leases as expired")
+    @admin.action(description="Mark selected ended leases as expired")
     def mark_expired(self, request, queryset):
-        updated = queryset.filter(status=Lease.Status.ACTIVE).update(
-            status=Lease.Status.EXPIRED
-        )
-        self.message_user(request, f"{updated} lease(s) marked as expired.")
+        done = 0
+        problems = []
+        for lease in queryset:
+            try:
+                lease.mark_expired(user=request.user)
+                log_change(request, lease, "Marked as expired.")
+                done += 1
+            except ValidationError as error:
+                problems.append(f"{lease}: {' '.join(error.messages)}")
+        if done:
+            self.message_user(request, f"{done} lease(s) marked as expired.", messages.SUCCESS)
+        for line in problems:
+            self.message_user(request, f"Skipped - {line}", messages.WARNING)
 
-    @admin.action(description="Create the cheque schedule for selected leases")
+    @admin.action(description="Create the payment schedule for selected leases")
     def generate_schedule(self, request, queryset):
         made = skipped = 0
         for lease in queryset:
@@ -789,22 +1247,36 @@ class LeaseAdmin(UnfoldModelAdmin):
                 skipped += 1
         if made:
             self.message_user(
-                request, f"Cheque schedules created for {made} lease(s).", messages.SUCCESS
+                request, f"Payment schedules created for {made} lease(s).", messages.SUCCESS
             )
         if skipped:
             self.message_user(
                 request,
-                f"{skipped} lease(s) skipped because they already have rent cheques.",
+                f"{skipped} lease(s) skipped because they already have rent payments.",
                 messages.WARNING,
             )
 
-    @admin.action(description="Create a renewal (next year) for selected leases")
+    @admin.action(description="Rebuild the expected (not received) payments of selected leases")
+    def rebuild_unreceived(self, request, queryset):
+        done = 0
+        for lease in queryset:
+            try:
+                lease.rebuild_schedule()
+                log_change(request, lease, "Payment schedule rebuilt.")
+                done += 1
+            except ValidationError as error:
+                self.message_user(request, f"{lease}: {' '.join(error.messages)}", messages.WARNING)
+        if done:
+            self.message_user(request, f"{done} lease(s) rebuilt.", messages.SUCCESS)
+
+    @admin.action(description="Create a renewal for selected leases (same length)")
     def create_renewal(self, request, queryset):
         created = skipped = 0
         for old in queryset.filter(status=Lease.Status.ACTIVE):
             if old.renewals.exists():
                 skipped += 1
                 continue
+            start = old.end_date + timedelta(days=1)
             new = Lease(
                 tenant=old.tenant,
                 unit=old.unit,
@@ -812,12 +1284,15 @@ class LeaseAdmin(UnfoldModelAdmin):
                 ejari_number="",
                 usage=old.usage,
                 renewal_of=old,
-                start_date=old.end_date + timedelta(days=1),
-                end_date=add_months(old.end_date, 12),
+                start_date=start,
+                end_date=add_months(start, old.term_months) - timedelta(days=1),
                 annual_rent=old.annual_rent,
                 vat_percent=old.vat_percent,
+                # The tenant's existing deposit stays with us: it is not new money.
                 security_deposit=old.security_deposit,
+                deposit_carried_over=old.deposit_received() > 0,
                 number_of_payments=old.number_of_payments,
+                payment_method=old.payment_method,
                 status=Lease.Status.ACTIVE,
             )
             try:
@@ -831,7 +1306,8 @@ class LeaseAdmin(UnfoldModelAdmin):
             self.message_user(
                 request,
                 f"{created} renewal(s) created. Open each one to update the rent, "
-                "the Ejari number and the cheques.",
+                "the Ejari number and the payments. The existing deposit is carried "
+                "over, not counted again.",
                 messages.SUCCESS,
             )
         if skipped:
@@ -899,10 +1375,16 @@ class ChequeEventInline(UnfoldTabularInline):
 @admin.register(Cheque)
 class ChequeAdmin(UnfoldModelAdmin):
     date_hierarchy = "cheque_date"
+    conditional_fields = {
+        "cheque_number": "method == 'cheque'",
+        "bank_name": "method == 'cheque'",
+        "drawer_name": "method == 'cheque'",
+    }
     list_display = (
         "cheque_date",
         "tenant_name",
         "unit_label",
+        "method",
         "cheque_number",
         "bank_name",
         "amount_aed",
@@ -912,6 +1394,7 @@ class ChequeAdmin(UnfoldModelAdmin):
     list_filter = (
         "status",
         ChequeDueFilter,
+        "method",
         "purpose",
         "lease__unit__property",
     )
@@ -919,6 +1402,7 @@ class ChequeAdmin(UnfoldModelAdmin):
     search_fields = (
         "cheque_number",
         "bank_name",
+        "reference",
         "drawer_name",
         "lease__tenant__name",
         "lease__unit__unit_number",
@@ -927,17 +1411,19 @@ class ChequeAdmin(UnfoldModelAdmin):
     autocomplete_fields = ("lease",)
     raw_id_fields = ("replaces",)
     inlines = [ChequeEventInline]
-    actions = ["action_deposit", "action_clear"]
+    actions = ["action_deposit", "action_clear", "action_cancel"]
     fieldsets = (
         (
-            "Cheque",
+            "Payment",
             {
                 "fields": (
                     "lease",
                     "purpose",
+                    "method",
                     "installment_no",
                     "cheque_number",
                     "bank_name",
+                    "reference",
                     "drawer_name",
                     "amount",
                     "cheque_date",
@@ -964,6 +1450,27 @@ class ChequeAdmin(UnfoldModelAdmin):
         ),
         ("Notes", {"fields": ("notes",)}),
     )
+
+    # --- locking -----------------------------------------------------------
+
+    def get_readonly_fields(self, request, obj=None):
+        if obj is not None and obj.is_locked:
+            return [f.name for f in Cheque._meta.fields if f.editable]
+        return super().get_readonly_fields(request, obj)
+
+    def has_delete_permission(self, request, obj=None):
+        if obj is not None:
+            try:
+                obj._check_deletable()
+            except ValidationError:
+                return False
+        return super().has_delete_permission(request, obj)
+
+    def get_actions(self, request):
+        # Bulk delete would skip our rule: payments are cancelled, not deleted.
+        actions = super().get_actions(request)
+        actions.pop("delete_selected", None)
+        return actions
 
     # --- columns -----------------------------------------------------------
 
@@ -1020,9 +1527,13 @@ class ChequeAdmin(UnfoldModelAdmin):
     def action_deposit(self, request, queryset):
         self._run_bulk(request, queryset, "mark_deposited", "marked as deposited")
 
-    @admin.action(description="Mark selected cheques as cleared today")
+    @admin.action(description="Mark selected cheques / payments as cleared (paid) today")
     def action_clear(self, request, queryset):
         self._run_bulk(request, queryset, "mark_cleared", "marked as cleared")
+
+    @admin.action(description="Cancel selected payments (never collected)")
+    def action_cancel(self, request, queryset):
+        self._run_bulk(request, queryset, "cancel", "cancelled")
 
     # --- the daily desk ----------------------------------------------------
 
@@ -1083,8 +1594,8 @@ class ChequeAdmin(UnfoldModelAdmin):
                 "Not received",
                 "Expected but not received",
                 "warn",
-                "The cheque date has arrived but the tenant has not handed over the cheque. "
-                "Open it and fill in the cheque number and bank when it arrives.",
+                "The date has arrived but nothing has been received. Cheques: open it and fill in the "
+                "number and bank when it arrives. Cash, card or transfer: click Paid when the money is in.",
                 base.filter(status=S.PENDING, cheque_date__lte=today).order_by("cheque_date", "id"),
             ),
             (
@@ -1166,6 +1677,8 @@ class ChequeAdmin(UnfoldModelAdmin):
         action = request.POST.get("action", "")
         who = cheque.lease.tenant.name
         label = cheque.cheque_number or "(no number)"
+        if not cheque.is_cheque:
+            label = cheque.get_method_display().lower()
         try:
             if action == "deposit":
                 cheque.mark_deposited(user=request.user)
@@ -1173,6 +1686,15 @@ class ChequeAdmin(UnfoldModelAdmin):
             elif action == "clear":
                 cheque.mark_cleared(user=request.user)
                 messages.success(request, f"Cheque {label} from {who} marked as cleared.")
+            elif action == "pay":
+                cheque.mark_cleared(
+                    user=request.user, reference=request.POST.get("reference", "")
+                )
+                messages.success(
+                    request,
+                    f"{cheque.get_method_display()} payment of AED {cheque.amount:,.2f} "
+                    f"from {who} marked as paid.",
+                )
             elif action == "return":
                 cheque.mark_returned(request.POST.get("reason", ""), user=request.user)
                 messages.warning(

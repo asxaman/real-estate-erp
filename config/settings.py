@@ -141,7 +141,7 @@ UNFOLD = {
                 "title": "Daily work",
                 "separator": True,
                 "items": [
-                    {"title": "Cheques", "icon": "payments", "link": _link("realestate_cheque_changelist"), "permission": _can("view_cheque")},
+                    {"title": "Payments & cheques", "icon": "payments", "link": _link("realestate_cheque_changelist"), "permission": _can("view_cheque")},
                     {
                         "title": "Maintenance jobs",
                         "icon": "construction",
@@ -179,6 +179,7 @@ UNFOLD = {
                 "separator": True,
                 "items": [
                     {"title": "Vendors", "icon": "local_shipping", "link": _link("realestate_vendor_changelist"), "permission": _can("view_vendor")},
+                    {"title": "Company settings", "icon": "tune", "link": _link("realestate_companysettings_changelist"), "permission": _can("view_companysettings")},
                     {
                         "title": "Users",
                         "icon": "person",

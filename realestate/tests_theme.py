@@ -26,7 +26,9 @@ class ThemeTests(BaseCase):
         for group in settings.UNFOLD["SIDEBAR"]["navigation"]:
             for item in group["items"]:
                 with self.subTest(item=item["title"]):
-                    self.assertEqual(self.client.get(str(item["link"])).status_code, 200)
+                    self.assertEqual(
+                        self.client.get(str(item["link"]), follow=True).status_code, 200
+                    )
 
     def test_every_model_page_has_a_menu_entry(self):
         linked = {

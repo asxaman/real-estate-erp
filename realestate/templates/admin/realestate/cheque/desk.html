@@ -92,7 +92,7 @@
               <th>Cheque date</th>
               <th>Tenant</th>
               <th>Unit</th>
-              <th>Cheque / bank</th>
+              <th>Cheque / how paid</th>
               <th>For</th>
               <th class="num">Amount (AED)</th>
               <th>What to do</th>
@@ -105,8 +105,13 @@
                 <td>{{ c.lease.tenant }}</td>
                 <td>{{ c.lease.unit }}</td>
                 <td>
-                  {% if c.cheque_number %}{{ c.cheque_number }}{% else %}<em>no number yet</em>{% endif %}
-                  {% if c.bank_name %}<br><small>{{ c.bank_name }}</small>{% endif %}
+                  {% if c.method == "cheque" %}
+                    {% if c.cheque_number %}{{ c.cheque_number }}{% else %}<em>no number yet</em>{% endif %}
+                    {% if c.bank_name %}<br><small>{{ c.bank_name }}</small>{% endif %}
+                  {% else %}
+                    <strong>{{ c.get_method_display }}</strong>
+                    {% if c.reference %}<br><small>{{ c.reference }}</small>{% endif %}
+                  {% endif %}
                 </td>
                 <td>
                   {{ c.get_purpose_display }}{% if c.installment_no %} #{{ c.installment_no }}{% endif %}
@@ -115,7 +120,13 @@
                 <td class="num">{{ c.amount|floatformat:"2g" }}</td>
                 <td class="actions">
                   {% if can_change %}
-                    {% if c.status == "received" %}
+                    {% if c.status == "pending" and c.method != "cheque" %}
+                      <form method="post" action="{% url 'admin:realestate_cheque_workflow' c.pk %}">
+                        {% csrf_token %}<input type="hidden" name="next" value="{{ request.get_full_path }}">
+                        {% if c.method != "cash" %}<input type="text" name="reference" maxlength="100" placeholder="reference / approval code" aria-label="Reference">{% endif %}
+                        <button type="submit" name="action" value="pay" class="btn-good">Paid</button>
+                      </form>
+                    {% elif c.status == "received" %}
                       <form method="post" action="{% url 'admin:realestate_cheque_workflow' c.pk %}">
                         {% csrf_token %}<input type="hidden" name="next" value="{{ request.get_full_path }}">
                         <button type="submit" name="action" value="deposit" class="btn-main">Deposit</button>

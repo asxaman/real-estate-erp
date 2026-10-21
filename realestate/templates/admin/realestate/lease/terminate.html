@@ -1,0 +1,68 @@
+{% extends "admin/base_site.html" %}
+{% load static %}
+
+{% block extrastyle %}
+{{ block.super }}
+  <link rel="stylesheet" href="{% static 'realestate/admin/ui.css' %}">
+<style>
+  .term-box { max-width: 760px; }
+  .term-info, .term-form { border: 1px solid rgba(127,127,127,.4); border-radius: 6px; padding: 14px 18px; margin: 0 0 18px; background: rgba(127,127,127,.08); }
+  .term-info h2, .term-form h2 { margin: 0 0 8px; font-size: 15px; }
+  .term-info ul { margin: 6px 0 0; padding-left: 20px; }
+  .term-row { margin: 0 0 14px; }
+  .term-row label { display: block; font-weight: 600; margin-bottom: 3px; }
+  .term-row .help { font-size: 12px; opacity: .8; margin-top: 3px; }
+  .term-row input[type=text], .term-row input[type=number], .term-row input[type=date] { min-width: 240px; }
+  .term-errors { background: #ffebee; border: 1px solid #c62828; color: #7f0000; padding: 8px 12px; border-radius: 4px; margin-bottom: 12px; }
+  .term-errors ul { margin: 0; padding-left: 18px; }
+  .term-buttons button, .term-buttons a { margin-right: 10px; }
+</style>
+{% endblock %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+  <a href="{% url 'admin:index' %}">Home</a>
+  &rsaquo; <a href="{% url 'admin:realestate_lease_changelist' %}">Leases</a>
+  &rsaquo; <a href="{% url 'admin:realestate_lease_change' lease.pk %}">{{ lease }}</a>
+  &rsaquo; Terminate early
+</div>
+{% endblock %}
+
+{% block content %}
+<div id="content-main" class="erp-page term-box">
+  <div class="term-info">
+    <h2>{{ lease.tenant }} &mdash; {{ lease.unit }}</h2>
+    <p>Lease {{ lease.start_date|date:"d M Y" }} to {{ lease.end_date|date:"d M Y" }},
+      AED {{ lease.annual_rent|floatformat:"2g" }} a year.</p>
+    <p><strong>How early exit normally works in the UAE</strong> (check your contract and your lawyer):</p>
+    <ul>
+      <li>A tenant has no automatic right to leave early. The contract's early-termination clause, or a mutual agreement, decides.</li>
+      <li>Written notice is normally 60 to 90 days, and rent is payable until the notice period ends.</li>
+      <li>If the contract allows an early exit, the penalty is often 1 to 2 months of rent. This page suggests {{ penalty_months }} month(s): AED {{ suggested_penalty|floatformat:"2g" }}.</li>
+      <li>The security deposit can <strong>not</strong> be used to pay the penalty. It is refunded after the penalty and utilities are settled and the property is handed back in good condition.</li>
+      <li>Uncashed rent cheques for the time after the exit are returned to the tenant. This page cancels them for you.</li>
+    </ul>
+  </div>
+
+  <form method="post" class="term-form">
+    {% csrf_token %}
+    <h2>Termination details</h2>
+    {% if form.non_field_errors %}
+      <div class="term-errors"><ul>{% for e in form.non_field_errors %}<li>{{ e }}</li>{% endfor %}</ul></div>
+    {% endif %}
+    {% for field in form %}
+      <div class="term-row">
+        <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+        {{ field }}
+        {% if field.help_text %}<div class="help">{{ field.help_text }}</div>{% endif %}
+        {% for e in field.errors %}<div class="term-errors">{{ e }}</div>{% endfor %}
+      </div>
+    {% endfor %}
+    <div class="term-buttons">
+      <button type="submit" class="default"
+              onclick="return confirm('Terminate this lease? This cancels the payments dated after the exit date.');">Terminate lease</button>
+      <a href="{% url 'admin:realestate_lease_change' lease.pk %}">Cancel</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

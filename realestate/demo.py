@@ -14,6 +14,7 @@ from django.db.models import ProtectedError
 from django.utils import timezone
 
 from .models import (
+    allow_payment_deletion,
     Cheque,
     ChequeEvent,
     DemoRecord,
@@ -317,7 +318,7 @@ def remove_demo():
     """Delete everything that "Load demo data" created. Returns a summary."""
     removed = 0
     kept = []
-    with transaction.atomic():
+    with transaction.atomic(), allow_payment_deletion():
         for model in REMOVAL_ORDER:
             ct = ContentType.objects.get_for_model(model)
             ids = list(

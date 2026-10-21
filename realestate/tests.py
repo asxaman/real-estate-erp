@@ -32,6 +32,22 @@ class HelperTests(SimpleTestCase):
         self.assertEqual(utils.add_months(date(2028, 1, 31), 1), date(2028, 2, 29))
         self.assertEqual(utils.add_months(date(2026, 11, 15), 3), date(2027, 2, 15))
 
+    def test_lease_length_in_months(self):
+        from datetime import date
+
+        self.assertEqual(utils.lease_term_months(date(2026, 1, 1), date(2026, 12, 31)), 12)
+        self.assertEqual(utils.lease_term_months(date(2026, 1, 1), date(2026, 6, 30)), 6)
+        self.assertEqual(utils.lease_term_months(date(2026, 1, 1), date(2027, 6, 30)), 18)
+        self.assertEqual(utils.lease_term_months(date(2026, 1, 1), date(2028, 12, 31)), 36)
+
+    def test_installment_count_and_proration(self):
+        self.assertEqual(utils.installment_count(18, 1), 2)
+        self.assertEqual(utils.installment_count(6, 1), 1)
+        self.assertEqual(utils.installment_count(12, 4), 4)
+        self.assertEqual(utils.installment_count(7, 12), 7)
+        self.assertEqual(utils.prorate(Decimal("120000"), 18), Decimal("180000.00"))
+        self.assertEqual(utils.prorate(Decimal("120000"), 6), Decimal("60000.00"))
+
     def test_split_amount_adds_up(self):
         for total, parts in (("100000", 3), ("99999.99", 12), ("45000", 1)):
             amounts = utils.split_amount(Decimal(total), parts)
@@ -289,7 +305,7 @@ class LeaseTests(BaseCase):
         lease = self.make_lease(
             end_date=self.today + timedelta(days=729), number_of_payments=2
         )
-        self.assertEqual(lease.lease_years, 2)
+        self.assertEqual(lease.term_months, 24)
         self.assertEqual(lease.generate_cheque_schedule(), 4)
         self.assertEqual(sum(c.amount for c in lease.cheques.all()), Decimal("80000.00"))
 

@@ -3,7 +3,7 @@
 from datetime import timedelta
 from decimal import Decimal
 
-from django.db.models import Count, Sum
+from django.db.models import Count, F, Sum
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.http import urlencode
@@ -46,15 +46,18 @@ def dashboard_context(request):
     month_start = _month_start(today)
     next_month = _next_month(month_start)
     S = Cheque.Status
+    # Every kind of payment (rent, deposits, penalties, fees...), so these
+    # numbers always match the daily cheque desk.
+    everything = Cheque.objects.all()
     rent = Cheque.objects.filter(purpose=Cheque.Purpose.RENT)
 
     # --- cheques -----------------------------------------------------------
     cheque_tiles = [
-        ("Deposit today", rent.filter(status=S.RECEIVED, cheque_date=today).count(), "primary"),
-        ("Overdue to deposit", rent.filter(status=S.RECEIVED, cheque_date__lt=today).count(), "warn"),
-        ("Not received", rent.filter(status=S.PENDING, cheque_date__lte=today).count(), "warn"),
-        ("At the bank", rent.filter(status=S.DEPOSITED).count(), "info"),
-        ("Bounced", rent.filter(status=S.RETURNED).count(), "danger"),
+        ("Deposit today", everything.filter(status=S.RECEIVED, cheque_date=today).count(), "primary"),
+        ("Overdue to deposit", everything.filter(status=S.RECEIVED, cheque_date__lt=today).count(), "warn"),
+        ("Not received", everything.filter(status=S.PENDING, cheque_date__lte=today).count(), "warn"),
+        ("At the bank", everything.filter(status=S.DEPOSITED).count(), "info"),
+        ("Bounced", everything.filter(status=S.RETURNED).count(), "danger"),
     ]
 
     # --- money this month --------------------------------------------------
@@ -66,7 +69,7 @@ def dashboard_context(request):
         rent.filter(status=S.CLEARED, cleared_date__gte=month_start, cleared_date__lt=next_month)
     )
     overdue_total = _sum(
-        rent.filter(status__in=[S.PENDING, S.RECEIVED, S.RETURNED], cheque_date__lt=today)
+        everything.filter(status__in=[S.PENDING, S.RECEIVED, S.RETURNED], cheque_date__lt=today)
     )
 
     months = []
@@ -81,7 +84,7 @@ def dashboard_context(request):
         m["percent"] = int(m["total"] * 100 / biggest) if biggest else 0
 
     owing = list(
-        rent.filter(status__in=[S.PENDING, S.RECEIVED, S.RETURNED], cheque_date__lt=today)
+        everything.filter(status__in=[S.PENDING, S.RECEIVED, S.RETURNED], cheque_date__lt=today)
         .values(
             "lease__tenant__name",
             "lease__unit__unit_number",
@@ -92,8 +95,10 @@ def dashboard_context(request):
     )
 
     # --- units -------------------------------------------------------------
-    counts = {"vacant": 0, "occupied": 0, "reserved": 0, "maintenance": 0}
-    for status in Unit.objects.with_status().values_list("status_calc", flat=True):
+    counts = {"vacant": 0, "occupied": 0, "reserved": 0, "holdover": 0, "maintenance": 0}
+    # Units of properties we no longer manage are not counted as vacant.
+    live_units = Unit.objects.filter(property__is_active=True).with_status()
+    for status in live_units.values_list("status_calc", flat=True):
         counts[status] = counts.get(status, 0) + 1
     total_units = sum(counts.values())
     occupancy = int(counts["occupied"] * 100 / total_units) if total_units else 0
@@ -120,6 +125,10 @@ def dashboard_context(request):
     payouts = [s.net_payout for s in approved]
     payable_count = len([p for p in payouts if p > 0])
     payable_total = sum((p for p in payouts if p > 0), ZERO)
+    to_recover = Expense.objects.filter(bearer=Expense.Bearer.TENANT).exclude(
+        recovered_amount__gte=F("amount")
+    )
+    recover_total = sum((e.still_to_recover for e in to_recover), ZERO)
     waiting_expenses = Expense.objects.filter(
         bearer=Expense.Bearer.OWNER, statement_line__isnull=True
     ).count()
@@ -163,6 +172,9 @@ def dashboard_context(request):
             "payable_count": payable_count,
             "payable_total": payable_total,
             "payable_url": _url("realestate_ownerstatement_changelist", status__exact="approved"),
+            "recover_count": to_recover.count(),
+            "recover_total": recover_total,
+            "recover_url": _url("realestate_expense_changelist", recovery="open"),
             "waiting_expenses": waiting_expenses,
             "waiting_expenses_url": _url("realestate_expense_changelist", statement="waiting"),
             "open_jobs": open_jobs.count(),

@@ -94,3 +94,27 @@ def make_iban(bank_code, account_number):
     # "AE" is 10 and 14 in the IBAN check, followed by 00 while we work out the digits.
     check = 98 - int(bban + "101400") % 97
     return f"AE{check:02d}{bban}"
+
+
+def lease_term_months(start, end):
+    """Length of a lease in whole months (at least 1), counting both end days.
+
+    1 Jan - 31 Dec = 12, 1 Jan - 30 Jun = 6, 1 Jan next year - 30 Jun after = 18.
+    """
+    if not (start and end):
+        return 12
+    days = (end - start).days + 1
+    return max(1, int(Decimal(days) / Decimal("30.4375") + Decimal("0.5")))
+
+
+def installment_count(months, per_year):
+    """How many payments a lease of `months` months has, at `per_year` a year.
+
+    Always at least one. 18 months at 1 a year -> 2, 6 months at 1 a year -> 1.
+    """
+    return max(1, (months * per_year + 6) // 12)
+
+
+def prorate(annual_amount, months):
+    """The part of a yearly amount that belongs to `months` months."""
+    return (Decimal(annual_amount) * months / 12).quantize(CENT, ROUND_HALF_UP)

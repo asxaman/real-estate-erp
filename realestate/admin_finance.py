@@ -4,6 +4,7 @@ from datetime import date
 from decimal import Decimal
 
 from django.contrib import admin, messages
+from django.db.models import F
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.http import HttpResponseNotAllowed, HttpResponseRedirect
 from django.shortcuts import get_object_or_404
@@ -13,8 +14,9 @@ from django.utils import timezone
 from unfold.admin import ModelAdmin as UnfoldModelAdmin
 from unfold.admin import TabularInline as UnfoldTabularInline
 
-from .admin import badge
+from .admin import badge, log_change
 from .models import (
+    CompanySettings,
     Expense,
     MaintenanceRequest,
     OwnerStatement,
@@ -89,9 +91,33 @@ class ExpenseStatementFilter(admin.SimpleListFilter):
         return queryset
 
 
+class ExpenseRecoveryFilter(admin.SimpleListFilter):
+    title = "tenant repayment"
+    parameter_name = "recovery"
+
+    def lookups(self, request, model_admin):
+        return [
+            ("open", "Charged to a tenant, not fully paid back"),
+            ("paid", "Charged to a tenant, paid back"),
+        ]
+
+    def queryset(self, request, queryset):
+        tenant_expenses = queryset.filter(bearer=Expense.Bearer.TENANT)
+        if self.value() == "open":
+            return tenant_expenses.exclude(recovered_amount__gte=F("amount"))
+        if self.value() == "paid":
+            return tenant_expenses.filter(recovered_amount__gte=F("amount"))
+        return queryset
+
+
 @admin.register(Expense)
 class ExpenseAdmin(UnfoldModelAdmin):
     date_hierarchy = "expense_date"
+    conditional_fields = {
+        "tenant": "bearer == 'tenant'",
+        "recovered_amount": "bearer == 'tenant'",
+        "recovered_on": "bearer == 'tenant'",
+    }
     list_display = (
         "expense_date",
         "property",
@@ -102,10 +128,12 @@ class ExpenseAdmin(UnfoldModelAdmin):
         "amount_aed",
         "who_pays",
         "statement_column",
+        "owed_by_tenant",
     )
     list_filter = (
         "bearer",
         ExpenseStatementFilter,
+        ExpenseRecoveryFilter,
         "category",
         "property",
     )
@@ -117,7 +145,7 @@ class ExpenseAdmin(UnfoldModelAdmin):
         "unit__unit_number",
         "vendor__name",
     )
-    autocomplete_fields = ("property", "unit", "vendor")
+    autocomplete_fields = ("property", "unit", "vendor", "tenant")
     raw_id_fields = ("maintenance_request",)
     fieldsets = (
         (
@@ -145,6 +173,13 @@ class ExpenseAdmin(UnfoldModelAdmin):
                 "fields": ("amount", "vat_amount", "bearer"),
             },
         ),
+        (
+            "Paying back (only when the tenant pays)",
+            {
+                "description": "Record who owes this money and how much they have paid back.",
+                "fields": ("tenant", "recovered_amount", "recovered_on"),
+            },
+        ),
         ("Receipt", {"fields": ("receipt", "notes")}),
     )
 
@@ -165,9 +200,22 @@ class ExpenseAdmin(UnfoldModelAdmin):
             return badge("Not yet", "#757575")
         return badge(line.statement.number or "draft", STATEMENT_COLORS[line.statement.status])
 
+    @admin.display(description="Tenant still owes")
+    def owed_by_tenant(self, obj):
+        if obj.bearer != Expense.Bearer.TENANT:
+            return "-"
+        owed = obj.still_to_recover
+        if owed <= 0:
+            return badge("Paid back", "#2e7d32")
+        return badge(f"AED {owed:,.2f}", "#c62828")
+
     def get_readonly_fields(self, request, obj=None):
         if obj is not None and obj.is_locked:
-            return [f.name for f in Expense._meta.fields if f.editable]
+            # Money the tenant pays back can still be recorded.
+            keep_open = {"tenant", "recovered_amount", "recovered_on"}
+            return [
+                f.name for f in Expense._meta.fields if f.editable and f.name not in keep_open
+            ]
         return super().get_readonly_fields(request, obj)
 
     def has_delete_permission(self, request, obj=None):
@@ -463,6 +511,8 @@ class OwnerStatementAdmin(UnfoldModelAdmin):
                     "statement": obj,
                     "totals": obj.totals(),
                     "sections": statement_sections(obj),
+                    "stale": obj.is_stale(),
+                    "calculated_at": obj.calculated_at,
                     "uncovered": obj.uncovered_items() if obj.is_draft else None,
                     "new_items": obj.new_items() if obj.is_draft else None,
                     "today": timezone.localdate().isoformat(),
@@ -496,12 +546,15 @@ class OwnerStatementAdmin(UnfoldModelAdmin):
         try:
             if action == "recalculate":
                 count = statement.recalculate()
+                log_change(request, statement, f"Recalculated ({count} lines).")
                 messages.success(request, f"Recalculated: {count} line(s).")
             elif action == "approve":
                 statement.approve(user=request.user)
+                log_change(request, statement, "Approved and locked.")
                 messages.success(request, "Statement approved. It is now locked.")
             elif action == "reopen":
                 statement.reopen()
+                log_change(request, statement, "Reopened as a draft.")
                 messages.success(request, "Statement reopened as a draft.")
             elif action == "pay":
                 try:
@@ -513,6 +566,12 @@ class OwnerStatementAdmin(UnfoldModelAdmin):
                     method=request.POST.get("pay_method", ""),
                     reference=request.POST.get("pay_reference", ""),
                     user=request.user,
+                )
+                log_change(
+                    request,
+                    statement,
+                    f"Marked as paid: AED {statement.net_payout:,.2f} by "
+                    f"{statement.get_pay_method_display()} {statement.pay_reference}".strip() + ".",
                 )
                 messages.success(request, "Marked as paid.")
             else:
@@ -536,3 +595,37 @@ class OwnerStatementAdmin(UnfoldModelAdmin):
             "company_name": admin.site.site_header,
         }
         return TemplateResponse(request, "admin/realestate/ownerstatement/print.html", context)
+
+
+# ---------------------------------------------------------------------------
+# Company settings (one row)
+# ---------------------------------------------------------------------------
+
+
+@admin.register(CompanySettings)
+class CompanySettingsAdmin(UnfoldModelAdmin):
+    fieldsets = (
+        (
+            "Fees and VAT",
+            {"fields": ("fee_vat_percent", "bounce_fee")},
+        ),
+        (
+            "Early termination of leases",
+            {"fields": ("default_notice_days", "penalty_months")},
+        ),
+    )
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    def changelist_view(self, request, extra_context=None):
+        # There is only one settings record, so go straight to it.
+        if not self.has_view_permission(request):
+            raise PermissionDenied
+        settings_ = CompanySettings.load()
+        return HttpResponseRedirect(
+            reverse("admin:realestate_companysettings_change", args=[settings_.pk])
+        )

@@ -27,6 +27,13 @@
     ({{ statement.period_start|date:"d M Y" }} to {{ statement.period_end|date:"d M Y" }})
     &mdash; {{ statement.get_status_display }}</h2>
 
+  {% if stale %}
+    <div class="os-warn">
+      <strong>This statement is out of date.</strong> A payment or expense changed, or something
+      new was added, since it was calculated{% if calculated_at %} ({{ calculated_at|date:"d M Y H:i" }}){% endif %}.
+      Click <strong>Recalculate</strong> before approving. Approving is blocked until you do.
+    </div>
+  {% endif %}
   {% if new_items and new_items.cheques or new_items and new_items.expenses %}
     <div class="os-warn">
       {{ new_items.cheques }} cleared cheque(s) and {{ new_items.expenses }} expense(s) in these dates

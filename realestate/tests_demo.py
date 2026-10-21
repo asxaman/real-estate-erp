@@ -138,7 +138,7 @@ class DemoPageTests(TestCase):
         self.assertTrue(has_demo_data())
         page = self.client.get(self.url)
         self.assertContains(page, "Remove demo data")
-        self.assertContains(page, "Cheques")
+        self.assertContains(page, "Payments")
         self.assertRedirects(self.client.post(self.url, {"action": "remove"}), self.url)
         self.assertFalse(has_demo_data())
 
