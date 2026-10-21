@@ -33,12 +33,13 @@
 
 <div class="dash erp-page">
   <div class="dash-row quick">
-    <a class="button" href="{% url 'admin:realestate_lease_add' %}">+ New lease</a>
-    <a class="button" href="{% url 'admin:realestate_tenant_add' %}">+ New tenant</a>
-    <a class="button" href="{% url 'admin:realestate_expense_add' %}">+ New expense</a>
-    <a class="button" href="{% url 'admin:realestate_maintenancerequest_add' %}">+ New maintenance job</a>
-    <a class="button" href="{% url 'admin:realestate_ownerstatement_add' %}">+ New owner statement</a>
+    {% if perms.realestate.add_lease %}<a class="button" href="{% url 'admin:realestate_lease_add' %}">+ New lease</a>{% endif %}
+    {% if perms.realestate.add_tenant %}<a class="button" href="{% url 'admin:realestate_tenant_add' %}">+ New tenant</a>{% endif %}
+    {% if perms.realestate.add_expense %}<a class="button" href="{% url 'admin:realestate_expense_add' %}">+ New expense</a>{% endif %}
+    {% if perms.realestate.add_maintenancerequest %}<a class="button" href="{% url 'admin:realestate_maintenancerequest_add' %}">+ New maintenance job</a>{% endif %}
+    {% if perms.realestate.add_ownerstatement %}<a class="button" href="{% url 'admin:realestate_ownerstatement_add' %}">+ New owner statement</a>{% endif %}
   </div>
+  {% if perms.realestate.view_cheque %}
   <h2>Cheques &mdash; <a href="{{ dash.desk_url }}">open the daily cheque desk</a></h2>
   <div class="dash-row">
     {% for label, count, color in dash.cheque_tiles %}
@@ -88,7 +89,9 @@
       {% endif %}
     </div>
   </div>
+  {% endif %}
 
+  {% if perms.realestate.view_unit %}
   <h2>Units &mdash; {{ dash.occupancy }}% occupied ({{ dash.total_units }} units)</h2>
   <div class="dash-row">
     <a class="tile good" href="{{ dash.vacant_url }}"><div class="n">{{ dash.units.vacant }}</div><div class="t">Vacant (click to see)</div></a>
@@ -96,7 +99,9 @@
     <div class="tile warn"><div class="n">{{ dash.units.reserved }}</div><div class="t">Reserved</div></div>
     <div class="tile info"><div class="n">{{ dash.units.maintenance }}</div><div class="t">Under maintenance</div></div>
   </div>
+  {% endif %}
 
+  {% if perms.realestate.view_lease %}
   <h2>Contracts and documents</h2>
   <div class="dash-row">
     <a class="tile danger{% if not dash.leases_overdue %} zero{% endif %}" href="{{ dash.leases_overdue_url }}"><div class="n">{{ dash.leases_overdue }}</div><div class="t">Leases past end date, still active</div></a>
@@ -107,14 +112,17 @@
     <div class="tile warn{% if not dash.docs_expiring %} zero{% endif %}"><div class="n">{{ dash.docs_expiring }}</div><div class="t">Papers expiring soon<br>
       <a href="{{ dash.tenants_expiring_url }}">tenants</a> &middot; <a href="{{ dash.owners_expiring_url }}">owners</a></div></div>
   </div>
+  {% endif %}
 
+  {% if perms.realestate.view_expense or perms.realestate.view_ownerstatement or perms.realestate.view_maintenancerequest %}
   <h2>Owner payouts and maintenance</h2>
   <div class="dash-row">
-    <a class="tile warn{% if not dash.waiting_expenses %} zero{% endif %}" href="{{ dash.waiting_expenses_url }}"><div class="n">{{ dash.waiting_expenses }}</div><div class="t">Owner expenses not on a statement yet</div></a>
-    <a class="tile info{% if not dash.drafts %} zero{% endif %}" href="{{ dash.drafts_url }}"><div class="n">{{ dash.drafts }}</div><div class="t">Draft owner statements</div></a>
-    <a class="tile primary{% if not dash.payable_count %} zero{% endif %}" href="{{ dash.payable_url }}"><div class="n">{{ dash.payable_count }}</div><div class="t">Approved, waiting to be paid<br>AED {{ dash.payable_total|floatformat:"2g" }}</div></a>
-    <a class="tile warn{% if not dash.open_jobs %} zero{% endif %}" href="{{ dash.jobs_url }}"><div class="n">{{ dash.open_jobs }}</div><div class="t">Open maintenance jobs{% if dash.urgent_jobs %}<br><strong>{{ dash.urgent_jobs }} urgent</strong>{% endif %}</div></a>
+    {% if perms.realestate.view_expense %}<a class="tile warn{% if not dash.waiting_expenses %} zero{% endif %}" href="{{ dash.waiting_expenses_url }}"><div class="n">{{ dash.waiting_expenses }}</div><div class="t">Owner expenses not on a statement yet</div></a>{% endif %}
+    {% if perms.realestate.view_ownerstatement %}<a class="tile info{% if not dash.drafts %} zero{% endif %}" href="{{ dash.drafts_url }}"><div class="n">{{ dash.drafts }}</div><div class="t">Draft owner statements</div></a>{% endif %}
+    {% if perms.realestate.view_ownerstatement %}<a class="tile primary{% if not dash.payable_count %} zero{% endif %}" href="{{ dash.payable_url }}"><div class="n">{{ dash.payable_count }}</div><div class="t">Approved, waiting to be paid<br>AED {{ dash.payable_total|floatformat:"2g" }}</div></a>{% endif %}
+    {% if perms.realestate.view_maintenancerequest %}<a class="tile warn{% if not dash.open_jobs %} zero{% endif %}" href="{{ dash.jobs_url }}"><div class="n">{{ dash.open_jobs }}</div><div class="t">Open maintenance jobs{% if dash.urgent_jobs %}<br><strong>{{ dash.urgent_jobs }} urgent</strong>{% endif %}</div></a>{% endif %}
   </div>
+  {% endif %}
 </div>
 
 {% endblock %}

@@ -3,6 +3,7 @@ from decimal import Decimal
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
+from django.contrib.contenttypes.models import ContentType
 from django.db import models, transaction
 from django.db.models import Case, CharField, Exists, OuterRef, Q, Sum, Value, When
 from django.utils import timezone
@@ -1766,3 +1767,32 @@ class StatementLine(models.Model):
 
     def __str__(self):
         return f"{self.get_kind_display()}: {self.description}"
+
+
+# ---------------------------------------------------------------------------
+# Demo data bookkeeping
+# ---------------------------------------------------------------------------
+
+
+class DemoRecord(models.Model):
+    """Remembers which records were created by "Load demo data".
+
+    Only records listed here are removed by "Remove demo data", so anything
+    you typed in yourself is never touched.
+    """
+
+    content_type = models.ForeignKey(ContentType, on_delete=models.CASCADE, related_name="+")
+    object_id = models.PositiveBigIntegerField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["content_type", "object_id"], name="unique_demo_record"
+            )
+        ]
+        verbose_name = "demo data"
+        verbose_name_plural = "demo data"
+
+    def __str__(self):
+        return f"{self.content_type} #{self.object_id}"

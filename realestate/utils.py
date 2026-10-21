@@ -81,3 +81,16 @@ def split_vat(gross, vat_percent):
 def percent_of(amount, percent):
     """`percent` % of `amount`, rounded to fils (0.01)."""
     return (Decimal(amount) * Decimal(percent or 0) / 100).quantize(CENT, ROUND_HALF_UP)
+
+
+def make_iban(bank_code, account_number):
+    """Build a UAE IBAN with correct check digits (used for demo data).
+
+    bank_code is 3 digits, account_number is 16 digits.
+    """
+    bban = f"{bank_code}{account_number}"
+    if not (bban.isdigit() and len(bban) == 19):
+        raise ValueError("A UAE IBAN needs a 3-digit bank code and a 16-digit account number.")
+    # "AE" is 10 and 14 in the IBAN check, followed by 00 while we work out the digits.
+    check = 98 - int(bban + "101400") % 97
+    return f"AE{check:02d}{bban}"

@@ -28,3 +28,16 @@ html.dark .erp-page a:not(.tile):not(.button) { color: rgb(96, 165, 250); }
 .erp-page button.button, .erp-page button.default, .erp-page a.button {
   background: rgb(37, 99, 235); color: #fff; border: 0; padding: 6px 12px;
 }
+
+/* Tiles lift a little when you point at them, and appear one after another. */
+.erp-page a.tile:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0, 0, 0, .12); }
+.erp-page .tile { animation: erp-rise .35s ease both; }
+.erp-page .tile:nth-child(2) { animation-delay: .04s; }
+.erp-page .tile:nth-child(3) { animation-delay: .08s; }
+.erp-page .tile:nth-child(4) { animation-delay: .12s; }
+.erp-page .tile:nth-child(5) { animation-delay: .16s; }
+.erp-page .desk-section, .erp-page .os-panel { animation: erp-rise .4s ease both; }
+@keyframes erp-rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .erp-page .tile, .erp-page .desk-section, .erp-page .os-panel { animation: none; }
+}

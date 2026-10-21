@@ -1223,3 +1223,7 @@ admin.site.index_template = "realestate/dashboard.html"
 
 # Users and Groups in the same look.
 from . import admin_auth  # noqa: E402,F401
+
+
+# Demo data page (superuser only).
+from . import admin_demo  # noqa: E402,F401

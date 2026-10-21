@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+from django.templatetags.static import static
 from django.urls import reverse_lazy
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -92,12 +93,18 @@ def _link(name):
     return reverse_lazy(f"admin:{name}")
 
 
+def _can(permission):
+    """Show a menu item only to users who may open that page."""
+    return lambda request: request.user.has_perm(f"realestate.{permission}")
+
+
 UNFOLD = {
     "SITE_TITLE": "Real Estate ERP",
     "SITE_HEADER": "Real Estate ERP",
     "SITE_SUBHEADER": "UAE property management",
     "SITE_SYMBOL": "apartment",
     "BORDER_RADIUS": "8px",
+    "STYLES": [lambda request: static("realestate/admin/transitions.css")],
     "COLORS": {
         "primary": {
             "50": "oklch(97% 0.014 254.604)",
@@ -126,6 +133,7 @@ UNFOLD = {
                         "title": "Daily cheque desk",
                         "icon": "event_available",
                         "link": _link("realestate_cheque_desk"),
+                        "permission": _can("view_cheque"),
                     },
                 ],
             },
@@ -133,34 +141,36 @@ UNFOLD = {
                 "title": "Daily work",
                 "separator": True,
                 "items": [
-                    {"title": "Cheques", "icon": "payments", "link": _link("realestate_cheque_changelist")},
+                    {"title": "Cheques", "icon": "payments", "link": _link("realestate_cheque_changelist"), "permission": _can("view_cheque")},
                     {
                         "title": "Maintenance jobs",
                         "icon": "construction",
                         "link": _link("realestate_maintenancerequest_changelist"),
+                        "permission": _can("view_maintenancerequest"),
                     },
-                    {"title": "Expenses", "icon": "receipt_long", "link": _link("realestate_expense_changelist")},
+                    {"title": "Expenses", "icon": "receipt_long", "link": _link("realestate_expense_changelist"), "permission": _can("view_expense")},
                 ],
             },
             {
                 "title": "Properties and people",
                 "separator": True,
                 "items": [
-                    {"title": "Properties", "icon": "domain", "link": _link("realestate_property_changelist")},
-                    {"title": "Units", "icon": "meeting_room", "link": _link("realestate_unit_changelist")},
-                    {"title": "Owners", "icon": "badge", "link": _link("realestate_owner_changelist")},
-                    {"title": "Tenants", "icon": "groups", "link": _link("realestate_tenant_changelist")},
+                    {"title": "Properties", "icon": "domain", "link": _link("realestate_property_changelist"), "permission": _can("view_property")},
+                    {"title": "Units", "icon": "meeting_room", "link": _link("realestate_unit_changelist"), "permission": _can("view_unit")},
+                    {"title": "Owners", "icon": "badge", "link": _link("realestate_owner_changelist"), "permission": _can("view_owner")},
+                    {"title": "Tenants", "icon": "groups", "link": _link("realestate_tenant_changelist"), "permission": _can("view_tenant")},
                 ],
             },
             {
                 "title": "Contracts and payouts",
                 "separator": True,
                 "items": [
-                    {"title": "Leases", "icon": "description", "link": _link("realestate_lease_changelist")},
+                    {"title": "Leases", "icon": "description", "link": _link("realestate_lease_changelist"), "permission": _can("view_lease")},
                     {
                         "title": "Owner statements",
                         "icon": "request_quote",
                         "link": _link("realestate_ownerstatement_changelist"),
+                        "permission": _can("view_ownerstatement"),
                     },
                 ],
             },
@@ -168,7 +178,7 @@ UNFOLD = {
                 "title": "Setup",
                 "separator": True,
                 "items": [
-                    {"title": "Vendors", "icon": "local_shipping", "link": _link("realestate_vendor_changelist")},
+                    {"title": "Vendors", "icon": "local_shipping", "link": _link("realestate_vendor_changelist"), "permission": _can("view_vendor")},
                     {
                         "title": "Users",
                         "icon": "person",
@@ -179,6 +189,12 @@ UNFOLD = {
                         "title": "Groups",
                         "icon": "lock",
                         "link": _link("auth_group_changelist"),
+                        "permission": lambda request: request.user.is_superuser,
+                    },
+                    {
+                        "title": "Demo data",
+                        "icon": "science",
+                        "link": _link("realestate_demorecord_changelist"),
                         "permission": lambda request: request.user.is_superuser,
                     },
                 ],
