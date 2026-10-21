@@ -3,6 +3,8 @@
 {% block content %}
 <style>
   .dash { margin-bottom: 26px; }
+  .dash a.button { color:#fff; padding:8px 14px; text-decoration:none; font-size:13px; }
+  .dash-row.quick { margin-bottom:6px; }
   .dash h2 { font-size: 15px; margin: 22px 0 8px; }
   .dash-row { display: flex; gap: 12px; flex-wrap: wrap; }
   .tile { flex: 1 1 150px; min-width: 140px; border: 1px solid var(--hairline-color, #ddd); border-left-width: 5px; border-radius: 6px; padding: 10px 14px; background: var(--body-bg, #fff); text-decoration: none; color: var(--body-fg, #222); display: block; }
@@ -24,6 +26,13 @@
 </style>
 
 <div class="dash">
+  <div class="dash-row quick">
+    <a class="button" href="{% url 'admin:realestate_lease_add' %}">+ New lease</a>
+    <a class="button" href="{% url 'admin:realestate_tenant_add' %}">+ New tenant</a>
+    <a class="button" href="{% url 'admin:realestate_expense_add' %}">+ New expense</a>
+    <a class="button" href="{% url 'admin:realestate_maintenancerequest_add' %}">+ New maintenance job</a>
+    <a class="button" href="{% url 'admin:realestate_ownerstatement_add' %}">+ New owner statement</a>
+  </div>
   <h2>Cheques &mdash; <a href="{{ dash.desk_url }}">open the daily cheque desk</a></h2>
   <div class="dash-row">
     {% for label, count, color in dash.cheque_tiles %}

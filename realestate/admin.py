@@ -1207,3 +1207,9 @@ def _dashboard_index(request, extra_context=None):
 
 admin.site.index = _dashboard_index
 admin.site.index_template = "realestate/dashboard.html"
+
+
+# Side menu grouped by kind of work.
+from .navigation import install as _install_navigation  # noqa: E402
+
+_install_navigation(admin.site)

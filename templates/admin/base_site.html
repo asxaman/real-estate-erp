@@ -1,0 +1,12 @@
+{% extends "admin/base_site.html" %}
+{% load static %}
+
+{% comment %}
+  This file has the same name as Django's own one on purpose: it adds our
+  stylesheet to EVERY admin page and leaves everything else as it was.
+{% endcomment %}
+
+{% block extrastyle %}
+  {{ block.super }}
+  <link rel="stylesheet" href="{% static 'realestate/admin/theme.css' %}">
+{% endblock %}
