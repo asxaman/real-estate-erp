@@ -82,14 +82,19 @@ Sidebar > **Property management**:
 
 * **Owners** - the people or companies who own the buildings you manage. The optional
   *Portal access* field links an owner to a login account; it will be used by the owner portal later.
-* **Properties** - buildings, villa compounds, land. Each has a short unique **code** (e.g. `RMT`),
-  an owner, emirate, area, and the management fee percentage. The property page lists its
-  units at the bottom and you can add units there directly.
+* **Properties** - each has a short unique **code** (e.g. `RMT`), a type, an owner and an emirate
+  (all required). Address, year built, total floors, management fee and notes are optional.
+  Management fee: enter 0 if company-owned, or a value above 0 if you manage the property for
+  another owner.
+  * **Residential Building** and **Commercial Building** have units. Save the property first,
+    then the units section appears at the bottom of the page where you can add them.
+  * **Villa, Warehouse, Yard, Shop, Apartment, Parking Spot** are standalone: no units section,
+    and they cannot be chosen when adding a unit.
 * **Units** - apartments, villas, offices, shops. Shown as `CODE-number` (e.g. `RMT-304`) with
   filters for status, type and property. Status: Vacant, Occupied, Reserved, Under maintenance
   (set by hand for now; it will update automatically once leases exist).
-* **Seed sample data** now also creates 3 owners, 4 properties (Abu Dhabi, Dubai, Sharjah) and
-  88 units, and gives the demo roles permissions: Property Manager can do everything,
+* **Seed sample data** now also creates 4 owners (one is the company itself), 12 properties
+  (3 buildings with 80 units in total, plus 9 standalone properties of different types), and gives the demo roles permissions: Property Manager can do everything,
   Accountant and Maintenance Supervisor can only view, Leasing Agent can view and edit units.
   Log in as `demo.manager` / `demo.leasing` etc. to see what each role can see.
 * **Erase all data** now also deletes all owners, properties and units.

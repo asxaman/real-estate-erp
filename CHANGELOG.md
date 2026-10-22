@@ -1,6 +1,17 @@
 # Changelog
 
-## Module 1 - Properties and units (current)
+## Module 1, update 2 - Property form changes (current)
+- Property types are now: Residential Building, Commercial Building (have units) and
+  Villa, Warehouse, Yard, Shop, Apartment, Parking Spot (standalone, no units)
+- Units section is hidden for standalone properties and for the "add property" page
+  (save first); units can only be created for buildings
+- "Area / Community" field removed
+- Management fee is optional (0 = company-owned, above 0 = managed for another owner)
+- Data migration 0002 converts old property types automatically
+- Sample data: 4 owners, 12 properties (3 buildings, 80 units, 9 standalone)
+- Run `makemigrations` then `migrate` after extracting
+
+## Module 1 - Properties and units
 - New `properties` app: Owner, Property and Unit models with Unfold admin pages
 - Property page shows its units inline; Property list shows unit and vacant counts
 - Unit list with colour status badges and filters (status, type, property, furnished)

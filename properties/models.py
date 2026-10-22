@@ -1,4 +1,5 @@
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
 from django.db import models
 
@@ -34,11 +35,22 @@ class Property(models.Model):
     """A building, villa compound, land plot, etc."""
 
     class PropertyType(models.TextChoices):
-        RESIDENTIAL = "residential", "Residential building"
-        COMMERCIAL = "commercial", "Commercial building"
-        VILLA_COMPOUND = "villa_compound", "Villa compound"
-        MIXED_USE = "mixed_use", "Mixed use"
-        LAND = "land", "Land"
+        # Buildings: these contain units
+        RESIDENTIAL_BUILDING = "residential_building", "Residential Building"
+        COMMERCIAL_BUILDING = "commercial_building", "Commercial Building"
+        # Standalone properties: no units
+        VILLA = "villa", "Villa"
+        WAREHOUSE = "warehouse", "Warehouse"
+        YARD = "yard", "Yard"
+        SHOP = "shop", "Shop"
+        APARTMENT = "apartment", "Apartment"
+        PARKING_SPOT = "parking_spot", "Parking Spot"
+
+    # Only these types can have units. Every other type is a standalone property.
+    BUILDING_TYPES = (
+        PropertyType.RESIDENTIAL_BUILDING,
+        PropertyType.COMMERCIAL_BUILDING,
+    )
 
     class Emirate(models.TextChoices):
         ABU_DHABI = "abu_dhabi", "Abu Dhabi"
@@ -56,14 +68,15 @@ class Property(models.Model):
         help_text="Short unique code, e.g. RMT. Used in unit references like RMT-101.",
     )
     property_type = models.CharField(
-        max_length=20, choices=PropertyType.choices, default=PropertyType.RESIDENTIAL
+        max_length=20,
+        choices=PropertyType.choices,
+        default=PropertyType.RESIDENTIAL_BUILDING,
+        help_text="Only Residential and Commercial Buildings have units. "
+        "All other types are standalone properties.",
     )
     owner = models.ForeignKey(Owner, on_delete=models.PROTECT, related_name="properties")
     emirate = models.CharField(
         max_length=20, choices=Emirate.choices, default=Emirate.ABU_DHABI
-    )
-    area = models.CharField(
-        "Area / community", max_length=120, blank=True, help_text="e.g. Al Reem Island"
     )
     address = models.TextField(blank=True)
     year_built = models.PositiveIntegerField(null=True, blank=True)
@@ -72,9 +85,12 @@ class Property(models.Model):
         "Management fee (%)",
         max_digits=5,
         decimal_places=2,
+        null=True,
+        blank=True,
         default=0,
         validators=[MinValueValidator(0)],
-        help_text="Percentage of collected rent charged to the owner.",
+        help_text="Enter 0 if company-owned; enter a value greater than 0 "
+        "if managing the property for another owner.",
     )
     notes = models.TextField(blank=True)
     is_active = models.BooleanField(default=True)
@@ -86,6 +102,20 @@ class Property(models.Model):
 
     def __str__(self):
         return f"{self.name} ({self.code})"
+
+    @property
+    def has_units(self):
+        return self.property_type in self.BUILDING_TYPES
+
+    def clean(self):
+        # Don't allow switching a building that already has units to a standalone type.
+        if self.pk and not self.has_units and self.units.exists():
+            raise ValidationError(
+                {
+                    "property_type": "This property still has units. Delete its units "
+                    "before changing it to a standalone type."
+                }
+            )
 
 
 class Unit(models.Model):
@@ -140,3 +170,9 @@ class Unit(models.Model):
 
     def __str__(self):
         return f"{self.property.code}-{self.unit_number}"
+
+    def clean(self):
+        if self.property_id and not self.property.has_units:
+            raise ValidationError(
+                {"property": "Units can only be added to Residential or Commercial Buildings."}
+            )

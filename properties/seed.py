@@ -15,7 +15,6 @@ UNIT_SPECS = {
     U.ONE_BR: (1, 2, 750, 62000),
     U.TWO_BR: (2, 3, 1200, 95000),
     U.THREE_BR: (3, 4, 1700, 140000),
-    U.VILLA: (4, 5, 3800, 260000),
     U.OFFICE: (0, 1, 900, 80000),
     U.SHOP: (0, 1, 650, 120000),
 }
@@ -58,6 +57,7 @@ def seed_properties() -> str:
         ("Khalifa Al Mansoori", "khalifa@example.com", "+971 50 000 0001"),
         ("Gulf Horizon Investments LLC", "info@gulfhorizon.example.com", "+971 2 000 0002"),
         ("Noura Al Suwaidi", "noura@example.com", "+971 55 000 0003"),
+        ("Own Portfolio (Company-owned)", "", ""),
     ]:
         owners[name], _ = Owner.objects.get_or_create(
             name=name, defaults={"email": email, "phone": phone}
@@ -67,29 +67,61 @@ def seed_properties() -> str:
         obj, _ = Property.objects.get_or_create(code=code, defaults=fields)
         return obj
 
+    T = Property.PropertyType
+    E = Property.Emirate
+    own = owners["Own Portfolio (Company-owned)"]
+
+    # Buildings (have units)
     reem = prop(
         "RMT", name="Reem Marina Tower", owner=owners["Khalifa Al Mansoori"],
-        property_type=Property.PropertyType.RESIDENTIAL, emirate=Property.Emirate.ABU_DHABI,
-        area="Al Reem Island", year_built=2017, total_floors=10,
+        property_type=T.RESIDENTIAL_BUILDING, emirate=E.ABU_DHABI,
+        address="Al Reem Island, Abu Dhabi", year_built=2017, total_floors=10,
         management_fee_percent=Decimal("5.00"),
     )
     hub = prop(
         "SBH", name="Saadiyat Business Hub", owner=owners["Gulf Horizon Investments LLC"],
-        property_type=Property.PropertyType.COMMERCIAL, emirate=Property.Emirate.ABU_DHABI,
-        area="Saadiyat Island", year_built=2019, total_floors=5,
+        property_type=T.COMMERCIAL_BUILDING, emirate=E.ABU_DHABI,
+        address="Saadiyat Island, Abu Dhabi", year_built=2019, total_floors=5,
         management_fee_percent=Decimal("6.00"),
     )
     marina = prop(
         "DMR", name="Marina View Residence", owner=owners["Gulf Horizon Investments LLC"],
-        property_type=Property.PropertyType.RESIDENTIAL, emirate=Property.Emirate.DUBAI,
-        area="Dubai Marina", year_built=2014, total_floors=6,
+        property_type=T.RESIDENTIAL_BUILDING, emirate=E.DUBAI,
+        address="Dubai Marina, Dubai", year_built=2014, total_floors=6,
         management_fee_percent=Decimal("5.00"),
     )
-    villas = prop(
-        "ZPV", name="Zahia Palm Villas", owner=owners["Noura Al Suwaidi"],
-        property_type=Property.PropertyType.VILLA_COMPOUND, emirate=Property.Emirate.SHARJAH,
-        area="Al Zahia", year_built=2021, total_floors=2,
-        management_fee_percent=Decimal("4.50"),
+
+    # Standalone properties (no units)
+    for i in range(1, 5):
+        prop(
+            f"ZV{i:02d}", name=f"Zahia Villa {i}", owner=owners["Noura Al Suwaidi"],
+            property_type=T.VILLA, emirate=E.SHARJAH, address="Al Zahia, Sharjah",
+            year_built=2021, total_floors=2, management_fee_percent=Decimal("4.50"),
+        )
+    prop(
+        "MSW01", name="Mussafah Warehouse 1", owner=own,
+        property_type=T.WAREHOUSE, emirate=E.ABU_DHABI, address="Mussafah, Abu Dhabi",
+        management_fee_percent=Decimal("0"),
+    )
+    prop(
+        "MSY01", name="Mussafah Storage Yard", owner=own,
+        property_type=T.YARD, emirate=E.ABU_DHABI, address="Mussafah, Abu Dhabi",
+        management_fee_percent=Decimal("0"),
+    )
+    prop(
+        "CRS01", name="Corniche Retail Shop", owner=owners["Khalifa Al Mansoori"],
+        property_type=T.SHOP, emirate=E.ABU_DHABI, address="Corniche Road, Abu Dhabi",
+        management_fee_percent=Decimal("5.00"),
+    )
+    prop(
+        "KHA01", name="Khalidiyah Apartment 2B", owner=owners["Khalifa Al Mansoori"],
+        property_type=T.APARTMENT, emirate=E.ABU_DHABI, address="Khalidiyah, Abu Dhabi",
+        year_built=2010, total_floors=1, management_fee_percent=Decimal("5.00"),
+    )
+    prop(
+        "DMP01", name="Marina Parking Spot P-118", owner=own,
+        property_type=T.PARKING_SPOT, emirate=E.DUBAI, address="Dubai Marina, Dubai",
+        management_fee_percent=Decimal("0"),
     )
 
     new_units = 0
@@ -115,11 +147,6 @@ def seed_properties() -> str:
         for i, utype in enumerate([U.STUDIO, U.ONE_BR, U.ONE_BR, U.TWO_BR], start=1):
             counter += 1
             new_units += _make_unit(marina, f"{floor}0{i}", floor, utype, counter, premium=1200)
-
-    # Zahia Palm Villas: 8 villas
-    for i in range(1, 9):
-        counter += 1
-        new_units += _make_unit(villas, f"V{i:02d}", 0, U.VILLA, counter)
 
     _grant_role_permissions()
     return (

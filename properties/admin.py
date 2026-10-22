@@ -41,22 +41,34 @@ class PropertyAdmin(ModelAdmin):
         "code",
         "property_type",
         "emirate",
-        "area",
         "owner",
         "unit_count",
         "vacant_count",
         "is_active",
     )
     list_filter = ("property_type", "emirate", "is_active", "owner")
-    search_fields = ("name", "code", "area", "owner__name")
+    search_fields = ("name", "code", "owner__name")
     list_select_related = ("owner",)
     inlines = [UnitInline]
     fieldsets = (
-        (None, {"fields": ("name", "code", "property_type", "owner", "is_active")}),
-        ("Location", {"fields": ("emirate", "area", "address")}),
+        (
+            None,
+            {
+                "fields": ("name", "code", "property_type", "owner", "is_active"),
+                "description": "Units can be added after saving, and only for "
+                "Residential and Commercial Buildings.",
+            },
+        ),
+        ("Location", {"fields": ("emirate", "address")}),
         ("Building details", {"fields": ("year_built", "total_floors", "management_fee_percent")}),
         ("Other", {"fields": ("notes",)}),
     )
+
+    def get_inline_instances(self, request, obj=None):
+        # Units are shown only for saved properties that are buildings.
+        if obj is None or not obj.has_units:
+            return []
+        return super().get_inline_instances(request, obj)
 
     def get_queryset(self, request):
         return super().get_queryset(request).annotate(
@@ -66,11 +78,11 @@ class PropertyAdmin(ModelAdmin):
 
     @admin.display(description="Units", ordering="_unit_count")
     def unit_count(self, obj):
-        return obj._unit_count
+        return obj._unit_count if obj.has_units else "-"
 
     @admin.display(description="Vacant", ordering="_vacant_count")
     def vacant_count(self, obj):
-        return obj._vacant_count
+        return obj._vacant_count if obj.has_units else "-"
 
 
 @admin.register(Unit)
@@ -93,6 +105,14 @@ class UnitAdmin(ModelAdmin):
         ("Rent", {"fields": ("asking_rent",)}),
         ("Other", {"fields": ("notes",)}),
     )
+
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        # Only buildings can contain units.
+        if db_field.name == "property":
+            kwargs["queryset"] = Property.objects.filter(
+                property_type__in=Property.BUILDING_TYPES
+            )
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
 
     @admin.display(description="Unit", ordering="unit_number")
     def reference(self, obj):
