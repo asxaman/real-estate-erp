@@ -493,6 +493,12 @@
       return lines;
     }
 
+    function singular(word) {
+      if (/ies$/i.test(word)) { return word.replace(/ies$/i, "y"); }
+      if (/(ss|us)$/i.test(word)) { return word; }
+      return word.replace(/s$/i, "");
+    }
+
     function csrfToken() {
       var input = document.querySelector('input[name="csrfmiddlewaretoken"]');
       if (input) { return input.value; }
@@ -531,6 +537,7 @@
       var dlg = el("div", "erp-leave-dialog erp-del-dialog");
       dlg.setAttribute("role", "alertdialog");
       dlg.setAttribute("aria-modal", "true");
+      dlg.setAttribute("aria-label", opts.title);
       dlg.appendChild(el("div", "erp-leave-icon erp-del-icon", "!"));
       dlg.appendChild(el("h2", "", opts.title));
       if (opts.text) { dlg.appendChild(el("p", "", opts.text)); }
@@ -593,7 +600,7 @@
         var lines = area ? textLines(document.importNode(area, true)) : [];
 
         // Django itself says it cannot delete (protected related records / no permission).
-        if (BLOCKED.test(pageText)) {
+        if (BLOCKED.test(area ? area.textContent : pageText)) {
           var reason = lines.filter(function (l) { return l.length > 25; }).slice(0, 6);
           showDialog({
             title: "This cannot be deleted",
@@ -607,18 +614,19 @@
         var low = lines.map(function (l) { return l.toLowerCase(); });
         var iSummary = low.indexOf("summary");
         var iObjects = low.indexOf("objects");
-        var summary = [], objects = [], noun = opts.noun || "", count = opts.count;
+        var summary = [], objects = [], noun = opts.noun || "", count = opts.count, noundFromPage = false;
         if (iObjects > -1) {
           summary = iSummary > -1 ? lines.slice(iSummary + 1, iObjects) : [];
           objects = lines.slice(iObjects + 1);
           var text = lines.join("\n");
           var found = (text.match(/delete the selected ([^?\n]+)\?/i) || [])[1] ||
                       (text.match(/delete the ([^"“”'?\n]+?)\s*["“”']/i) || [])[1];
-          if (found) { noun = found.trim(); }
+          if (found) { noun = found.trim(); noundFromPage = true; }
           var n = parseInt(((summary[0] || "").match(/:\s*(\d+)/) || [])[1], 10);
           if (n) { count = n; }
         }
         if (!objects.length) { objects = opts.names; }
+        if (!noundFromPage && count <= 1) { noun = singular(noun); }  // "properties" -> "property"
 
         // "Property: Sharjah 3 (SHJ3)" -> name "Sharjah 3 (SHJ3)"
         var first = (objects[0] || "").replace(/^[^:]{1,40}:\s*/, "");
@@ -680,8 +688,14 @@
 
       var names = ticked.map(function (box) {
         var row = box.closest("tr");
-        var cell = row && (row.querySelector("th a, td a") || row.querySelector("th"));
-        return cell && cell.textContent.trim() ? cell.textContent.trim() : "Selected item";
+        var best = "";
+        if (row) {
+          Array.prototype.forEach.call(row.querySelectorAll("a"), function (a) {
+            var t = a.textContent.trim();
+            if (t.length > best.length) { best = t; }
+          });
+        }
+        return best || "Selected item";
       });
       var select = form.querySelector('select[name="action"]');
       var label = select && select.selectedOptions[0] ? select.selectedOptions[0].textContent : "";

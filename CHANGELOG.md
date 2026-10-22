@@ -1,5 +1,11 @@
 # Changelog
 
+## Update 8d - Audit of the delete pop-up
+- "Cannot be deleted" is now decided from the page's main content only
+- Correct singular wording when one record is selected from a list ("property", not "properties")
+- Record names in the list pop-up are read more reliably (users with a profile picture)
+- Checked the whole app: no other browser pop-ups or separate confirmation pages remain (only the browser's own box on closing the tab or reloading, which cannot be replaced)
+
 ## Update 8c - Fix: delete from a list, clearer wording
 - Fix: "Delete selected" in lists did not delete (the page address was read wrongly because the list form has a field called "action")
 - Delete pop-up wording: names what is being deleted (for example: Delete property “Sharjah 3 (SHJ3)”?), says plainly whether related items go too, and no longer lists a stray "Yes, I'm sure" line
