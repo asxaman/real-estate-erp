@@ -1,5 +1,8 @@
 # Changelog
 
+## Update 8b - Fix: delete from a list
+- Fix: "Delete selected" in list pages showed a wrong "This cannot be deleted" pop-up. The delete pop-up no longer depends on the layout of Django's confirmation page: it builds the delete request itself, lists the ticked records by name, and shows "cannot be deleted" only when Django reports protected records or missing permission
+
 ## Update 8 - Delete confirmation pop-up (whole app)
 - Deleting anything (the Delete button on a record, or "Delete selected" in a list) now asks in a pop-up that lists what will be deleted, instead of opening a separate page. If something cannot be deleted (other records depend on it) the pop-up explains why
 - Applies automatically to every current and future module

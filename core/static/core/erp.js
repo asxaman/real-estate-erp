@@ -471,6 +471,7 @@
   /* ---- Delete confirmation: a pop-up instead of Django's separate "Are you sure?" page ---- */
   function deleteGuard() {
     var CANCEL_TEXT = /take me back|^no,|^cancel$/i;
+    var BLOCKED = /protected related objects|would require deleting|have permission to delete|cannot delete/i;
 
     function el(tag, cls, text) {
       var node = document.createElement(tag);
@@ -479,8 +480,8 @@
       return node;
     }
 
+    // Read the visible text of a node line by line (it must be in the page, even off-screen).
     function textLines(node) {
-      // Read the visible text line by line (needs the node to be in the page, even off-screen).
       var holder = el("div");
       holder.style.cssText = "position:absolute;left:-9999px;top:0;width:800px;";
       holder.appendChild(node);
@@ -488,8 +489,33 @@
       var lines = (holder.innerText || "").split("\n")
         .map(function (l) { return l.trim(); })
         .filter(function (l) { return l && !CANCEL_TEXT.test(l); });
-      holder.style.display = "none";
-      return { lines: lines, holder: holder };
+      holder.remove();
+      return lines;
+    }
+
+    function csrfToken() {
+      var input = document.querySelector('input[name="csrfmiddlewaretoken"]');
+      if (input) { return input.value; }
+      var m = document.cookie.match(/csrftoken=([^;]+)/);
+      return m ? decodeURIComponent(m[1]) : "";
+    }
+
+    // The request that really deletes: our own form, so it does not depend on Unfold's markup.
+    function submitDelete(url, pairs) {
+      var form = el("form");
+      form.method = "post";
+      form.action = url;
+      form.style.display = "none";
+      pairs.concat([["csrfmiddlewaretoken", csrfToken()], ["post", "yes"]]).forEach(function (kv) {
+        var input = document.createElement("input");
+        input.type = "hidden";
+        input.name = kv[0];
+        input.value = kv[1];
+        form.appendChild(input);
+      });
+      document.body.appendChild(form);
+      window.__erpAllowLeave = true;  // no "unsaved changes" box on the way out
+      form.submit();
     }
 
     function closeDialog() {
@@ -535,14 +561,10 @@
       overlay.classList.add("is-open");
       cancel.focus();
 
-      function dismiss() {
-        closeDialog();
-        if (opts.onCancel) { opts.onCancel(); }
-      }
-      cancel.addEventListener("click", dismiss);
-      overlay.addEventListener("click", function (e) { if (e.target === overlay) { dismiss(); } });
+      cancel.addEventListener("click", closeDialog);
+      overlay.addEventListener("click", function (e) { if (e.target === overlay) { closeDialog(); } });
       overlay.addEventListener("keydown", function (e) {
-        if (e.key === "Escape") { e.stopPropagation(); dismiss(); }
+        if (e.key === "Escape") { e.stopPropagation(); closeDialog(); }
         if (e.key === "Tab" && go) {
           if (e.shiftKey && document.activeElement === cancel) { e.preventDefault(); go.focus(); }
           else if (!e.shiftKey && document.activeElement === go) { e.preventDefault(); cancel.focus(); }
@@ -557,26 +579,22 @@
       }
     }
 
-    // Fetch Django's own confirmation page, read it, and show it as a pop-up.
-    function confirmDelete(url, fetchOptions, postUrl, fallback) {
+    // opts: url, body (POST data, optional), postUrl, pairs, names, count, noun, fallback
+    function confirmDelete(opts) {
       var options = { credentials: "same-origin", headers: { "X-Requested-With": "XMLHttpRequest" } };
-      for (var key in fetchOptions) { options[key] = fetchOptions[key]; }
-      fetch(url, options).then(function (response) {
+      if (opts.body) { options.method = "POST"; options.body = opts.body; }
+      fetch(opts.url, options).then(function (response) {
         if (response.redirected && /login/.test(response.url)) { throw new Error("login"); }
         return response.text();
       }).then(function (html) {
         var doc = new DOMParser().parseFromString(html, "text/html");
-        var confirmForm = null;
-        Array.prototype.forEach.call(doc.querySelectorAll("form"), function (f) {
-          if (!confirmForm && f.querySelector('input[name="post"]')) { confirmForm = f; }
-        });
+        var pageText = doc.body ? doc.body.textContent : "";
+        var area = doc.querySelector("main") || doc.querySelector("#content-main") || doc.querySelector("#content");
+        var lines = area ? textLines(document.importNode(area, true)) : [];
 
-        if (!confirmForm) {
-          // Nothing can be deleted (protected records or no permission): explain it.
-          var area = doc.querySelector("main") || doc.querySelector("#content-main") || doc.querySelector("#content");
-          var info = area ? textLines(document.importNode(area, true)) : { lines: [], holder: null };
-          if (info.holder) { info.holder.remove(); }
-          var reason = info.lines.filter(function (l) { return l.length > 25; }).slice(0, 6);
+        // Django itself says it cannot delete (protected related records / no permission).
+        if (BLOCKED.test(pageText)) {
+          var reason = lines.filter(function (l) { return l.length > 25; }).slice(0, 6);
           showDialog({
             title: "This cannot be deleted",
             text: reason.length ? "" : "Other records depend on it, or you do not have permission to delete it.",
@@ -585,28 +603,24 @@
           return;
         }
 
-        var form = document.importNode(confirmForm, true);
-        form.action = postUrl;
-        form.method = "post";
-        var read = textLines(form);
-        var lines = read.lines;
+        // Read Django's own list of what will be deleted; fall back to the names we already know.
         var low = lines.map(function (l) { return l.toLowerCase(); });
         var iSummary = low.indexOf("summary");
         var iObjects = low.indexOf("objects");
-        var question = lines[0] || "";
-        var noun = (question.match(/delete the selected ([^?]+)\?/i) || [])[1] || "";
-        var summary = [], objects = [];
+        var summary = [], objects = [], noun = opts.noun || "", count = opts.count;
         if (iObjects > -1) {
           summary = iSummary > -1 ? lines.slice(iSummary + 1, iObjects) : [];
           objects = lines.slice(iObjects + 1);
-        } else {
-          objects = lines.slice(1);
+          var found = (lines.join("\n").match(/delete the selected ([^?\n]+)\?/i) || [])[1];
+          if (found) { noun = found; }
+          var n = parseInt(((summary[0] || "").match(/:\s*(\d+)/) || [])[1], 10);
+          if (n) { count = n; }
         }
-        var count = parseInt(((summary[0] || "").match(/:\s*(\d+)/) || [])[1], 10);
+        if (!objects.length) { objects = opts.names; }
+
         var title = "Delete this record?";
-        if (noun) {
-          title = count > 1 ? "Delete " + count + " " + noun + "?" : "Delete this " + noun + "?";
-        }
+        if (count > 1) { title = "Delete " + count + " " + (noun || "records") + "?"; }
+        else if (noun) { title = "Delete this " + noun + "?"; }
         showDialog({
           title: title,
           text: "This will permanently delete the items below, together with anything that belongs to them. This cannot be undone.",
@@ -615,41 +629,61 @@
             { heading: "Will be deleted", items: objects }
           ],
           confirmLabel: "Yes, delete",
-          onCancel: function () { read.holder.remove(); },
-          onConfirm: function () {
-            window.__erpAllowLeave = true;  // no "unsaved changes" box on the way out
-            form.submit();
-          }
+          onConfirm: function () { submitDelete(opts.postUrl, opts.pairs); }
         });
-      }).catch(function () { fallback(); });
+      }).catch(function () { opts.fallback(); });
     }
 
+    // Delete button inside a record
     document.addEventListener("click", function (e) {
       if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) { return; }
       var link = e.target.closest ? e.target.closest("a[href]") : null;
       if (!link) { return; }
-      var path = link.pathname || "";
-      if (!/\/delete\/?$/.test(path) || (link.target && link.target !== "_self")) { return; }
+      if (!/\/delete\/?$/.test(link.pathname || "") || (link.target && link.target !== "_self")) { return; }
       if (link.closest(".related-widget-wrapper") || /_popup=/.test(link.search)) { return; }
       e.preventDefault();
       e.stopPropagation();
-      confirmDelete(link.href, {}, link.href, function () { window.location.href = link.href; });
+      var heading = document.querySelector("h1");
+      confirmDelete({
+        url: link.href, postUrl: link.href, pairs: [],
+        names: heading && heading.textContent.trim() ? [heading.textContent.trim()] : [],
+        count: 1, noun: "",
+        fallback: function () { window.location.href = link.href; }
+      });
     }, true);
 
-    // "Delete selected ..." from the list pages
+    // "Delete selected ..." from a list page
     document.addEventListener("submit", function (e) {
       var form = e.target;
       if (!form || form.tagName !== "FORM" || form.dataset.erpBypass) { return; }
       var data;
       try { data = new FormData(form); } catch (err) { return; }
       if (data.get("action") !== "delete_selected" || data.get("post")) { return; }
-      if (!data.getAll("_selected_action").length) { return; }  // nothing ticked: Django explains
+      var ticked = Array.prototype.slice.call(form.querySelectorAll('input[name="_selected_action"]:checked'));
+      if (!ticked.length) { return; }  // nothing ticked: Django explains it
       e.preventDefault();
       e.stopPropagation();
+
+      var names = ticked.map(function (box) {
+        var row = box.closest("tr");
+        var cell = row && (row.querySelector("th a, td a") || row.querySelector("th"));
+        return cell && cell.textContent.trim() ? cell.textContent.trim() : "Selected item";
+      });
+      var select = form.querySelector('select[name="action"]');
+      var label = select && select.selectedOptions[0] ? select.selectedOptions[0].textContent : "";
+      var noun = (label.match(/delete selected (.+)/i) || [])[1] || "";
+
+      var pairs = [];
+      data.forEach(function (value, key) {
+        if (key !== "csrfmiddlewaretoken" && key !== "post" && key !== "index" && typeof value === "string") {
+          pairs.push([key, value]);
+        }
+      });
       var target = form.action || window.location.href;
-      confirmDelete(target, { method: "POST", body: data }, target, function () {
-        form.dataset.erpBypass = "1";
-        form.submit();
+      confirmDelete({
+        url: target, body: data, postUrl: target, pairs: pairs,
+        names: names, count: names.length, noun: noun,
+        fallback: function () { form.dataset.erpBypass = "1"; form.submit(); }
       });
     }, true);
   }
