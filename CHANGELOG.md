@@ -1,6 +1,14 @@
 # Changelog
 
-## Module 1, update 5 - Fixes and Units form (current)
+## Infrastructure - PostgreSQL (current)
+- The project now uses PostgreSQL. Connection details come from a local `.env` file (see `.env.example`); `.env` is never uploaded to GitHub
+- If `DB_NAME` is not set, the project falls back to the old SQLite file
+- New command `python manage.py db_info` shows which database is in use and tests the connection
+- `requirements.txt` adds the `psycopg` driver
+- README has a step-by-step PostgreSQL setup guide for Windows
+- Start with an empty database: run `migrate`, `createsuperuser`, then seed sample data again
+
+## Module 1, update 5 - Fixes and Units form
 - Fix: the management fee section now hides when "Company Owned" is chosen (more robust show/hide logic;
   whole sections including their headings are hidden)
 - Property code must be 3 to 6 letters/numbers starting with a letter

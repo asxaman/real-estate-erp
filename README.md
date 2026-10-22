@@ -1,7 +1,7 @@
 # Real Estate ERP
 
 Web ERP for a real estate management company.
-Built with Django + Django Unfold (admin theme) + SQLite.
+Built with Django + Django Unfold (admin theme) + PostgreSQL.
 
 Project folder on your computer: `C:\Projects\real-estate-erp\`
 
@@ -44,11 +44,63 @@ Every time you open a new terminal you must activate the environment again (this
 
     pip install -r requirements.txt
 
-### Step 5 - Create the database
+### Step 5 - Set up the PostgreSQL database
 
+The system stores its data in PostgreSQL. Do the five parts below once.
+
+**5a. Install PostgreSQL 18**
+1. Open https://www.postgresql.org/download/windows/ and click **Download the installer**.
+2. On the EDB page pick version **18.x** for **Windows x86-64** and download it.
+3. Run the installer and click **Next** through the screens, keeping the defaults. Keep **PostgreSQL Server**,
+   **pgAdmin 4** and **Command Line Tools** ticked.
+4. When it asks for a **password for the database superuser (postgres)**, type a password and **write it down**.
+   Use only letters and numbers (no quotes, spaces or symbols) to avoid problems later.
+5. Keep port **5432** and the default locale. At the end, untick Stack Builder and click **Finish**.
+
+**5b. Create the project database and its user**
+1. Press the Windows key, type **SQL Shell (psql)** and open it.
+2. Press **Enter** four times to accept Server, Database, Port and Username (`localhost`, `postgres`, `5432`, `postgres`).
+3. Type the superuser password from 5a and press Enter (nothing shows while you type).
+4. Paste these three lines, one at a time, pressing Enter after each. Replace `YourPasswordHere` with a NEW
+   password for the project (letters and numbers only) and write it down:
+
+       CREATE USER erp_user WITH PASSWORD 'YourPasswordHere';
+       ALTER USER erp_user CREATEDB;
+       CREATE DATABASE real_estate_erp OWNER erp_user;
+
+   Each line should answer `CREATE ROLE`, `ALTER ROLE` and `CREATE DATABASE`.
+5. Type `\q` and press Enter to leave.
+
+**5c. Tell the project how to connect**
+1. In the VS Code terminal run:
+
+       Copy-Item .env.example .env
+
+2. Open the new `.env` file in VS Code and replace `put-your-database-password-here` with the project password from 5b.
+   Save the file. (It must be named exactly `.env`, not `.env.txt`. Git never uploads it.)
+
+**5d. Install the packages again and test the connection**
+
+    pip install -r requirements.txt
+    python manage.py db_info
+
+You should see `Database type : postgresql` and `Connection OK`.
+
+**5e. Create the tables**
+
+    python manage.py makemigrations
     python manage.py migrate
 
-This creates the file `db.sqlite3`.
+`makemigrations` should say "No changes detected". `migrate` then builds all tables in PostgreSQL.
+
+If something goes wrong:
+* `connection refused` - PostgreSQL is not running. Press Windows + R, type `services.msc`, find
+  **postgresql-x64-18**, right-click and choose **Start**.
+* `password authentication failed` - the password in `.env` does not match the one from 5b.
+* `database "real_estate_erp" does not exist` - repeat 5b.
+* `No module named psycopg` - repeat the `pip install -r requirements.txt` command with `(venv)` active.
+* If `DB_NAME` is missing from `.env` the project quietly uses the old SQLite file instead;
+  `python manage.py db_info` tells you which one is in use.
 
 ### Step 6 - Create your superuser (the main administrator)
 
