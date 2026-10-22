@@ -3,13 +3,16 @@ from decimal import Decimal
 
 from django.contrib import admin
 from django.contrib.auth.models import User
+from django.core.exceptions import ValidationError
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import RequestFactory, TestCase
 
 from properties.models import Owner, Property, Unit
 
 from . import audit
 from .data_registry import run_erasers, run_seeders
-from .models import AuditEntry
+from .admin_utils import avatar_html
+from .models import MAX_PHOTO_BYTES, PHOTO_VALIDATORS, AuditEntry
 from .safety import superuser_change_problem, user_delete_problem
 
 
@@ -129,3 +132,25 @@ class DataTools(TestCase):
         self.assertEqual(Property.objects.count(), 0)
         self.assertEqual(Unit.objects.count(), 0)
         self.assertEqual(list(Owner.objects.values_list("is_company", flat=True)), [True])
+
+
+class ProfilePicture(TestCase):
+    def check(self, upload):
+        for validator in PHOTO_VALIDATORS:
+            validator(upload)
+
+    def test_small_png_is_accepted(self):
+        self.check(SimpleUploadedFile("me.PNG", b"x" * 100, content_type="image/png"))
+
+    def test_wrong_type_is_refused(self):
+        with self.assertRaises(ValidationError):
+            self.check(SimpleUploadedFile("me.pdf", b"x" * 100))
+
+    def test_big_file_is_refused(self):
+        with self.assertRaises(ValidationError):
+            self.check(SimpleUploadedFile("me.jpg", b"x" * (MAX_PHOTO_BYTES + 1)))
+
+    def test_avatar_shows_initials_without_a_picture(self):
+        user = User.objects.create_user("asad", first_name="Asad", last_name="Zaman")
+        self.assertIn("AZ", avatar_html(user))
+        self.assertIn("AS", avatar_html(User.objects.create_user("asif")))

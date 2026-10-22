@@ -148,6 +148,11 @@ USE_TZ = True
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
+# Uploaded files (profile pictures). Back up the "media" folder together with the database.
+MEDIA_URL = "media/"
+MEDIA_ROOT = BASE_DIR / "media"
+DATA_UPLOAD_MAX_MEMORY_SIZE = 5 * 1024 * 1024
+
 # --------------------------------------------------------------------------
 # Django Unfold (admin theme)
 # --------------------------------------------------------------------------
@@ -173,7 +178,7 @@ UNFOLD = {
     "SHOW_VIEW_ON_SITE": False,
     # Our own small style/behaviour layer (info icons, compact forms).
     # Bump the ?v= number whenever these files change so browsers reload them.
-    "STYLES": [lambda request: static("core/erp.css") + "?v=5"],
+    "STYLES": [lambda request: static("core/erp.css") + "?v=6"],
     "SCRIPTS": [lambda request: static("core/erp.js") + "?v=5"],
     "SIDEBAR": {
         "show_search": True,

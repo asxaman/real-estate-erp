@@ -156,3 +156,13 @@ html.dark .erp-leave-icon { background: rgba(245, 158, 11, 0.15); color: #fbbf24
 html.dark .erp-leave-go { color: #f87171; border-color: rgba(248, 113, 113, 0.4) !important; }
 @keyframes erp-fade { from { opacity: 0; } to { opacity: 1; } }
 @keyframes erp-pop { from { opacity: 0; transform: translateY(6px) scale(0.97); } to { opacity: 1; transform: none; } }
+
+/* ---- Profile picture upload on the user form ---- */
+form#user_form input[type="file"] {
+  max-width: 420px; padding: 6px 8px; font-size: 13px; border-radius: 8px;
+  border: 1px dashed rgba(148, 163, 184, 0.6); background: transparent; color: inherit; cursor: pointer;
+}
+form#user_form input[type="file"]::file-selector-button {
+  margin-right: 10px; padding: 5px 12px; border: 0; border-radius: 6px;
+  background: #7c3aed; color: #fff; font-size: 13px; cursor: pointer;
+}

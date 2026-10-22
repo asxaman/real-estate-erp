@@ -1,5 +1,11 @@
 # Changelog
 
+## Module 0, update 7 - User profile picture
+- Optional profile picture on every user (Personal info section); round photo or initials circle in the Users list
+- Pictures: JPG/PNG/WebP, max 2 MB, stored in the new `media` folder; the file is deleted when the picture is removed or the user is deleted
+- New requirement: Pillow (run `pip install -r requirements.txt`)
+- Run `makemigrations` then `migrate` after extracting
+
 ## Module 1, update 6b - Unsaved-changes pop-up
 - Leaving a form with unsaved changes (sidebar, breadcrumbs, links) now shows a pop-up in the app's own style instead of the browser's "Leave site?" box. Closing the tab or reloading still uses the browser's box (browsers do not allow anything else)
 - No database changes

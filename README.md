@@ -128,6 +128,9 @@ Stop the server any time with **Ctrl + C** in the terminal.
 * **Data tools** (sidebar > Administration > Data tools):
   * **Seed sample data** - creates 4 roles and 4 demo users (password `Demo@12345`).
   * **Erase all data** - type `ERASE` to confirm. Superusers are never deleted.
+* **Profile picture** (optional): open a user, and in *Personal info* choose a picture (JPG, PNG or WebP, up to 2 MB).
+  It shows in the Users list as a round photo; people without one get a circle with their initials.
+  Tick *Remove current picture* to delete it. Pictures are stored in the `media` folder, so include that folder in your backups.
 * Only superusers can see Users, Roles and Data tools.
 
 ## What you can do in Module 1 (Properties and units)
@@ -278,6 +281,7 @@ The `.gitignore` file keeps your database, passwords and the `venv` folder out o
     config/      project settings, URLs
     core/        Module 0: users, roles, seed/erase tools, audit log, safety rules, backup command
     properties/  Module 1: owners, properties, units
+    media/       uploaded files such as profile pictures (never uploaded to GitHub)
     backups/     database backups made by `backup_db` (never uploaded to GitHub)
     .env         your private settings and database password (never uploaded to GitHub)
     manage.py    command-line entry point

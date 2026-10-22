@@ -1,4 +1,4 @@
-from django.utils.html import strip_tags
+from django.utils.html import format_html, strip_tags
 
 
 def move_help_text_to_tooltip(form):
@@ -37,3 +37,20 @@ def format_amount(value):
         return "-"
     text = f"{value:,.2f}"
     return text[:-3] if text.endswith(".00") else text
+
+
+def avatar_html(user, size=32):
+    """Round profile picture, or a circle with the person's initials when there is none."""
+    profile = getattr(user, "profile", None)
+    if profile is not None and profile.photo:
+        return format_html(
+            '<img src="{}" alt="" style="width:{}px;height:{}px;border-radius:50%;object-fit:cover;">',
+            profile.photo.url, size, size,
+        )
+    initials = ((user.first_name[:1] + user.last_name[:1]) or user.get_username()[:2]).upper()
+    return format_html(
+        '<span style="display:inline-flex;align-items:center;justify-content:center;'
+        'width:{}px;height:{}px;border-radius:50%;background:#ede9fe;color:#6d28d9;'
+        'font-weight:600;font-size:{}px;">{}</span>',
+        size, size, int(size * 0.4), initials,
+    )

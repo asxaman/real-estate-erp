@@ -5,17 +5,20 @@ Only superusers can see or manage Users and Roles (groups). That is how the
 superuser creates other users, and it stops ordinary staff from giving
 themselves extra permissions.
 """
+from django import forms
 from django.contrib import admin
 from django.contrib.auth.admin import GroupAdmin as BaseGroupAdmin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.contrib.auth.models import Group, User
+from django.core.files.uploadedfile import UploadedFile
 from django.utils.html import format_html_join
 from django.utils.safestring import mark_safe
 from unfold.admin import ModelAdmin
 from unfold.decorators import display
 from unfold.forms import AdminPasswordChangeForm, UserChangeForm, UserCreationForm
 
-from .models import AuditEntry
+from .admin_utils import avatar_html
+from .models import PHOTO_VALIDATORS, AuditEntry, UserProfile
 from .safety import superuser_change_problem, user_delete_problem
 
 admin.site.unregister(User)
@@ -44,6 +47,16 @@ class SafeUserChangeForm(UserChangeForm):
 
     current_user = None  # set per request in UserAdmin.get_form
 
+    # Optional profile picture (saved to the user's profile in UserAdmin.save_model).
+    photo = forms.ImageField(
+        label="Change picture",
+        required=False,
+        validators=PHOTO_VALIDATORS,
+        widget=forms.FileInput(attrs={"accept": "image/png,image/jpeg,image/webp"}),
+        help_text="Optional. JPG, PNG or WebP, up to 2 MB.",
+    )
+    remove_photo = forms.BooleanField(required=False, label="Remove current picture")
+
     def clean(self):
         cleaned = super().clean() or self.cleaned_data
         problem = superuser_change_problem(
@@ -63,8 +76,45 @@ class UserAdmin(SuperuserOnlyMixin, BaseUserAdmin, ModelAdmin):
     form = SafeUserChangeForm
     add_form = UserCreationForm
     change_password_form = AdminPasswordChangeForm
-    list_display = ("username", "first_name", "last_name", "email", "is_staff", "is_active")
+    list_display = ("avatar", "username", "first_name", "last_name", "email", "is_staff", "is_active")
+    list_display_links = ("avatar", "username")
+    list_select_related = ("profile",)
     list_filter = ("is_staff", "is_superuser", "is_active", "groups")
+    readonly_fields = ("photo_preview",)
+    fieldsets = (
+        (None, {"fields": ("username", "password")}),
+        (
+            "Personal info",
+            {"fields": ("photo_preview", "photo", "remove_photo", "first_name", "last_name", "email")},
+        ),
+        (
+            "Permissions",
+            {"fields": ("is_active", "is_staff", "is_superuser", "groups", "user_permissions")},
+        ),
+        ("Important dates", {"fields": ("last_login", "date_joined")}),
+    )
+
+    @admin.display(description="")
+    def avatar(self, obj):
+        return avatar_html(obj, 32)
+
+    @admin.display(description="Current picture")
+    def photo_preview(self, obj):
+        return avatar_html(obj, 72) if obj is not None and obj.pk else "-"
+
+    def save_model(self, request, obj, form, change):
+        super().save_model(request, obj, form, change)
+        photo = form.cleaned_data.get("photo")
+        remove = form.cleaned_data.get("remove_photo")
+        if not (photo or remove):
+            return
+        profile, _ = UserProfile.objects.get_or_create(user=obj)
+        if profile.photo:  # replacing or removing: delete the old file
+            profile.photo.delete(save=False)
+            profile.photo = ""
+        if isinstance(photo, UploadedFile) and not remove:
+            profile.photo = photo
+        profile.save()
 
     def get_form(self, request, obj=None, **kwargs):
         form = super().get_form(request, obj, **kwargs)
