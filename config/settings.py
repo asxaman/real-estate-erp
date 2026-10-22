@@ -46,6 +46,7 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     # ERP modules
     "core",  # Module 0: foundation (users, roles, data tools)
+    "properties",  # Module 1: owners, properties, units
 ]
 
 MIDDLEWARE = [
@@ -122,6 +123,15 @@ def _is_superuser(request):
     return request.user.is_superuser
 
 
+def _can(permission):
+    """Sidebar helper: show a menu item only to users who hold this permission."""
+
+    def check(request):
+        return request.user.has_perm(permission)
+
+    return check
+
+
 UNFOLD = {
     "SITE_TITLE": "Real Estate ERP",
     "SITE_HEADER": "Real Estate ERP",
@@ -133,6 +143,30 @@ UNFOLD = {
         "show_search": True,
         "show_all_applications": True,
         "navigation": [
+            {
+                "title": "Property management",
+                "separator": True,
+                "items": [
+                    {
+                        "title": "Owners",
+                        "icon": "account_circle",
+                        "link": reverse_lazy("admin:properties_owner_changelist"),
+                        "permission": _can("properties.view_owner"),
+                    },
+                    {
+                        "title": "Properties",
+                        "icon": "apartment",
+                        "link": reverse_lazy("admin:properties_property_changelist"),
+                        "permission": _can("properties.view_property"),
+                    },
+                    {
+                        "title": "Units",
+                        "icon": "meeting_room",
+                        "link": reverse_lazy("admin:properties_unit_changelist"),
+                        "permission": _can("properties.view_unit"),
+                    },
+                ],
+            },
             {
                 "title": "Administration",
                 "separator": True,

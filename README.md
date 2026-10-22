@@ -76,6 +76,24 @@ Stop the server any time with **Ctrl + C** in the terminal.
   * **Erase all data** - type `ERASE` to confirm. Superusers are never deleted.
 * Only superusers can see Users, Roles and Data tools.
 
+## What you can do in Module 1 (Properties and units)
+
+Sidebar > **Property management**:
+
+* **Owners** - the people or companies who own the buildings you manage. The optional
+  *Portal access* field links an owner to a login account; it will be used by the owner portal later.
+* **Properties** - buildings, villa compounds, land. Each has a short unique **code** (e.g. `RMT`),
+  an owner, emirate, area, and the management fee percentage. The property page lists its
+  units at the bottom and you can add units there directly.
+* **Units** - apartments, villas, offices, shops. Shown as `CODE-number` (e.g. `RMT-304`) with
+  filters for status, type and property. Status: Vacant, Occupied, Reserved, Under maintenance
+  (set by hand for now; it will update automatically once leases exist).
+* **Seed sample data** now also creates 3 owners, 4 properties (Abu Dhabi, Dubai, Sharjah) and
+  88 units, and gives the demo roles permissions: Property Manager can do everything,
+  Accountant and Maintenance Supervisor can only view, Leasing Agent can view and edit units.
+  Log in as `demo.manager` / `demo.leasing` etc. to see what each role can see.
+* **Erase all data** now also deletes all owners, properties and units.
+
 Same tools from the terminal:
 
     python manage.py seed_data
@@ -111,7 +129,13 @@ Same tools from the terminal:
 2. In the terminal (with `(venv)` active):
 
        pip install -r requirements.txt
+       python manage.py makemigrations
        python manage.py migrate
+
+   `makemigrations` writes the "recipe" for the new database tables (a file inside the
+   module's `migrations` folder). `migrate` then builds the tables. Commit the new
+   migration files to Git too (step 4 does this) so the recipe is saved with the code.
+   If `makemigrations` says "No changes detected" that is fine.
 
 3. Test it with `python manage.py runserver`.
 4. Save to GitHub:
@@ -128,6 +152,7 @@ The `.gitignore` file keeps your database, passwords and the `venv` folder out o
 
     config/      project settings, URLs
     core/        Module 0: users, roles, seed/erase tools
+    properties/  Module 1: owners, properties, units
     manage.py    command-line entry point
     db.sqlite3   your database (created by migrate, never uploaded to GitHub)
 
