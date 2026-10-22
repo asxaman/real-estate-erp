@@ -1,5 +1,27 @@
 # Changelog
 
+## Module 1, update 4 - Property form logic (current)
+- Built-in owner "Company Owned" (created automatically after `migrate`, cannot be renamed or deleted,
+  never removed by "Erase all data"). Selecting it hides the management fee fields
+- Management fee type: percentage of rent or fixed AED per year; required for every owner except Company Owned
+- Standalone properties get "Annual rent (AED)" and "Status" (hidden for buildings)
+- Year built and Total floors hidden for Warehouse, Yard, Shop, Apartment, Parking Spot (cleared on save)
+- New optional "Map link" field
+- The server also enforces these rules, not only the page
+- Run `makemigrations` then `migrate` after extracting
+
+## Module 1, update 3 - Property form UI/UX polish
+- Fields arranged in a compact two/three-column layout in three sections (Basic information, Details, Notes)
+- Shorter address and notes boxes, helpful placeholders, tighter field spacing
+- Searchable Owner dropdown
+- Property code is shown and stored in capitals
+- After saving a new building you stay on the page so you can add its units immediately
+- Warning if you try to leave the form with unsaved changes
+- Help text under fields is replaced by a small "i" icon next to the field name; hover (or Tab to it) to read the tip. Applies to the Owner, Property and Unit forms (the server moves each help text onto its field, so it no longer depends on Unfold's page markup)
+- Property type shows a small "Has units" / "Standalone" pill that updates as you choose
+- New files: `core/static/core/erp.css` and `erp.js` (loaded through the Unfold settings)
+- No database changes in this update (no new migration needed, `migrate` can be skipped)
+
 ## Module 1, update 2 - Property form changes (current)
 - Property types are now: Residential Building, Commercial Building (have units) and
   Villa, Warehouse, Yard, Shop, Apartment, Parking Spot (standalone, no units)

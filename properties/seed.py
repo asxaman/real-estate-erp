@@ -52,12 +52,12 @@ def _make_unit(prop, number, floor, unit_type, counter, premium=0):
 
 
 def seed_properties() -> str:
+    company = Owner.company()  # the built-in "Company Owned" owner
     owners = {}
     for name, email, phone in [
         ("Khalifa Al Mansoori", "khalifa@example.com", "+971 50 000 0001"),
         ("Gulf Horizon Investments LLC", "info@gulfhorizon.example.com", "+971 2 000 0002"),
         ("Noura Al Suwaidi", "noura@example.com", "+971 55 000 0003"),
-        ("Own Portfolio (Company-owned)", "", ""),
     ]:
         owners[name], _ = Owner.objects.get_or_create(
             name=name, defaults={"email": email, "phone": phone}
@@ -69,59 +69,77 @@ def seed_properties() -> str:
 
     T = Property.PropertyType
     E = Property.Emirate
-    own = owners["Own Portfolio (Company-owned)"]
+    F = Property.FeeType
+    S = Property.Status
 
-    # Buildings (have units)
+    def percent_fee(value):
+        return {"management_fee_type": F.PERCENT, "management_fee_percent": Decimal(value)}
+
+    # Company-owned properties have no management fee
+    no_fee = {"management_fee_type": "", "management_fee_percent": Decimal("0")}
+
+    # Buildings (have units; rent and status live on the units)
     reem = prop(
         "RMT", name="Reem Marina Tower", owner=owners["Khalifa Al Mansoori"],
         property_type=T.RESIDENTIAL_BUILDING, emirate=E.ABU_DHABI,
         address="Al Reem Island, Abu Dhabi", year_built=2017, total_floors=10,
-        management_fee_percent=Decimal("5.00"),
+        status="", **percent_fee("5.00"),
     )
     hub = prop(
         "SBH", name="Saadiyat Business Hub", owner=owners["Gulf Horizon Investments LLC"],
         property_type=T.COMMERCIAL_BUILDING, emirate=E.ABU_DHABI,
         address="Saadiyat Island, Abu Dhabi", year_built=2019, total_floors=5,
-        management_fee_percent=Decimal("6.00"),
+        status="", **percent_fee("6.00"),
     )
     marina = prop(
         "DMR", name="Marina View Residence", owner=owners["Gulf Horizon Investments LLC"],
         property_type=T.RESIDENTIAL_BUILDING, emirate=E.DUBAI,
         address="Dubai Marina, Dubai", year_built=2014, total_floors=6,
-        management_fee_percent=Decimal("5.00"),
+        status="", **percent_fee("5.00"),
     )
 
-    # Standalone properties (no units)
+    # Standalone properties (no units; they carry their own annual rent and status)
+    villa_status = [S.OCCUPIED, S.OCCUPIED, S.VACANT, S.RESERVED]
     for i in range(1, 5):
+        fee = (
+            percent_fee("4.50")
+            if i < 4
+            else {  # one villa shows the "fixed amount" fee type
+                "management_fee_type": F.FIXED,
+                "management_fee_percent": Decimal("0"),
+                "management_fee_fixed": Decimal("6000"),
+            }
+        )
         prop(
             f"ZV{i:02d}", name=f"Zahia Villa {i}", owner=owners["Noura Al Suwaidi"],
             property_type=T.VILLA, emirate=E.SHARJAH, address="Al Zahia, Sharjah",
-            year_built=2021, total_floors=2, management_fee_percent=Decimal("4.50"),
+            year_built=2021, total_floors=2,
+            annual_rent=Decimal(180000 + i * 5000), status=villa_status[i - 1], **fee,
         )
     prop(
-        "MSW01", name="Mussafah Warehouse 1", owner=own,
+        "MSW01", name="Mussafah Warehouse 1", owner=company,
         property_type=T.WAREHOUSE, emirate=E.ABU_DHABI, address="Mussafah, Abu Dhabi",
-        management_fee_percent=Decimal("0"),
+        annual_rent=Decimal("150000"), status=S.OCCUPIED, **no_fee,
     )
     prop(
-        "MSY01", name="Mussafah Storage Yard", owner=own,
+        "MSY01", name="Mussafah Storage Yard", owner=company,
         property_type=T.YARD, emirate=E.ABU_DHABI, address="Mussafah, Abu Dhabi",
-        management_fee_percent=Decimal("0"),
+        annual_rent=Decimal("90000"), status=S.VACANT, **no_fee,
     )
     prop(
         "CRS01", name="Corniche Retail Shop", owner=owners["Khalifa Al Mansoori"],
         property_type=T.SHOP, emirate=E.ABU_DHABI, address="Corniche Road, Abu Dhabi",
-        management_fee_percent=Decimal("5.00"),
+        annual_rent=Decimal("110000"), status=S.OCCUPIED, **percent_fee("5.00"),
     )
     prop(
         "KHA01", name="Khalidiyah Apartment 2B", owner=owners["Khalifa Al Mansoori"],
         property_type=T.APARTMENT, emirate=E.ABU_DHABI, address="Khalidiyah, Abu Dhabi",
-        year_built=2010, total_floors=1, management_fee_percent=Decimal("5.00"),
+        annual_rent=Decimal("72000"), status=S.VACANT, **percent_fee("5.00"),
     )
     prop(
-        "DMP01", name="Marina Parking Spot P-118", owner=own,
+        "DMP01", name="Marina Parking Spot P-118", owner=company,
         property_type=T.PARKING_SPOT, emirate=E.DUBAI, address="Dubai Marina, Dubai",
-        management_fee_percent=Decimal("0"),
+        annual_rent=Decimal("12000"), status=S.OCCUPIED, **no_fee,
     )
 
     new_units = 0
@@ -181,10 +199,11 @@ def _grant_role_permissions():
 def erase_properties() -> str:
     units = Unit.objects.count()
     properties = Property.objects.count()
-    owners = Owner.objects.count()
+    owners = Owner.objects.filter(is_company=False).count()
     Unit.objects.all().delete()
     Property.objects.all().delete()
-    Owner.objects.all().delete()
+    # The built-in "Company Owned" owner is kept.
+    Owner.objects.filter(is_company=False).delete()
     return f"removed {units} units, {properties} properties, {owners} owners"
 
 

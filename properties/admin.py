@@ -1,7 +1,10 @@
-from django.contrib import admin
+from django import forms
+from django.contrib import admin, messages
 from django.db.models import Count, Q
 from unfold.admin import ModelAdmin, TabularInline
 from unfold.decorators import display
+
+from core.admin_utils import TooltipHelpMixin
 
 from .models import Owner, Property, Unit
 
@@ -15,7 +18,7 @@ class UnitInline(TabularInline):
 
 
 @admin.register(Owner)
-class OwnerAdmin(ModelAdmin):
+class OwnerAdmin(TooltipHelpMixin, ModelAdmin):
     list_display = ("name", "email", "phone", "property_count", "is_active")
     list_filter = ("is_active",)
     search_fields = ("name", "email", "phone")
@@ -29,13 +32,65 @@ class OwnerAdmin(ModelAdmin):
     def get_queryset(self, request):
         return super().get_queryset(request).annotate(_property_count=Count("properties"))
 
+    def get_readonly_fields(self, request, obj=None):
+        # The built-in "Company Owned" owner cannot be renamed or deactivated.
+        if obj is not None and obj.is_company:
+            return ("name", "is_active")
+        return ()
+
+    def has_delete_permission(self, request, obj=None):
+        if obj is not None and obj.is_company:
+            return False
+        return super().has_delete_permission(request, obj)
+
     @admin.display(description="Properties", ordering="_property_count")
     def property_count(self, obj):
         return obj._property_count
 
 
+class PropertyAdminForm(forms.ModelForm):
+    """Same fields as before - only friendlier: placeholders and shorter text boxes."""
+
+    class Meta:
+        model = Property
+        fields = "__all__"
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        hints = {
+            "name": "e.g. Reem Marina Tower",
+            "code": "e.g. RMT",
+            "year_built": "e.g. 2018",
+            "total_floors": "e.g. 10",
+            "annual_rent": "e.g. 85000",
+            "management_fee_percent": "e.g. 5",
+            "management_fee_fixed": "e.g. 6000",
+            "map_link": "https://maps.google.com/...",
+            "address": "Street, area, city",
+            "notes": "Anything worth remembering about this property",
+        }
+        for field_name, text in hints.items():
+            if field_name in self.fields:
+                self.fields[field_name].widget.attrs["placeholder"] = text
+        if "owner" in self.fields:
+            # The page script uses this to know which owner means "Company Owned".
+            self.fields["owner"].widget.attrs["data-company-owner-id"] = str(Owner.company().pk)
+        if "code" in self.fields:
+            # Codes are always stored in capitals; show them that way while typing.
+            self.fields["code"].widget.attrs.update(
+                {"style": "text-transform: uppercase;", "autocomplete": "off"}
+            )
+        for field_name in ("address", "notes"):
+            if field_name in self.fields:
+                self.fields[field_name].widget.attrs["rows"] = 3
+
+
 @admin.register(Property)
-class PropertyAdmin(ModelAdmin):
+class PropertyAdmin(TooltipHelpMixin, ModelAdmin):
+    form = PropertyAdminForm
+    compressed_fields = True  # tighter spacing between fields
+    warn_unsaved_form = True  # warns before leaving the page with unsaved changes
+    autocomplete_fields = ["owner"]  # searchable owner dropdown
     list_display = (
         "name",
         "code",
@@ -52,17 +107,47 @@ class PropertyAdmin(ModelAdmin):
     inlines = [UnitInline]
     fieldsets = (
         (
-            None,
+            "Basic information",
             {
-                "fields": ("name", "code", "property_type", "owner", "is_active"),
-                "description": "Units can be added after saving, and only for "
-                "Residential and Commercial Buildings.",
+                "fields": (
+                    ("name", "code"),
+                    ("property_type", "owner"),
+                    ("emirate", "is_active"),
+                ),
+                "description": "Residential and Commercial Buildings have units - after "
+                "saving a building you will land on a page where you can add them.",
             },
         ),
-        ("Location", {"fields": ("emirate", "address")}),
-        ("Building details", {"fields": ("year_built", "total_floors", "management_fee_percent")}),
-        ("Other", {"fields": ("notes",)}),
+        (
+            "Details",
+            {
+                # Some of these rows appear or disappear depending on the property type
+                # and owner (see core/static/core/erp.js).
+                "fields": (
+                    "address",
+                    "map_link",
+                    ("year_built", "total_floors"),
+                    ("annual_rent", "status"),
+                    ("management_fee_type", "management_fee_percent", "management_fee_fixed"),
+                ),
+            },
+        ),
+        ("Notes", {"fields": ("notes",)}),
     )
+
+    def response_add(self, request, obj, post_url_continue=None):
+        # After adding a building, stay on the page so its units can be added right away.
+        if (
+            obj.has_units
+            and "_popup" not in request.POST
+            and "_addanother" not in request.POST
+            and "_continue" not in request.POST
+        ):
+            post = request.POST.copy()
+            post["_continue"] = "1"
+            request.POST = post
+            messages.info(request, "Now add this building's units in the section below.")
+        return super().response_add(request, obj, post_url_continue)
 
     def get_inline_instances(self, request, obj=None):
         # Units are shown only for saved properties that are buildings.
@@ -86,7 +171,7 @@ class PropertyAdmin(ModelAdmin):
 
 
 @admin.register(Unit)
-class UnitAdmin(ModelAdmin):
+class UnitAdmin(TooltipHelpMixin, ModelAdmin):
     list_display = (
         "reference",
         "property",

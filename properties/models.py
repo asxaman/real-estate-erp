@@ -1,13 +1,19 @@
 from django.conf import settings
 from django.core.exceptions import ValidationError
-from django.core.validators import MinValueValidator
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
+
+from .models_constants import COMPANY_OWNER_NAME
 
 
 class Owner(models.Model):
     """A property owner (individual or company) whose properties we manage."""
 
     name = models.CharField("Owner name", max_length=200)
+    # The one built-in owner that stands for "our own company". It is created
+    # automatically, cannot be renamed or deleted, and properties owned by it
+    # have no management fee.
+    is_company = models.BooleanField(default=False, editable=False)
     email = models.EmailField(blank=True)
     phone = models.CharField(max_length=30, blank=True)
     address = models.TextField(blank=True)
@@ -25,10 +31,18 @@ class Owner(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        ordering = ["name"]
+        ordering = ["-is_company", "name"]  # "Company Owned" always comes first
 
     def __str__(self):
         return self.name
+
+    @classmethod
+    def company(cls):
+        """Return the built-in "Company Owned" owner, creating it if it is missing."""
+        owner = cls.objects.filter(is_company=True).first()
+        if owner is None:
+            owner = cls.objects.create(name=COMPANY_OWNER_NAME, is_company=True)
+        return owner
 
 
 class Property(models.Model):
@@ -51,6 +65,24 @@ class Property(models.Model):
         PropertyType.RESIDENTIAL_BUILDING,
         PropertyType.COMMERCIAL_BUILDING,
     )
+    # Types for which "Year built" and "Total floors" make no sense.
+    NO_BUILDING_INFO_TYPES = (
+        PropertyType.WAREHOUSE,
+        PropertyType.YARD,
+        PropertyType.SHOP,
+        PropertyType.APARTMENT,
+        PropertyType.PARKING_SPOT,
+    )
+
+    class FeeType(models.TextChoices):
+        PERCENT = "percent", "Percentage of collected rent (%)"
+        FIXED = "fixed", "Fixed amount (AED per year)"
+
+    class Status(models.TextChoices):
+        VACANT = "vacant", "Vacant"
+        OCCUPIED = "occupied", "Occupied"
+        RESERVED = "reserved", "Reserved"
+        MAINTENANCE = "maintenance", "Under maintenance"
 
     class Emirate(models.TextChoices):
         ABU_DHABI = "abu_dhabi", "Abu Dhabi"
@@ -79,8 +111,29 @@ class Property(models.Model):
         max_length=20, choices=Emirate.choices, default=Emirate.ABU_DHABI
     )
     address = models.TextField(blank=True)
+    map_link = models.URLField(
+        "Map link", max_length=500, blank=True, help_text="Google Maps link (optional)."
+    )
     year_built = models.PositiveIntegerField(null=True, blank=True)
     total_floors = models.PositiveIntegerField(null=True, blank=True)
+
+    # Standalone properties only (buildings rent out their units instead)
+    annual_rent = models.DecimalField(
+        "Annual rent (AED)",
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        validators=[MinValueValidator(0)],
+    )
+    status = models.CharField(
+        max_length=20, choices=Status.choices, blank=True, default=Status.VACANT
+    )
+
+    # Management fee - not used when the owner is "Company Owned"
+    management_fee_type = models.CharField(
+        "Fee type", max_length=10, choices=FeeType.choices, blank=True, default=FeeType.PERCENT
+    )
     management_fee_percent = models.DecimalField(
         "Management fee (%)",
         max_digits=5,
@@ -88,9 +141,17 @@ class Property(models.Model):
         null=True,
         blank=True,
         default=0,
+        validators=[MinValueValidator(0), MaxValueValidator(100)],
+        help_text="Percentage of the rent collected that the company charges the owner.",
+    )
+    management_fee_fixed = models.DecimalField(
+        "Management fee (AED / year)",
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
         validators=[MinValueValidator(0)],
-        help_text="Enter 0 if company-owned; enter a value greater than 0 "
-        "if managing the property for another owner.",
+        help_text="Fixed amount the company charges the owner each year.",
     )
     notes = models.TextField(blank=True)
     is_active = models.BooleanField(default=True)
@@ -107,15 +168,59 @@ class Property(models.Model):
     def has_units(self):
         return self.property_type in self.BUILDING_TYPES
 
+    def save(self, *args, **kwargs):
+        self.code = (self.code or "").strip().upper()
+        super().save(*args, **kwargs)
+
+    @property
+    def is_company_owned(self):
+        return bool(self.owner_id and self.owner.is_company)
+
     def clean(self):
+        # Codes are stored in capitals (checked here so "rmt" and "RMT" count as the same code).
+        self.code = (self.code or "").strip().upper()
+        errors = {}
+
         # Don't allow switching a building that already has units to a standalone type.
         if self.pk and not self.has_units and self.units.exists():
-            raise ValidationError(
-                {
-                    "property_type": "This property still has units. Delete its units "
-                    "before changing it to a standalone type."
-                }
+            errors["property_type"] = (
+                "This property still has units. Delete its units "
+                "before changing it to a standalone type."
             )
+
+        # Year built / floors do not apply to these types: clear anything left over.
+        if self.property_type in self.NO_BUILDING_INFO_TYPES:
+            self.year_built = None
+            self.total_floors = None
+
+        # Annual rent and status belong to standalone properties only.
+        if self.has_units:
+            self.annual_rent = None
+            self.status = ""
+        elif not self.status:
+            errors["status"] = "Please choose a status."
+
+        # Management fee: none for company-owned, required for properties managed for others.
+        if self.owner_id:
+            if self.owner.is_company:
+                self.management_fee_type = ""
+                self.management_fee_percent = 0
+                self.management_fee_fixed = None
+            elif self.management_fee_type == self.FeeType.PERCENT:
+                self.management_fee_fixed = None
+                if not self.management_fee_percent:
+                    errors["management_fee_percent"] = "Enter a fee greater than 0."
+            elif self.management_fee_type == self.FeeType.FIXED:
+                self.management_fee_percent = 0
+                if not self.management_fee_fixed:
+                    errors["management_fee_fixed"] = "Enter an amount greater than 0."
+            else:
+                errors["management_fee_type"] = (
+                    "Choose how the owner is charged: a percentage or a fixed amount."
+                )
+
+        if errors:
+            raise ValidationError(errors)
 
 
 class Unit(models.Model):

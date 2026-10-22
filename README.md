@@ -83,9 +83,13 @@ Sidebar > **Property management**:
 * **Owners** - the people or companies who own the buildings you manage. The optional
   *Portal access* field links an owner to a login account; it will be used by the owner portal later.
 * **Properties** - each has a short unique **code** (e.g. `RMT`), a type, an owner and an emirate
-  (all required). Address, year built, total floors, management fee and notes are optional.
-  Management fee: enter 0 if company-owned, or a value above 0 if you manage the property for
-  another owner.
+  (all required). Address, map link and notes are optional.
+  * **Owner "Company Owned"** is a built-in choice (always first in the list, cannot be renamed
+    or deleted). Pick it for properties the company owns itself: the management fee fields
+    disappear. For any other owner you must choose a **fee type** (percentage of collected rent,
+    or a fixed AED amount per year) and enter the fee.
+  * **Year built** and **Total floors** are hidden for Warehouse, Yard, Shop, Apartment and Parking Spot.
+  * **Standalone properties** show **Annual rent (AED)** and **Status** instead of units.
   * **Residential Building** and **Commercial Building** have units. Save the property first,
     then the units section appears at the bottom of the page where you can add them.
   * **Villa, Warehouse, Yard, Shop, Apartment, Parking Spot** are standalone: no units section,

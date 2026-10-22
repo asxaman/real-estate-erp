@@ -7,6 +7,7 @@ same code can later run on a real server without editing this file.
 import os
 from pathlib import Path
 
+from django.templatetags.static import static
 from django.urls import reverse_lazy
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -139,6 +140,10 @@ UNFOLD = {
     "SITE_URL": "/",
     "SHOW_HISTORY": True,
     "SHOW_VIEW_ON_SITE": False,
+    # Our own small style/behaviour layer (info icons, compact forms).
+    # Bump the ?v= number whenever these files change so browsers reload them.
+    "STYLES": [lambda request: static("core/erp.css") + "?v=3"],
+    "SCRIPTS": [lambda request: static("core/erp.js") + "?v=3"],
     "SIDEBAR": {
         "show_search": True,
         "show_all_applications": True,
