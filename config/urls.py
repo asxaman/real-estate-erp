@@ -1,10 +1,13 @@
 from django.contrib import admin
 from django.urls import path
+from django.views.generic import RedirectView
 
-admin.site.site_header = "Real Estate ERP"
-admin.site.site_title = "Real Estate ERP"
-admin.site.index_title = "Dashboard"
+from core.views import data_tools_view
 
 urlpatterns = [
-    path("", admin.site.urls),  # the admin IS the application: open http://127.0.0.1:8000/
+    # Superuser-only page with the "Seed sample data" and "Erase all data" buttons.
+    # Must be listed BEFORE "admin/" so it is matched first.
+    path("admin/data-tools/", admin.site.admin_view(data_tools_view), name="data_tools"),
+    path("admin/", admin.site.urls),
+    path("", RedirectView.as_view(url="/admin/", permanent=False)),
 ]

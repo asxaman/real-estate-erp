@@ -1,63 +1,52 @@
-from django.contrib import messages
+from django.contrib import admin, messages
+from django.contrib.auth import get_user_model
 from django.core.exceptions import PermissionDenied
-from django.shortcuts import redirect
-from django.views.generic import TemplateView
-from unfold.views import UnfoldModelAdminViewMixin
+from django.shortcuts import redirect, render
 
-from . import datatools, seeding
+from .data_registry import run_erasers, run_seeders
 
-ERASE_PHRASE = "ERASE ALL DATA"
+ERASE_CONFIRMATION_WORD = "ERASE"
 
 
-class DataToolsView(UnfoldModelAdminViewMixin, TemplateView):
+def data_tools_view(request):
     """Superuser-only page: seed sample data / erase all data."""
+    if not request.user.is_superuser:
+        raise PermissionDenied
 
-    title = "Data tools"
-    permission_required = ()
-    template_name = "core/data_tools.html"
-
-    def dispatch(self, request, *args, **kwargs):
-        if not request.user.is_superuser:
-            raise PermissionDenied
-        return super().dispatch(request, *args, **kwargs)
-
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        context["title"] = "Data tools"
-        context["summary"] = datatools.data_summary()
-        context["seeders"] = seeding.all_seeders()
-        context["erase_phrase"] = ERASE_PHRASE
-        return context
-
-    def post(self, request, *args, **kwargs):
+    if request.method == "POST":
         action = request.POST.get("action")
 
         if action == "seed":
             try:
-                for line in seeding.run_all():
+                for line in run_seeders():
                     messages.success(request, line)
             except Exception as exc:  # show the problem instead of a crash page
-                messages.error(request, f"Seeding failed, nothing was saved: {exc}")
+                messages.error(request, f"Seeding failed and was rolled back: {exc}")
 
         elif action == "erase":
-            phrase = request.POST.get("confirm_text", "").strip()
-            password = request.POST.get("password", "")
-            if phrase != ERASE_PHRASE:
-                messages.error(request, f'You must type exactly "{ERASE_PHRASE}". Nothing was erased.')
-            elif not request.user.check_password(password):
-                messages.error(request, "Wrong password. Nothing was erased.")
+            typed = request.POST.get("confirm_text", "").strip()
+            if typed != ERASE_CONFIRMATION_WORD:
+                messages.error(
+                    request,
+                    f"Nothing was erased. You must type {ERASE_CONFIRMATION_WORD} "
+                    "(in capital letters) to confirm.",
+                )
             else:
-                include_users = request.POST.get("include_users") == "on"
                 try:
-                    deleted = datatools.erase_all_data(
-                        include_users=include_users, keep_user=request.user
-                    )
-                    total = sum(deleted.values())
-                    extra = " Other user accounts were removed too." if include_users else ""
-                    messages.success(request, f"All data erased ({total} records removed).{extra}")
+                    include_users = request.POST.get("include_users") == "on"
+                    for line in run_erasers(include_users=include_users):
+                        messages.warning(request, line)
                 except Exception as exc:
-                    messages.error(request, f"Erase failed, nothing was changed: {exc}")
-        else:
-            messages.error(request, "Unknown action.")
+                    messages.error(request, f"Erase failed and was rolled back: {exc}")
 
-        return redirect("admin:core_data_tools")
+        return redirect("data_tools")
+
+    User = get_user_model()
+    context = {
+        **admin.site.each_context(request),
+        "title": "Data tools",
+        "user_count": User.objects.count(),
+        "superuser_count": User.objects.filter(is_superuser=True).count(),
+        "confirmation_word": ERASE_CONFIRMATION_WORD,
+    }
+    return render(request, "core/data_tools.html", context)

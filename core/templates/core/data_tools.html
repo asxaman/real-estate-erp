@@ -1,56 +1,51 @@
-{% extends 'admin/base.html' %}
-{% load i18n %}
-
-{% block breadcrumbs %}{% endblock %}
-{% block title %}Data tools | {{ site_title|default:"Real Estate ERP" }}{% endblock %}
+{% extends "admin/base_site.html" %}
 
 {% block content %}
-<style>
-  .dt-card { border: 1px solid rgba(128,128,128,.3); border-radius: 8px; padding: 1.25rem 1.5rem; margin-bottom: 1.5rem; max-width: 46rem; }
-  .dt-card h2 { font-size: 1.1rem; font-weight: 600; margin-bottom: .5rem; }
-  .dt-card p, .dt-card li { opacity: .85; margin-bottom: .5rem; }
-  .dt-card input[type=text], .dt-card input[type=password] { display: block; width: 100%; max-width: 22rem; margin: .25rem 0 .9rem; padding: .5rem .7rem; border: 1px solid rgba(128,128,128,.5); border-radius: 6px; background: transparent; color: inherit; }
-  .dt-btn { padding: .55rem 1.1rem; border-radius: 6px; font-weight: 600; cursor: pointer; border: 0; color: #fff; background: #2563eb; }
-  .dt-btn.danger { background: #dc2626; }
-  .dt-danger { border-color: rgba(220,38,38,.6); }
-  .dt-table td { padding: .2rem 1.5rem .2rem 0; }
-</style>
+<div style="max-width: 860px; display: grid; gap: 24px;">
 
-<div class="dt-card">
-  <h2>Seed sample data</h2>
-  <p>Adds demo records so you can test the system. Safe to press more than once; existing demo records are not duplicated.</p>
-  <p>This will run:</p>
-  <ul style="list-style:disc;padding-left:1.25rem">
-    {% for s in seeders %}<li>{{ s.name }}</li>{% endfor %}
-  </ul>
-  <form method="post">{% csrf_token %}
-    <input type="hidden" name="action" value="seed">
-    <button class="dt-btn" type="submit">Seed sample data</button>
-  </form>
-</div>
+  <div style="border: 1px solid rgba(128,128,128,.3); border-radius: 8px; padding: 24px;">
+    <h2 style="font-size: 18px; font-weight: 600; margin: 0 0 8px;">Seed sample data</h2>
+    <p style="margin: 0 0 16px; opacity: .8;">
+      Adds sample records so you can test the system. It is safe to run more than once:
+      records that already exist are not duplicated.
+      Demo users are created with the password <strong>Demo@12345</strong>.
+    </p>
+    <form method="post">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="seed">
+      <button type="submit"
+              style="background:#2563eb;color:#fff;border:0;border-radius:6px;padding:10px 18px;font-weight:600;cursor:pointer;">
+        Seed sample data
+      </button>
+    </form>
+  </div>
 
-<div class="dt-card">
-  <h2>Data currently stored</h2>
-  <table class="dt-table">
-    {% for label, count in summary %}<tr><td>{{ label }}</td><td>{{ count }}</td></tr>{% endfor %}
-  </table>
-</div>
+  <div style="border: 1px solid #dc2626; border-radius: 8px; padding: 24px;">
+    <h2 style="font-size: 18px; font-weight: 600; margin: 0 0 8px; color: #dc2626;">Erase all data</h2>
+    <p style="margin: 0 0 8px; opacity: .8;">
+      Permanently deletes all business data in the system. <strong>This cannot be undone.</strong>
+      Superuser accounts (currently {{ superuser_count }}) are never deleted.
+    </p>
+    <form method="post" style="display: grid; gap: 14px;">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="erase">
+      <label style="display:flex;gap:8px;align-items:center;">
+        <input type="checkbox" name="include_users">
+        Also delete all other users and roles ({{ user_count }} user account(s) exist in total)
+      </label>
+      <label style="display:grid;gap:6px;">
+        <span>Type <strong>{{ confirmation_word }}</strong> to confirm:</span>
+        <input type="text" name="confirm_text" autocomplete="off"
+               style="max-width: 240px; padding: 8px 10px; border: 1px solid rgba(128,128,128,.5); border-radius: 6px; background: transparent; color: inherit;">
+      </label>
+      <div>
+        <button type="submit"
+                style="background:#dc2626;color:#fff;border:0;border-radius:6px;padding:10px 18px;font-weight:600;cursor:pointer;">
+          Erase all data
+        </button>
+      </div>
+    </form>
+  </div>
 
-<div class="dt-card dt-danger">
-  <h2>Erase all data</h2>
-  <p>Permanently deletes every business record (company settings, and in later modules properties, leases, invoices and so on). This cannot be undone. Your own account and the roles are kept.</p>
-  <form method="post">{% csrf_token %}
-    <input type="hidden" name="action" value="erase">
-    <label>Type <strong>{{ erase_phrase }}</strong> to confirm
-      <input type="text" name="confirm_text" autocomplete="off">
-    </label>
-    <label>Your password
-      <input type="password" name="password" autocomplete="current-password">
-    </label>
-    <label style="display:block;margin-bottom:1rem">
-      <input type="checkbox" name="include_users"> Also delete all other user accounts
-    </label>
-    <button class="dt-btn danger" type="submit">Erase all data</button>
-  </form>
 </div>
 {% endblock %}

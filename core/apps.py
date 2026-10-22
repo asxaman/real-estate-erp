@@ -1,16 +1,4 @@
 from django.apps import AppConfig
-from django.db.models.signals import post_migrate
-from django.utils.module_loading import autodiscover_modules
-
-
-def create_roles(sender, **kwargs):
-    """Make sure the standard staff/portal roles (user groups) always exist."""
-    from django.contrib.auth.models import Group
-
-    from .roles import ROLES
-
-    for name in ROLES:
-        Group.objects.get_or_create(name=name)
 
 
 class CoreConfig(AppConfig):
@@ -19,6 +7,5 @@ class CoreConfig(AppConfig):
     verbose_name = "Core"
 
     def ready(self):
-        post_migrate.connect(create_roles, sender=self)
-        # Every module may ship a seeders.py; importing it registers its sample-data seeder.
-        autodiscover_modules("seeders")
+        # Register this module's seed (and, in later modules, erase) steps.
+        from . import seed  # noqa: F401

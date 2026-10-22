@@ -1,8 +1,24 @@
-venv/
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
+
+# Virtual environment (recreate it with: python -m venv venv)
+venv/
+.venv/
+
+# Local database - contains your real data, never upload it to GitHub
 db.sqlite3
+db.sqlite3-journal
+
+# Secrets and local settings
 .env
-.vscode/
+
+# Generated files
 staticfiles/
 media/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

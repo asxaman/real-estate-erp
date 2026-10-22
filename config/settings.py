@@ -1,8 +1,8 @@
 """
-Django settings for the Real Estate ERP.
+Django settings for the Real Estate ERP project.
 
-Anything that differs between your PC and a live server is read from
-environment variables, with safe defaults for local development.
+Settings can be overridden with environment variables (see README.md) so the
+same code can later run on a real server without editing this file.
 """
 import os
 from pathlib import Path
@@ -11,20 +11,41 @@ from django.urls import reverse_lazy
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "dev-only-insecure-key-change-before-going-live")
+# --------------------------------------------------------------------------
+# Core
+# --------------------------------------------------------------------------
+# IMPORTANT: before going live, set a real DJANGO_SECRET_KEY environment
+# variable and DJANGO_DEBUG=0. The default below is for local development only.
+SECRET_KEY = os.environ.get(
+    "DJANGO_SECRET_KEY",
+    "dev-only-insecure-key-change-me-before-production",
+)
 DEBUG = os.environ.get("DJANGO_DEBUG", "1") == "1"
-ALLOWED_HOSTS = os.environ.get("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
+ALLOWED_HOSTS = [
+    h.strip()
+    for h in os.environ.get("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
+    if h.strip()
+]
+CSRF_TRUSTED_ORIGINS = [
+    o.strip()
+    for o in os.environ.get("DJANGO_CSRF_TRUSTED_ORIGINS", "").split(",")
+    if o.strip()
+]
 
+# --------------------------------------------------------------------------
+# Applications
+# --------------------------------------------------------------------------
 INSTALLED_APPS = [
-    "unfold",  # must be BEFORE django.contrib.admin
+    # Unfold MUST come before django.contrib.admin
+    "unfold",
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
-    # --- ERP modules (one app per module; new ones are added here) ---
-    "core",
+    # ERP modules
+    "core",  # Module 0: foundation (users, roles, data tools)
 ]
 
 MIDDLEWARE = [
@@ -42,7 +63,7 @@ ROOT_URLCONF = "config.urls"
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [BASE_DIR / "templates"],  # project templates win over Unfold, so our dashboard is used
+        "DIRS": [BASE_DIR / "templates"],
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [
@@ -55,53 +76,63 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = "config.wsgi.application"
+ASGI_APPLICATION = "config.asgi.application"
 
+# --------------------------------------------------------------------------
+# Database (SQLite)
+# --------------------------------------------------------------------------
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",
         "NAME": BASE_DIR / "db.sqlite3",
     }
 }
+DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
+# --------------------------------------------------------------------------
+# Authentication
+# --------------------------------------------------------------------------
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
     {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
     {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
     {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
 ]
+LOGIN_URL = "/admin/login/"
+LOGIN_REDIRECT_URL = "/admin/"
 
-LANGUAGE_CODE = "en"
+# --------------------------------------------------------------------------
+# Internationalisation (UAE)
+# --------------------------------------------------------------------------
+LANGUAGE_CODE = "en-us"
 TIME_ZONE = "Asia/Dubai"
 USE_I18N = True
 USE_TZ = True
 
+# --------------------------------------------------------------------------
+# Static files
+# --------------------------------------------------------------------------
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
-DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-LOGIN_URL = "admin:login"
-LOGIN_REDIRECT_URL = "admin:index"
-
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------
 # Django Unfold (admin theme)
-# ---------------------------------------------------------------------------
+# --------------------------------------------------------------------------
+def _is_superuser(request):
+    return request.user.is_superuser
+
+
 UNFOLD = {
     "SITE_TITLE": "Real Estate ERP",
     "SITE_HEADER": "Real Estate ERP",
-    "SITE_SYMBOL": "apartment",  # Material Symbols icon name
+    "SITE_SUBHEADER": "Property management suite",
+    "SITE_URL": "/",
     "SHOW_HISTORY": True,
-    "DASHBOARD_CALLBACK": "core.dashboard.dashboard_callback",
+    "SHOW_VIEW_ON_SITE": False,
     "SIDEBAR": {
         "show_search": True,
-        "show_all_applications": False,  # we define the menu ourselves below
+        "show_all_applications": True,
         "navigation": [
-            {
-                "title": "Overview",
-                "items": [
-                    {"title": "Dashboard", "icon": "dashboard", "link": reverse_lazy("admin:index")},
-                ],
-            },
-            # >>> Each new module adds its own section here <<<
             {
                 "title": "Administration",
                 "separator": True,
@@ -110,25 +141,19 @@ UNFOLD = {
                         "title": "Users",
                         "icon": "person",
                         "link": reverse_lazy("admin:auth_user_changelist"),
-                        "permission": lambda request: request.user.is_superuser,
+                        "permission": _is_superuser,
                     },
                     {
-                        "title": "Roles",
+                        "title": "Roles (groups)",
                         "icon": "badge",
                         "link": reverse_lazy("admin:auth_group_changelist"),
-                        "permission": lambda request: request.user.is_superuser,
-                    },
-                    {
-                        "title": "Company settings",
-                        "icon": "business",
-                        "link": reverse_lazy("admin:core_companysettings_changelist"),
-                        "permission": lambda request: request.user.is_staff,
+                        "permission": _is_superuser,
                     },
                     {
                         "title": "Data tools",
                         "icon": "database",
-                        "link": reverse_lazy("admin:core_data_tools"),
-                        "permission": lambda request: request.user.is_superuser,
+                        "link": reverse_lazy("data_tools"),
+                        "permission": _is_superuser,
                     },
                 ],
             },
