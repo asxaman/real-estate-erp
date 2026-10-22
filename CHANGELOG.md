@@ -1,5 +1,9 @@
 # Changelog
 
+## Module 1, update 6b - Unsaved-changes pop-up
+- Leaving a form with unsaved changes (sidebar, breadcrumbs, links) now shows a pop-up in the app's own style instead of the browser's "Leave site?" box. Closing the tab or reloading still uses the browser's box (browsers do not allow anything else)
+- No database changes
+
 ## Module 1, update 6 - Audit fixes (current)
 - Owners: "Company Owned" is reserved; duplicate names refused (ignoring capitals/spaces); phone format checked; email saved in lower case
 - Building type: cannot switch Residential <-> Commercial while units of the other kind exist

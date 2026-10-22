@@ -139,7 +139,7 @@ class PropertyAdminForm(forms.ModelForm):
 class PropertyAdmin(TooltipHelpMixin, ModelAdmin):
     form = PropertyAdminForm
     compressed_fields = True  # tighter spacing between fields
-    warn_unsaved_form = True  # warns before leaving the page with unsaved changes
+    # The unsaved-changes warning is our own pop-up (core/static/core/erp.js).
     autocomplete_fields = ["owner"]  # searchable owner dropdown
     list_display = (
         "name",
@@ -266,7 +266,6 @@ class BuildingFilter(admin.RelatedFieldListFilter):
 class UnitAdmin(TooltipHelpMixin, ModelAdmin):
     form = UnitAdminForm
     compressed_fields = True
-    warn_unsaved_form = True
     list_display = (
         "reference",
         "property",

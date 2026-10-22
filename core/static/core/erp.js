@@ -370,6 +370,104 @@
     }
   }
 
+  /* ---- Unsaved-changes guard: our own pop-up instead of the browser's "Leave site?" box ---- */
+  function leaveGuard(form) {
+    var initial = null;
+    var allowLeave = false;
+    var modal = null;
+    var pendingHref = null;
+    var lastFocus = null;
+
+    function serialise() {
+      try {
+        return new URLSearchParams(new FormData(form)).toString();
+      } catch (e) {
+        return "";
+      }
+    }
+    // Take the starting snapshot a moment after load, once dropdowns have finished setting up.
+    setTimeout(function () { initial = serialise(); }, 600);
+
+    function isDirty() {
+      return initial !== null && serialise() !== initial;
+    }
+
+    function closeModal() {
+      if (!modal) { return; }
+      modal.classList.remove("is-open");
+      pendingHref = null;
+      if (lastFocus && lastFocus.focus) { lastFocus.focus(); }
+    }
+
+    function buildModal() {
+      modal = document.createElement("div");
+      modal.id = "erp-leave-modal";
+      modal.innerHTML =
+        '<div class="erp-leave-dialog" role="alertdialog" aria-modal="true" ' +
+        'aria-labelledby="erp-leave-title" aria-describedby="erp-leave-text">' +
+        '<div class="erp-leave-icon" aria-hidden="true">!</div>' +
+        '<h2 id="erp-leave-title">Leave this page?</h2>' +
+        '<p id="erp-leave-text">You have unsaved changes. If you leave now, they will be lost.</p>' +
+        '<div class="erp-leave-actions">' +
+        '<button type="button" class="erp-leave-stay">Keep editing</button>' +
+        '<button type="button" class="erp-leave-go">Leave without saving</button>' +
+        '</div></div>';
+      document.body.appendChild(modal);
+      modal.addEventListener("click", function (e) {
+        if (e.target === modal) { closeModal(); }
+      });
+      modal.querySelector(".erp-leave-stay").addEventListener("click", closeModal);
+      modal.querySelector(".erp-leave-go").addEventListener("click", function () {
+        var href = pendingHref;
+        allowLeave = true;
+        modal.classList.remove("is-open");
+        if (href) { window.location.href = href; }
+      });
+      modal.addEventListener("keydown", function (e) {
+        if (e.key === "Escape") { e.stopPropagation(); closeModal(); }
+        if (e.key === "Tab") {  // keep keyboard focus inside the pop-up
+          var stay = modal.querySelector(".erp-leave-stay");
+          var go = modal.querySelector(".erp-leave-go");
+          if (e.shiftKey && document.activeElement === stay) { e.preventDefault(); go.focus(); }
+          else if (!e.shiftKey && document.activeElement === go) { e.preventDefault(); stay.focus(); }
+        }
+      });
+    }
+
+    function showModal(href) {
+      if (!modal) { buildModal(); }
+      pendingHref = href;
+      lastFocus = document.activeElement;
+      modal.classList.add("is-open");
+      modal.querySelector(".erp-leave-stay").focus();
+    }
+
+    document.addEventListener("click", function (e) {
+      if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) { return; }
+      var link = e.target.closest ? e.target.closest("a[href]") : null;
+      if (!link || (modal && modal.contains(link))) { return; }
+      var href = link.getAttribute("href");
+      if (!href || href.charAt(0) === "#" || /^(javascript|mailto|tel):/i.test(href)) { return; }
+      if (link.target && link.target !== "_self") { return; }
+      if (link.hasAttribute("download") || link.closest(".related-widget-wrapper") || /_popup=/.test(href)) { return; }
+      if (!isDirty()) { return; }
+      e.preventDefault();
+      e.stopPropagation();
+      showModal(link.href);
+    }, true);
+
+    form.addEventListener("submit", function () { allowLeave = true; });
+
+    // Closing the tab, reloading or the Back button cannot be intercepted by a page:
+    // for those the browser's own box is the only option.
+    window.addEventListener("beforeunload", function (e) {
+      if (!allowLeave && isDirty()) {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    });
+  }
+
   function init() {
     var form = document.querySelector('form[id$="_form"]');
     if (!form) {
@@ -378,6 +476,7 @@
     addInfoIconsFromData(form);
     addInfoIcons(form);
     markRows(form);
+    leaveGuard(form);
     if (form.id === "property_form") {
       propertyFormExtras(form);
     }

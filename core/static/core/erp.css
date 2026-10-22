@@ -121,3 +121,38 @@ form[id$="_form"] .erp-row {
 form[id$="_form"] label {
   font-weight: 600;
 }
+
+/* ---- Unsaved-changes pop-up ---- */
+#erp-leave-modal {
+  position: fixed; inset: 0; z-index: 10000; display: none;
+  align-items: center; justify-content: center; padding: 16px;
+  background: rgba(15, 23, 42, 0.55); backdrop-filter: blur(2px);
+}
+#erp-leave-modal.is-open { display: flex; animation: erp-fade 0.12s ease-out; }
+.erp-leave-dialog {
+  width: 100%; max-width: 400px; padding: 24px; text-align: center;
+  background: #fff; color: #1f2937; border: 1px solid #e5e7eb; border-radius: 14px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.3); animation: erp-pop 0.15s ease-out;
+}
+.erp-leave-icon {
+  width: 44px; height: 44px; margin: 0 auto 12px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 22px; font-weight: 700; color: #b45309; background: #fef3c7;
+}
+.erp-leave-dialog h2 { margin: 0 0 6px; font-size: 17px; font-weight: 600; }
+.erp-leave-dialog p { margin: 0 0 20px; font-size: 14px; line-height: 1.5; color: #6b7280; }
+.erp-leave-actions { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+.erp-leave-actions button {
+  padding: 9px 16px; border-radius: 8px; font-size: 14px; font-weight: 500;
+  cursor: pointer; border: 1px solid transparent; transition: filter 0.1s;
+}
+.erp-leave-actions button:hover { filter: brightness(1.08); }
+.erp-leave-actions button:focus-visible { outline: 2px solid #8b5cf6; outline-offset: 2px; }
+.erp-leave-stay { background: #7c3aed; color: #fff; }
+.erp-leave-go { background: transparent; color: #dc2626; border-color: #fca5a5 !important; }
+html.dark .erp-leave-dialog { background: #111827; color: #f3f4f6; border-color: #1f2937; }
+html.dark .erp-leave-dialog p { color: #9ca3af; }
+html.dark .erp-leave-icon { background: rgba(245, 158, 11, 0.15); color: #fbbf24; }
+html.dark .erp-leave-go { color: #f87171; border-color: rgba(248, 113, 113, 0.4) !important; }
+@keyframes erp-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes erp-pop { from { opacity: 0; transform: translateY(6px) scale(0.97); } to { opacity: 1; transform: none; } }
