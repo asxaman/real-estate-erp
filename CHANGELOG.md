@@ -1,6 +1,18 @@
 # Changelog
 
-## Module 1, update 4 - Property form logic (current)
+## Module 1, update 5 - Fixes and Units form (current)
+- Fix: the management fee section now hides when "Company Owned" is chosen (more robust show/hide logic;
+  whole sections including their headings are hidden)
+- Property code must be 3 to 6 letters/numbers starting with a letter
+- Apartment properties: new "Type" (Studio, 1BHK-5BHK) and "Bathrooms" (1-10) fields
+- Units form rebuilt:
+  - Floor is required and accepts only G, LG, UG, R, RF, PH, M, MZ, A, S, SC, GF, L, LV, E, B1.., P1.., 1, 2, 3 ...
+  - Units are sorted by floor properly (basements, G, 1, 2 ... 10, roof, penthouse)
+  - Unit type: Studio, 1BHK-5BHK (residential buildings), Office or Shop (commercial buildings); required
+  - "Bedrooms" removed; Bathrooms (1-10), Status, Area, Furnished and Asking rent are optional
+- Run `makemigrations` then `migrate` after extracting
+
+## Module 1, update 4 - Property form logic
 - Built-in owner "Company Owned" (created automatically after `migrate`, cannot be renamed or deleted,
   never removed by "Erase all data"). Selecting it hides the management fee fields
 - Management fee type: percentage of rent or fixed AED per year; required for every owner except Company Owned

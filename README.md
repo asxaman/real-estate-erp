@@ -90,13 +90,18 @@ Sidebar > **Property management**:
     or a fixed AED amount per year) and enter the fee.
   * **Year built** and **Total floors** are hidden for Warehouse, Yard, Shop, Apartment and Parking Spot.
   * **Standalone properties** show **Annual rent (AED)** and **Status** instead of units.
+  * **Property code**: 3 to 6 letters or numbers, starting with a letter (e.g. `RMT`, `ZV01`); saved in capitals.
+  * **Apartment** (standalone) also asks for **Type** (Studio, 1BHK ... 5BHK) and **Bathrooms** (1-10).
   * **Residential Building** and **Commercial Building** have units. Save the property first,
     then the units section appears at the bottom of the page where you can add them.
   * **Villa, Warehouse, Yard, Shop, Apartment, Parking Spot** are standalone: no units section,
     and they cannot be chosen when adding a unit.
-* **Units** - apartments, villas, offices, shops. Shown as `CODE-number` (e.g. `RMT-304`) with
-  filters for status, type and property. Status: Vacant, Occupied, Reserved, Under maintenance
-  (set by hand for now; it will update automatically once leases exist).
+* **Units** - apartments, offices and shops inside a building. Shown as `CODE-number` (e.g. `RMT-304`).
+  * Required: Property, Unit number, Floor, Unit type. Optional: Status, Bathrooms (1-10), Area, Furnished, Asking rent.
+  * **Floor** accepts only: G, LG, UG, R, RF, PH, M, MZ, A, S, SC, GF, L, LV, E, B1, B2, B3 ... (basements),
+    P1, P2, P3 ... (podium levels) or a number 1, 2, 3 ... Hover the "i" next to the field to see the list.
+  * **Unit type**: Studio, 1BHK, 2BHK, 3BHK, 4BHK, 5BHK for residential buildings; Office or Shop for commercial buildings.
+  * **Status** is optional for now; later it will follow the lease (leased, not leased, under maintenance ...).
 * **Seed sample data** now also creates 4 owners (one is the company itself), 12 properties
   (3 buildings with 80 units in total, plus 9 standalone properties of different types), and gives the demo roles permissions: Property Manager can do everything,
   Accountant and Maintenance Supervisor can only view, Leasing Agent can view and edit units.

@@ -12,9 +12,9 @@ from .models import Owner, Property, Unit
 class UnitInline(TabularInline):
     model = Unit
     extra = 0
-    fields = ("unit_number", "floor", "unit_type", "bedrooms", "status", "asking_rent")
+    fields = ("unit_number", "floor", "unit_type", "bathrooms", "status", "asking_rent")
     show_change_link = True
-    ordering = ("floor", "unit_number")
+    ordering = ("floor_sort", "unit_number")
 
 
 @admin.register(Owner)
@@ -62,6 +62,7 @@ class PropertyAdminForm(forms.ModelForm):
             "code": "e.g. RMT",
             "year_built": "e.g. 2018",
             "total_floors": "e.g. 10",
+            "bathrooms": "1 to 10",
             "annual_rent": "e.g. 85000",
             "management_fee_percent": "e.g. 5",
             "management_fee_fixed": "e.g. 6000",
@@ -80,9 +81,17 @@ class PropertyAdminForm(forms.ModelForm):
             self.fields["code"].widget.attrs.update(
                 {"style": "text-transform: uppercase;", "autocomplete": "off"}
             )
+        if "code" in self.fields:
+            self.fields["code"].widget.attrs["maxlength"] = 6  # the browser stops typing at 6
+        if "bathrooms" in self.fields:
+            self.fields["bathrooms"].widget.attrs.update({"min": 1, "max": 10})
         for field_name in ("address", "notes"):
             if field_name in self.fields:
                 self.fields[field_name].widget.attrs["rows"] = 3
+
+    def clean_code(self):
+        # Always stored in capitals, so "rmt" and "RMT" are the same code.
+        return self.cleaned_data["code"].strip().upper()
 
 
 @admin.register(Property)
@@ -118,19 +127,17 @@ class PropertyAdmin(TooltipHelpMixin, ModelAdmin):
                 "saving a building you will land on a page where you can add them.",
             },
         ),
+        # The sections below marked "conditional" appear or disappear depending on the
+        # property type and owner (see core/static/core/erp.js).
         (
             "Details",
-            {
-                # Some of these rows appear or disappear depending on the property type
-                # and owner (see core/static/core/erp.js).
-                "fields": (
-                    "address",
-                    "map_link",
-                    ("year_built", "total_floors"),
-                    ("annual_rent", "status"),
-                    ("management_fee_type", "management_fee_percent", "management_fee_fixed"),
-                ),
-            },
+            {"fields": ("address", "map_link", ("year_built", "total_floors"))},
+        ),
+        ("Apartment details", {"fields": (("apartment_type", "bathrooms"),)}),  # conditional
+        ("Rental", {"fields": (("annual_rent", "status"),)}),  # conditional
+        (
+            "Management fee",  # conditional
+            {"fields": (("management_fee_type", "management_fee_percent", "management_fee_fixed"),)},
         ),
         ("Notes", {"fields": ("notes",)}),
     )
@@ -170,13 +177,50 @@ class PropertyAdmin(TooltipHelpMixin, ModelAdmin):
         return obj._vacant_count if obj.has_units else "-"
 
 
+class UnitAdminForm(forms.ModelForm):
+    """Unit form: placeholders, capital letters for the floor code."""
+
+    class Meta:
+        model = Unit
+        fields = "__all__"
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        hints = {
+            "unit_number": "e.g. 304",
+            "floor": "e.g. 3, G, B1",
+            "bathrooms": "1 to 10",
+            "area_sqft": "e.g. 1200",
+            "asking_rent": "e.g. 95000",
+            "notes": "Anything worth remembering about this unit",
+        }
+        for field_name, text in hints.items():
+            if field_name in self.fields:
+                self.fields[field_name].widget.attrs["placeholder"] = text
+        if "floor" in self.fields:
+            self.fields["floor"].widget.attrs.update(
+                {"style": "text-transform: uppercase;", "autocomplete": "off", "maxlength": 4}
+            )
+        if "bathrooms" in self.fields:
+            self.fields["bathrooms"].widget.attrs.update({"min": 1, "max": 10})
+        if "notes" in self.fields:
+            self.fields["notes"].widget.attrs["rows"] = 3
+
+    def clean_floor(self):
+        return self.cleaned_data["floor"].strip().upper()
+
+
 @admin.register(Unit)
 class UnitAdmin(TooltipHelpMixin, ModelAdmin):
+    form = UnitAdminForm
+    compressed_fields = True
+    warn_unsaved_form = True
     list_display = (
         "reference",
         "property",
         "floor",
         "unit_type",
+        "bathrooms",
         "area_sqft",
         "asking_rent",
         "show_status",
@@ -185,10 +229,18 @@ class UnitAdmin(TooltipHelpMixin, ModelAdmin):
     search_fields = ("unit_number", "property__name", "property__code")
     list_select_related = ("property",)
     fieldsets = (
-        (None, {"fields": ("property", "unit_number", "floor", "status")}),
-        ("Details", {"fields": ("unit_type", "bedrooms", "bathrooms", "area_sqft", "furnished")}),
-        ("Rent", {"fields": ("asking_rent",)}),
-        ("Other", {"fields": ("notes",)}),
+        (
+            "Unit",
+            {
+                "fields": (
+                    ("property", "unit_number"),
+                    ("floor", "unit_type"),
+                    ("status", "furnished"),
+                ),
+            },
+        ),
+        ("Details", {"fields": (("bathrooms", "area_sqft", "asking_rent"),)}),
+        ("Notes", {"fields": ("notes",)}),
     )
 
     def formfield_for_foreignkey(self, db_field, request, **kwargs):
@@ -214,4 +266,4 @@ class UnitAdmin(TooltipHelpMixin, ModelAdmin):
         },
     )
     def show_status(self, obj):
-        return obj.get_status_display()
+        return obj.get_status_display() or "-"

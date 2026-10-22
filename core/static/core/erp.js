@@ -171,48 +171,86 @@
 
   var NO_BUILDING_INFO_TYPES = ["warehouse", "yard", "shop", "apartment", "parking_spot"];
 
-  function isIgnorable(node) {
-    return (
-      node.tagName === "SCRIPT" ||
-      node.tagName === "STYLE" ||
-      (node.tagName === "INPUT" && node.type === "hidden")
-    );
+  function namedControls(node) {
+    return node.querySelectorAll('[name]:not([type="hidden"])');
   }
 
-  // The smallest block on the page that holds this field's label and input.
-  function fieldBox(form, name) {
-    var control = form.querySelector('[name="' + name + '"]');
-    if (!control) {
-      return null;
-    }
-    var label = control.id ? form.querySelector('label[for="' + control.id + '"]') : null;
-    var node = label || control;
-    while (node.parentElement && node.parentElement !== form) {
-      var parent = node.parentElement;
-      if (parent.querySelectorAll("label[for]").length > 1) {
-        break;
+  // True when the block holds no input other than this one.
+  function holdsOnly(node, control) {
+    var found = namedControls(node);
+    for (var i = 0; i < found.length; i++) {
+      if (found[i] !== control) {
+        return false;
       }
-      node = parent;
     }
-    return node;
+    return true;
   }
 
-  function hideNode(form, node) {
+  function mark(node) {
     node.style.display = "none";
     node.setAttribute("data-erp-hid", "1");
-    // If that leaves its parent row empty, hide the row too (no blank gaps).
-    var parent = node.parentElement;
-    while (parent && parent !== form) {
-      var allHidden = Array.prototype.every.call(parent.children, function (child) {
-        return child.style.display === "none" || isIgnorable(child);
-      });
-      if (!allHidden) {
-        break;
-      }
-      parent.style.display = "none";
-      parent.setAttribute("data-erp-hid", "1");
-      parent = parent.parentElement;
+  }
+
+  // The blocks on the page that belong to one field: its input (with wrappers) and its label.
+  function fieldNodes(form, control) {
+    var label = control.id ? form.querySelector('label[for="' + control.id + '"]') : null;
+    var anchor = control;
+    while (
+      anchor.parentElement &&
+      anchor.parentElement !== form &&
+      holdsOnly(anchor.parentElement, control)
+    ) {
+      anchor = anchor.parentElement;
     }
+    var nodes = [anchor];
+    if (label && !anchor.contains(label)) {
+      var labelAnchor = label;
+      while (
+        labelAnchor.parentElement &&
+        labelAnchor.parentElement !== form &&
+        namedControls(labelAnchor.parentElement).length === 0
+      ) {
+        labelAnchor = labelAnchor.parentElement;
+      }
+      nodes.push(labelAnchor);
+    }
+    return nodes;
+  }
+
+  function hideFields(form, names) {
+    var wanted = {};
+    names.forEach(function (n) { wanted[n] = true; });
+    var hidden = [];
+    names.forEach(function (name) {
+      var control = form.querySelector('[name="' + name + '"]');
+      if (!control) {
+        return;
+      }
+      fieldNodes(form, control).forEach(function (node) {
+        mark(node);
+        hidden.push(node);
+      });
+    });
+    // Also hide any enclosing block (row, card, section with its heading) that now
+    // contains nothing but hidden fields.
+    hidden.forEach(function (node) {
+      var parent = node.parentElement;
+      while (parent && parent !== form) {
+        var inside = namedControls(parent);
+        var onlyHidden = inside.length > 0;
+        for (var i = 0; i < inside.length; i++) {
+          if (!wanted[inside[i].getAttribute("name")]) {
+            onlyHidden = false;
+            break;
+          }
+        }
+        if (!onlyHidden) {
+          break;
+        }
+        mark(parent);
+        parent = parent.parentElement;
+      }
+    });
   }
 
   function propertyFormExtras(form) {
@@ -244,6 +282,19 @@
       badge.textContent = hasUnits ? "Has units" : "Standalone · no units";
     }
 
+    // Is the selected owner the built-in "Company Owned" owner?
+    function ownerIsCompany() {
+      if (!ownerSelect) {
+        return false;
+      }
+      var companyId = ownerSelect.getAttribute("data-company-owner-id");
+      if (ownerSelect.value && companyId && ownerSelect.value === companyId) {
+        return true;
+      }
+      var option = ownerSelect.options ? ownerSelect.options[ownerSelect.selectedIndex] : null;
+      return !!(option && option.text && option.text.trim().toLowerCase() === "company owned");
+    }
+
     function applyRules() {
       // Show everything we hid before, then hide what does not apply now.
       Array.prototype.forEach.call(form.querySelectorAll("[data-erp-hid]"), function (n) {
@@ -252,21 +303,21 @@
       });
 
       var type = typeSelect ? typeSelect.value : "";
-      var owner = ownerSelect ? ownerSelect.value : "";
-      var companyId = ownerSelect ? ownerSelect.getAttribute("data-company-owner-id") : "";
       var feeType = feeSelect ? feeSelect.value : "";
       var isBuilding = BUILDING_TYPES.indexOf(type) !== -1;
       var isStandalone = !!type && !isBuilding;
-      var isCompany = !!owner && !!companyId && owner === companyId;
 
       var hide = [];
       if (NO_BUILDING_INFO_TYPES.indexOf(type) !== -1) {
         hide.push("year_built", "total_floors");
       }
+      if (type !== "apartment") {
+        hide.push("apartment_type", "bathrooms");
+      }
       if (!isStandalone) {
         hide.push("annual_rent", "status");
       }
-      if (isCompany) {
+      if (ownerIsCompany()) {
         hide.push("management_fee_type", "management_fee_percent", "management_fee_fixed");
       } else {
         if (feeType !== "percent") {
@@ -276,12 +327,7 @@
           hide.push("management_fee_fixed");
         }
       }
-      hide.forEach(function (name) {
-        var box = fieldBox(form, name);
-        if (box) {
-          hideNode(form, box);
-        }
-      });
+      hideFields(form, hide);
     }
 
     function refresh() {
@@ -301,6 +347,7 @@
       var state = [
         typeSelect ? typeSelect.value : "",
         ownerSelect ? ownerSelect.value : "",
+        ownerIsCompany() ? "company" : "other",
         feeSelect ? feeSelect.value : "",
       ].join("|");
       if (state !== lastState) {

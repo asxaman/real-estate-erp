@@ -9,14 +9,14 @@ from .models import Owner, Property, Unit
 
 U = Unit.UnitType
 
-# unit type -> (bedrooms, bathrooms, area sq ft, base yearly rent AED)
+# unit type -> (bathrooms, area sq ft, base yearly rent AED)
 UNIT_SPECS = {
-    U.STUDIO: (0, 1, 450, 42000),
-    U.ONE_BR: (1, 2, 750, 62000),
-    U.TWO_BR: (2, 3, 1200, 95000),
-    U.THREE_BR: (3, 4, 1700, 140000),
-    U.OFFICE: (0, 1, 900, 80000),
-    U.SHOP: (0, 1, 650, 120000),
+    U.STUDIO: (1, 450, 42000),
+    U.ONE_BR: (2, 750, 62000),
+    U.TWO_BR: (3, 1200, 95000),
+    U.THREE_BR: (4, 1700, 140000),
+    U.OFFICE: (1, 900, 80000),
+    U.SHOP: (1, 650, 120000),
 }
 
 
@@ -33,14 +33,13 @@ def _status(counter: int) -> str:
 
 
 def _make_unit(prop, number, floor, unit_type, counter, premium=0):
-    beds, baths, area, rent = UNIT_SPECS[unit_type]
+    baths, area, rent = UNIT_SPECS[unit_type]
     _, created = Unit.objects.get_or_create(
         property=prop,
         unit_number=number,
         defaults={
-            "floor": floor,
+            "floor": "G" if floor == 0 else str(floor),  # floor 0 is the ground floor
             "unit_type": unit_type,
-            "bedrooms": beds,
             "bathrooms": baths,
             "area_sqft": Decimal(area),
             "furnished": counter % 6 == 0,
@@ -134,6 +133,7 @@ def seed_properties() -> str:
     prop(
         "KHA01", name="Khalidiyah Apartment 2B", owner=owners["Khalifa Al Mansoori"],
         property_type=T.APARTMENT, emirate=E.ABU_DHABI, address="Khalidiyah, Abu Dhabi",
+        apartment_type="2br", bathrooms=2,
         annual_rent=Decimal("72000"), status=S.VACANT, **percent_fee("5.00"),
     )
     prop(
