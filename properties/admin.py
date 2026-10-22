@@ -4,13 +4,47 @@ from django.db.models import Count, Q
 from unfold.admin import ModelAdmin, TabularInline
 from unfold.decorators import display
 
-from core.admin_utils import TooltipHelpMixin
+from core.admin_utils import TooltipHelpMixin, format_amount
 
 from .models import Owner, Property, Unit
+from .models_constants import normalise_unit_number
+
+
+class UnitBaseForm(forms.ModelForm):
+    """Shared by the Unit page and the units table on the Property page."""
+
+    class Meta:
+        model = Unit
+        fields = "__all__"
+
+    def clean_unit_number(self):
+        # " g01 " and "G01" are the same unit.
+        return normalise_unit_number(self.cleaned_data["unit_number"])
+
+    def clean_floor(self):
+        return self.cleaned_data["floor"].strip().upper()
+
+
+class UnitInlineForm(UnitBaseForm):
+    """Units table on the Property page: no long help texts in the column headers."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for field in self.fields.values():
+            field.help_text = ""  # the full Unit page still shows them as "i" tooltips
+        hints = {"unit_number": "e.g. 304", "floor": "3, G, B1"}
+        for name, text in hints.items():
+            if name in self.fields:
+                self.fields[name].widget.attrs["placeholder"] = text
+        if "floor" in self.fields:
+            self.fields["floor"].widget.attrs.update(
+                {"style": "text-transform: uppercase;", "maxlength": 4}
+            )
 
 
 class UnitInline(TabularInline):
     model = Unit
+    form = UnitInlineForm
     extra = 0
     fields = ("unit_number", "floor", "unit_type", "bathrooms", "status", "asking_rent")
     show_change_link = True
@@ -31,6 +65,13 @@ class OwnerAdmin(TooltipHelpMixin, ModelAdmin):
 
     def get_queryset(self, request):
         return super().get_queryset(request).annotate(_property_count=Count("properties"))
+
+    def get_search_results(self, request, queryset, search_term):
+        queryset, may_have_duplicates = super().get_search_results(request, queryset, search_term)
+        # The owner dropdown on the Property form offers active owners only.
+        if request.GET.get("model_name") == "property" and request.GET.get("field_name") == "owner":
+            queryset = queryset.filter(is_active=True)
+        return queryset, may_have_duplicates
 
     def get_readonly_fields(self, request, obj=None):
         # The built-in "Company Owned" owner cannot be renamed or deactivated.
@@ -108,6 +149,7 @@ class PropertyAdmin(TooltipHelpMixin, ModelAdmin):
         "owner",
         "unit_count",
         "vacant_count",
+        "rent_aed",
         "is_active",
     )
     list_filter = ("property_type", "emirate", "is_active", "owner")
@@ -176,13 +218,13 @@ class PropertyAdmin(TooltipHelpMixin, ModelAdmin):
     def vacant_count(self, obj):
         return obj._vacant_count if obj.has_units else "-"
 
+    @admin.display(description="Annual rent (AED)", ordering="annual_rent")
+    def rent_aed(self, obj):
+        return format_amount(obj.annual_rent) if not obj.has_units else "-"
 
-class UnitAdminForm(forms.ModelForm):
-    """Unit form: placeholders, capital letters for the floor code."""
 
-    class Meta:
-        model = Unit
-        fields = "__all__"
+class UnitAdminForm(UnitBaseForm):
+    """Unit form: placeholders, capital letters for the floor code, active buildings only."""
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -205,9 +247,19 @@ class UnitAdminForm(forms.ModelForm):
             self.fields["bathrooms"].widget.attrs.update({"min": 1, "max": 10})
         if "notes" in self.fields:
             self.fields["notes"].widget.attrs["rows"] = 3
+        if "property" in self.fields:
+            # Buildings only, and inactive ones only if this unit already belongs to one.
+            self.fields["property"].queryset = Property.objects.filter(
+                property_type__in=Property.BUILDING_TYPES
+            ).filter(Q(is_active=True) | Q(pk=self.instance.property_id))
 
-    def clean_floor(self):
-        return self.cleaned_data["floor"].strip().upper()
+
+class BuildingFilter(admin.RelatedFieldListFilter):
+    """Property filter on the Units list: buildings only (standalone properties have no units)."""
+
+    def field_choices(self, field, request, model_admin):
+        buildings = Property.objects.filter(property_type__in=Property.BUILDING_TYPES)
+        return [(p.pk, str(p)) for p in buildings]
 
 
 @admin.register(Unit)
@@ -221,11 +273,11 @@ class UnitAdmin(TooltipHelpMixin, ModelAdmin):
         "floor",
         "unit_type",
         "bathrooms",
-        "area_sqft",
-        "asking_rent",
+        "area",
+        "rent_aed",
         "show_status",
     )
-    list_filter = ("status", "unit_type", "property", "furnished")
+    list_filter = ("status", "unit_type", ("property", BuildingFilter), "furnished")
     search_fields = ("unit_number", "property__name", "property__code")
     list_select_related = ("property",)
     fieldsets = (
@@ -254,6 +306,14 @@ class UnitAdmin(TooltipHelpMixin, ModelAdmin):
     @admin.display(description="Unit", ordering="unit_number")
     def reference(self, obj):
         return str(obj)
+
+    @admin.display(description="Area (sq ft)", ordering="area_sqft")
+    def area(self, obj):
+        return format_amount(obj.area_sqft)
+
+    @admin.display(description="Asking rent (AED / year)", ordering="asking_rent")
+    def rent_aed(self, obj):
+        return format_amount(obj.asking_rent)
 
     @display(
         description="Status",

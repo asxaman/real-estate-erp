@@ -24,6 +24,8 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.models import Group
 from django.db import transaction
 
+from .audit import suppressed
+
 
 @dataclass(frozen=True)
 class Step:
@@ -49,7 +51,7 @@ def register_eraser(label: str, func: Callable[[], str], order: int = 100) -> No
 def run_seeders() -> list[str]:
     """Run every registered seeder inside one transaction (all or nothing)."""
     messages = []
-    with transaction.atomic():
+    with suppressed(), transaction.atomic():  # not logged record by record
         for step in sorted(_seeders.values(), key=lambda s: s.order):
             messages.append(f"{step.label}: {step.func()}")
     return messages
@@ -64,7 +66,7 @@ def run_erasers(include_users: bool = False) -> list[str]:
     (group) is deleted as well.
     """
     messages = []
-    with transaction.atomic():
+    with suppressed(), transaction.atomic():  # not logged record by record
         for step in sorted(_erasers.values(), key=lambda s: s.order, reverse=True):
             messages.append(f"{step.label}: {step.func()}")
         if include_users:

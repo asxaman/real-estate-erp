@@ -2,6 +2,16 @@
 
 COMPANY_OWNER_NAME = "Company Owned"
 
+# ---- Owner phone: optional "+", then digits, spaces, brackets or dashes (6 to 30 characters) ----
+PHONE_REGEX = r"^\+?[0-9][0-9 ()\-]{5,28}$"
+PHONE_ERROR = "Enter a valid phone number, for example +971 50 123 4567."
+
+
+def normalise_unit_number(value):
+    """' g 01 ' -> 'G 01': trim, collapse repeated spaces, capital letters."""
+    return " ".join((value or "").split()).upper()
+
+
 # ---- Property code: 3 to 6 letters/numbers, starting with a letter (RMT, ZV01 ...) ----
 CODE_REGEX = r"(?i)^[A-Z][A-Z0-9]{2,5}$"
 CODE_ERROR = "Use 3 to 6 letters or numbers, starting with a letter (for example RMT or ZV01)."

@@ -73,6 +73,7 @@ MIDDLEWARE = [
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
+    "core.audit.AuditMiddleware",  # remembers who is logged in, for the audit log
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 
@@ -216,6 +217,12 @@ UNFOLD = {
                         "title": "Roles (groups)",
                         "icon": "badge",
                         "link": reverse_lazy("admin:auth_group_changelist"),
+                        "permission": _is_superuser,
+                    },
+                    {
+                        "title": "Audit log",
+                        "icon": "history",
+                        "link": reverse_lazy("admin:core_auditentry_changelist"),
                         "permission": _is_superuser,
                     },
                     {

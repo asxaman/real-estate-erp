@@ -22,3 +22,6 @@ media/
 .idea/
 .DS_Store
 Thumbs.db
+
+# database backups
+backups/

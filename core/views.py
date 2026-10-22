@@ -3,6 +3,7 @@ from django.contrib.auth import get_user_model
 from django.core.exceptions import PermissionDenied
 from django.shortcuts import redirect, render
 
+from .audit import log_tool
 from .data_registry import run_erasers, run_seeders
 
 ERASE_CONFIRMATION_WORD = "ERASE"
@@ -18,7 +19,9 @@ def data_tools_view(request):
 
         if action == "seed":
             try:
-                for line in run_seeders():
+                lines = run_seeders()
+                log_tool(request.user, "Seed sample data", lines)
+                for line in lines:
                     messages.success(request, line)
             except Exception as exc:  # show the problem instead of a crash page
                 messages.error(request, f"Seeding failed and was rolled back: {exc}")
@@ -34,7 +37,13 @@ def data_tools_view(request):
             else:
                 try:
                     include_users = request.POST.get("include_users") == "on"
-                    for line in run_erasers(include_users=include_users):
+                    lines = run_erasers(include_users=include_users)
+                    log_tool(
+                        request.user,
+                        "Erase all data" + (" (including users and roles)" if include_users else ""),
+                        lines,
+                    )
+                    for line in lines:
                         messages.warning(request, line)
                 except Exception as exc:
                     messages.error(request, f"Erase failed and was rolled back: {exc}")

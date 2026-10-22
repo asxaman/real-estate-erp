@@ -1,5 +1,5 @@
 from django.conf import settings
-from django.core.exceptions import ValidationError
+from django.core.exceptions import NON_FIELD_ERRORS, ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator, RegexValidator
 from django.db import models
 
@@ -10,8 +10,21 @@ from .models_constants import (
     FLOOR_ERROR,
     FLOOR_HELP,
     FLOOR_REGEX,
+    PHONE_ERROR,
+    PHONE_REGEX,
     floor_sort_key,
+    normalise_unit_number,
 )
+
+
+def _changed_in_db(instance, attname):
+    """True for a new record, or when `attname` differs from what is saved in the database."""
+    if instance._state.adding or instance.pk is None:
+        return True
+    saved = (
+        type(instance).objects.filter(pk=instance.pk).values_list(attname, flat=True).first()
+    )
+    return saved != getattr(instance, attname)
 
 
 class UnitType(models.TextChoices):
@@ -52,7 +65,12 @@ class Owner(models.Model):
     # have no management fee.
     is_company = models.BooleanField(default=False, editable=False)
     email = models.EmailField(blank=True)
-    phone = models.CharField(max_length=30, blank=True)
+    phone = models.CharField(
+        max_length=30,
+        blank=True,
+        validators=[RegexValidator(PHONE_REGEX, PHONE_ERROR)],
+        help_text="Optional. Example: +971 50 123 4567.",
+    )
     address = models.TextField(blank=True)
     # Used later by the Owner portal: the login account this owner signs in with.
     user = models.OneToOneField(
@@ -72,6 +90,25 @@ class Owner(models.Model):
 
     def __str__(self):
         return self.name
+
+    def save(self, *args, **kwargs):
+        self.name = " ".join((self.name or "").split())
+        super().save(*args, **kwargs)
+
+    def clean(self):
+        self.name = " ".join((self.name or "").split())  # trim and collapse repeated spaces
+        self.email = (self.email or "").strip().lower()
+        if self.is_company:
+            return  # the built-in owner is managed by the system
+        errors = {}
+        if self.name.lower() == COMPANY_OWNER_NAME.lower():
+            errors["name"] = (
+                f'"{COMPANY_OWNER_NAME}" is reserved for the company itself. Choose another name.'
+            )
+        elif self.name and Owner.objects.filter(name__iexact=self.name).exclude(pk=self.pk).exists():
+            errors["name"] = "An owner with this name already exists."
+        if errors:
+            raise ValidationError(errors)
 
     @classmethod
     def company(cls):
@@ -234,17 +271,44 @@ class Property(models.Model):
         self.code = (self.code or "").strip().upper()
         errors = {}
 
-        # Don't allow switching a building that already has units to a standalone type.
-        if self.pk and not self.has_units and self.units.exists():
-            errors["property_type"] = (
-                "This property still has units. Delete its units "
-                "before changing it to a standalone type."
-            )
+        if self.pk:
+            if not self.has_units:
+                # Don't allow switching a building that already has units to a standalone type.
+                if self.units.exists():
+                    errors["property_type"] = (
+                        "This property still has units. Delete its units "
+                        "before changing it to a standalone type."
+                    )
+            else:
+                # Residential and commercial buildings take different unit types.
+                if self.property_type == self.PropertyType.RESIDENTIAL_BUILDING:
+                    allowed = [t.value for t in RESIDENTIAL_UNIT_TYPES]
+                    other_kind = "commercial (Office / Shop)"
+                else:
+                    allowed = [t.value for t in COMMERCIAL_UNIT_TYPES]
+                    other_kind = "residential (Studio / 1BHK ... 5BHK)"
+                if self.units.exclude(unit_type__in=allowed).exists():
+                    errors["property_type"] = (
+                        f"This building has {other_kind} units that do not fit the new type. "
+                        "Delete or change those units first."
+                    )
 
         # Year built / floors do not apply to these types: clear anything left over.
         if self.property_type in self.NO_BUILDING_INFO_TYPES:
             self.year_built = None
             self.total_floors = None
+
+        # Total floors cannot be lower than a floor that already has units.
+        if self.pk and self.has_units and self.total_floors:
+            highest = max(
+                (int(f) for f in self.units.values_list("floor", flat=True) if f.isdigit()),
+                default=0,
+            )
+            if highest > self.total_floors:
+                errors["total_floors"] = (
+                    f"This building already has units on floor {highest}, "
+                    "so total floors cannot be lower than that."
+                )
 
         # Type and bathrooms are asked for apartments only.
         if self.property_type == self.PropertyType.APARTMENT:
@@ -260,6 +324,10 @@ class Property(models.Model):
             self.status = ""
         elif not self.status:
             errors["status"] = "Please choose a status."
+
+        # Inactive owners cannot be chosen for a property (an existing property may keep its owner).
+        if self.owner_id and not self.owner.is_active and _changed_in_db(self, "owner_id"):
+            errors["owner"] = "This owner is inactive. Choose an active owner."
 
         # Management fee: none for company-owned, required for properties managed for others.
         if self.owner_id:
@@ -341,24 +409,40 @@ class Unit(models.Model):
         return f"{self.property.code}-{self.unit_number}"
 
     def save(self, *args, **kwargs):
+        self.unit_number = normalise_unit_number(self.unit_number)
         self.floor = (self.floor or "").strip().upper()
         self.floor_sort = floor_sort_key(self.floor)
         super().save(*args, **kwargs)
 
     def clean(self):
+        # "g01 " and "G01" are the same unit number: store it trimmed and in capitals.
+        self.unit_number = normalise_unit_number(self.unit_number)
         self.floor = (self.floor or "").strip().upper()
         if not self.property_id:
             return
+        prop = self.property
         errors = {}
-        if not self.property.has_units:
+        if not prop.has_units:
             errors["property"] = "Units can only be added to Residential or Commercial Buildings."
-        elif self.unit_type:
-            is_residential = self.property.property_type == Property.PropertyType.RESIDENTIAL_BUILDING
-            if is_residential and self.unit_type not in RESIDENTIAL_UNIT_TYPES:
-                errors["unit_type"] = (
-                    "A residential building can only have Studio, 1BHK to 5BHK units."
+        else:
+            # Inactive buildings take no new units (existing units stay editable).
+            if not prop.is_active and _changed_in_db(self, "property_id"):
+                errors[NON_FIELD_ERRORS] = "This property is inactive, so units cannot be added to it."
+
+            if self.unit_type:
+                is_residential = prop.property_type == Property.PropertyType.RESIDENTIAL_BUILDING
+                if is_residential and self.unit_type not in RESIDENTIAL_UNIT_TYPES:
+                    errors["unit_type"] = (
+                        "A residential building can only have Studio, 1BHK to 5BHK units."
+                    )
+                elif not is_residential and self.unit_type not in COMMERCIAL_UNIT_TYPES:
+                    errors["unit_type"] = "A commercial building can only have Office or Shop units."
+
+            # A numbered floor cannot be higher than the building's total floors.
+            if prop.total_floors and self.floor.isdigit() and int(self.floor) > prop.total_floors:
+                errors["floor"] = (
+                    f"This building has {prop.total_floors} floors, "
+                    f"so floor {self.floor} does not exist."
                 )
-            elif not is_residential and self.unit_type not in COMMERCIAL_UNIT_TYPES:
-                errors["unit_type"] = "A commercial building can only have Office or Shop units."
         if errors:
             raise ValidationError(errors)

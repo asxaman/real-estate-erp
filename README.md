@@ -88,6 +88,8 @@ You should see `Database type : postgresql` and `Connection OK`.
 
 **5e. Create the tables**
 
+(From update 6 on, `makemigrations` will also create a first migration for the new audit log in the `core` folder.)
+
     python manage.py makemigrations
     python manage.py migrate
 
@@ -99,8 +101,8 @@ If something goes wrong:
 * `password authentication failed` - the password in `.env` does not match the one from 5b.
 * `database "real_estate_erp" does not exist` - repeat 5b.
 * `No module named psycopg` - repeat the `pip install -r requirements.txt` command with `(venv)` active.
-* If `DB_NAME` is missing from `.env` the project quietly uses the old SQLite file instead;
-  `python manage.py db_info` tells you which one is in use.
+* If `DB_NAME` is missing from `.env` the project quietly falls back to a local SQLite file
+  (only meant for quick tests, never for real data); `python manage.py db_info` tells you which one is in use.
 
 ### Step 6 - Create your superuser (the main administrator)
 
@@ -154,11 +156,68 @@ Sidebar > **Property management**:
     P1, P2, P3 ... (podium levels) or a number 1, 2, 3 ... Hover the "i" next to the field to see the list.
   * **Unit type**: Studio, 1BHK, 2BHK, 3BHK, 4BHK, 5BHK for residential buildings; Office or Shop for commercial buildings.
   * **Status** is optional for now; later it will follow the lease (leased, not leased, under maintenance ...).
+* **Rules added in update 6** (all enforced on the server):
+  * No owner can be named "Company Owned" (reserved) and two owners cannot share a name (capitals and extra spaces are ignored).
+    Owner phone numbers are checked (for example `+971 50 123 4567`).
+  * Inactive owners are not offered for new properties, and inactive buildings take no new units
+    (existing records keep working).
+  * A building cannot be switched between Residential and Commercial while it has units of the other kind.
+  * Unit numbers are saved trimmed and in capitals (`g01` = `G01`). A numbered floor cannot be higher than the
+    building's **Total floors**, and Total floors cannot be lowered below a floor that already has units.
+  * Lists show money with thousands separators (for example `95,000`).
 * **Seed sample data** now also creates 4 owners (one is the company itself), 12 properties
   (3 buildings with 80 units in total, plus 9 standalone properties of different types), and gives the demo roles permissions: Property Manager can do everything,
   Accountant and Maintenance Supervisor can only view, Leasing Agent can view and edit units.
   Log in as `demo.manager` / `demo.leasing` etc. to see what each role can see.
 * **Erase all data** now also deletes all owners, properties and units.
+
+## Safety and records (update 6)
+
+* **Audit log** (sidebar > Administration > Audit log, superusers only): every time an owner, property, unit or user
+  is created, changed or deleted, a line is added: who, when, and the old and new value of each changed field
+  (so a rent or management-fee change can always be traced). Nobody can edit or delete these lines. Passwords are never logged.
+  Seeding and erasing sample data add one summary line each instead of one line per record.
+* **Superuser protection**: you cannot delete, deactivate or remove the superuser/staff status of your own account,
+  and the last active superuser can never be removed. Ask another superuser to change your account.
+
+## Automated tests
+
+The project has automated checks of the business rules above. Run them after every update (with `(venv)` active):
+
+    python manage.py test
+
+The last lines should read `Ran ... tests` and `OK`. The tests build a temporary database named `test_real_estate_erp`
+(your real data is never touched) and delete it afterwards. If a test fails, send me the full text it prints.
+
+## Backup and restore (PostgreSQL)
+
+**Make a backup** (takes a few seconds; do it before every update and at least weekly):
+
+    python manage.py backup_db
+
+The file appears in the `backups` folder (for example `backups\real_estate_erp_20261022_184500.dump`).
+Copy it to another place too (USB drive, cloud drive): a backup that lives only on this PC is lost with the PC.
+If the command says `pg_dump was not found`, run it by hand instead (replace `18` if your version differs):
+
+    & "C:\Program Files\PostgreSQL\18\bin\pg_dump.exe" -h localhost -U erp_user -F c -f backups\manual.dump real_estate_erp
+
+**Restore a backup into the existing database** (this REPLACES the current data; stop `runserver` first):
+
+    & "C:\Program Files\PostgreSQL\18\bin\pg_restore.exe" -h localhost -U erp_user -d real_estate_erp --clean --if-exists --no-owner backups\YOUR-FILE.dump
+
+It asks for the `erp_user` password (nothing shows while you type). Messages that say a table "does not exist, skipping" are normal.
+
+**Check a backup safely without touching your data**: open SQL Shell (psql) as `postgres` and run
+`CREATE DATABASE restore_test OWNER erp_user;`, then run the restore command above with `-d restore_test`.
+
+## Fixing the package versions
+
+`requirements.txt` accepts a range of versions. To freeze exactly the versions that work on your PC, run once
+(and again after any deliberate upgrade):
+
+    python manage.py pin_versions --write
+
+then commit `requirements.txt`. A new computer then installs exactly the same versions.
 
 Same tools from the terminal:
 
@@ -217,12 +276,12 @@ The `.gitignore` file keeps your database, passwords and the `venv` folder out o
 ## Project layout
 
     config/      project settings, URLs
-    core/        Module 0: users, roles, seed/erase tools
+    core/        Module 0: users, roles, seed/erase tools, audit log, safety rules, backup command
     properties/  Module 1: owners, properties, units
+    backups/     database backups made by `backup_db` (never uploaded to GitHub)
+    .env         your private settings and database password (never uploaded to GitHub)
     manage.py    command-line entry point
-    db.sqlite3   your database (created by migrate, never uploaded to GitHub)
 
 ## Before going live
 Set the environment variables `DJANGO_SECRET_KEY` (long random text) and `DJANGO_DEBUG=0`,
-and set `DJANGO_ALLOWED_HOSTS` to your domain. SQLite is fine for development and small
-teams; we can plan a move to PostgreSQL later if the company grows.
+and set `DJANGO_ALLOWED_HOSTS` to your domain. Use PostgreSQL (see Step 5) with automatic, regular backups.

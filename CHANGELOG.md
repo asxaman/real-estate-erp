@@ -1,6 +1,18 @@
 # Changelog
 
-## Infrastructure - PostgreSQL (current)
+## Module 1, update 6 - Audit fixes (current)
+- Owners: "Company Owned" is reserved; duplicate names refused (ignoring capitals/spaces); phone format checked; email saved in lower case
+- Building type: cannot switch Residential <-> Commercial while units of the other kind exist
+- Unit numbers saved trimmed and in capitals; duplicates such as `g01` / `G01` are caught
+- Unit floor cannot exceed the building's Total floors; Total floors cannot drop below an occupied floor
+- Inactive owners are not offered for new properties; inactive buildings take no new units; Units list property choices show active buildings only
+- Safety: you cannot delete, deactivate or demote your own account, and the last active superuser is protected
+- New Audit log (sidebar > Administration): who changed what, with old and new values, for owners, properties, units and users; read-only
+- Automated tests (`python manage.py test`), `backup_db` and `pin_versions` commands, backup/restore guide in the README
+- Cosmetic: README brought up to date; Units list filter shows buildings only; no long help text in the units table on the Property page; money shown as `95,000`; Properties list gets an Annual rent column
+- Run `makemigrations` then `migrate` after extracting (new migration files in `core` and `properties`)
+
+## Infrastructure - PostgreSQL
 - The project now uses PostgreSQL. Connection details come from a local `.env` file (see `.env.example`); `.env` is never uploaded to GitHub
 - If `DB_NAME` is not set, the project falls back to the old SQLite file
 - New command `python manage.py db_info` shows which database is in use and tests the connection

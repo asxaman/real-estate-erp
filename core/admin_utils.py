@@ -29,3 +29,11 @@ class TooltipHelpMixin:
         TooltipForm.__name__ = form_class.__name__
         TooltipForm.__qualname__ = form_class.__qualname__
         return TooltipForm
+
+
+def format_amount(value):
+    """95000 -> '95,000'; 1200.5 -> '1,200.50'; nothing -> '-'. For list pages."""
+    if value is None or value == "":
+        return "-"
+    text = f"{value:,.2f}"
+    return text[:-3] if text.endswith(".00") else text
