@@ -470,7 +470,7 @@
 
   /* ---- Delete confirmation: a pop-up instead of Django's separate "Are you sure?" page ---- */
   function deleteGuard() {
-    var CANCEL_TEXT = /take me back|^no,|^cancel$/i;
+    var CANCEL_TEXT = /take me back|^no,|^yes,|^cancel$/i;
     var BLOCKED = /protected related objects|would require deleting|have permission to delete|cannot delete/i;
 
     function el(tag, cls, text) {
@@ -503,8 +503,8 @@
     // The request that really deletes: our own form, so it does not depend on Unfold's markup.
     function submitDelete(url, pairs) {
       var form = el("form");
-      form.method = "post";
-      form.action = url;
+      form.setAttribute("method", "post");
+      form.setAttribute("action", url);
       form.style.display = "none";
       pairs.concat([["csrfmiddlewaretoken", csrfToken()], ["post", "yes"]]).forEach(function (kv) {
         var input = document.createElement("input");
@@ -515,7 +515,7 @@
       });
       document.body.appendChild(form);
       window.__erpAllowLeave = true;  // no "unsaved changes" box on the way out
-      form.submit();
+      HTMLFormElement.prototype.submit.call(form);
     }
 
     function closeDialog() {
@@ -611,22 +611,36 @@
         if (iObjects > -1) {
           summary = iSummary > -1 ? lines.slice(iSummary + 1, iObjects) : [];
           objects = lines.slice(iObjects + 1);
-          var found = (lines.join("\n").match(/delete the selected ([^?\n]+)\?/i) || [])[1];
-          if (found) { noun = found; }
+          var text = lines.join("\n");
+          var found = (text.match(/delete the selected ([^?\n]+)\?/i) || [])[1] ||
+                      (text.match(/delete the ([^"“”'?\n]+?)\s*["“”']/i) || [])[1];
+          if (found) { noun = found.trim(); }
           var n = parseInt(((summary[0] || "").match(/:\s*(\d+)/) || [])[1], 10);
           if (n) { count = n; }
         }
         if (!objects.length) { objects = opts.names; }
 
-        var title = "Delete this record?";
-        if (count > 1) { title = "Delete " + count + " " + (noun || "records") + "?"; }
-        else if (noun) { title = "Delete this " + noun + "?"; }
+        // "Property: Sharjah 3 (SHJ3)" -> name "Sharjah 3 (SHJ3)"
+        var first = (objects[0] || "").replace(/^[^:]{1,40}:\s*/, "");
+        var related = objects.length > 1;
+        var title, message;
+        if (count > 1) {
+          title = "Delete " + count + " " + (noun || "records") + "?";
+          message = "These " + count + " " + (noun || "records") + " will be permanently deleted" +
+                    (related ? ", together with the related items listed below" : "") +
+                    ". This cannot be undone.";
+        } else {
+          title = noun && first ? "Delete " + noun + " “" + first + "”?" : "Delete this record?";
+          message = related
+            ? "This " + (noun || "record") + " and the related items listed below will be permanently deleted. This cannot be undone."
+            : "This " + (noun || "record") + " will be permanently deleted. This cannot be undone.";
+        }
         showDialog({
           title: title,
-          text: "This will permanently delete the items below, together with anything that belongs to them. This cannot be undone.",
+          text: message,
           sections: [
-            { heading: "Summary", items: summary, chips: true },
-            { heading: "Will be deleted", items: objects }
+            { heading: "Summary", items: summary.length > 1 ? summary : [], chips: true },
+            { heading: count > 1 || related ? "Will be deleted" : "", items: count > 1 || related ? objects : [] }
           ],
           confirmLabel: "Yes, delete",
           onConfirm: function () { submitDelete(opts.postUrl, opts.pairs); }
@@ -679,11 +693,11 @@
           pairs.push([key, value]);
         }
       });
-      var target = form.action || window.location.href;
+      var target = new URL(form.getAttribute("action") || window.location.href, window.location.href).href;
       confirmDelete({
         url: target, body: data, postUrl: target, pairs: pairs,
         names: names, count: names.length, noun: noun,
-        fallback: function () { form.dataset.erpBypass = "1"; form.submit(); }
+        fallback: function () { form.dataset.erpBypass = "1"; HTMLFormElement.prototype.submit.call(form); }
       });
     }, true);
   }

@@ -1,5 +1,9 @@
 # Changelog
 
+## Update 8c - Fix: delete from a list, clearer wording
+- Fix: "Delete selected" in lists did not delete (the page address was read wrongly because the list form has a field called "action")
+- Delete pop-up wording: names what is being deleted (for example: Delete property “Sharjah 3 (SHJ3)”?), says plainly whether related items go too, and no longer lists a stray "Yes, I'm sure" line
+
 ## Update 8b - Fix: delete from a list
 - Fix: "Delete selected" in list pages showed a wrong "This cannot be deleted" pop-up. The delete pop-up no longer depends on the layout of Django's confirmation page: it builds the delete request itself, lists the ticked records by name, and shows "cannot be deleted" only when Django reports protected records or missing permission
 
