@@ -166,3 +166,35 @@ form#user_form input[type="file"]::file-selector-button {
   margin-right: 10px; padding: 5px 12px; border: 0; border-radius: 6px;
   background: #7c3aed; color: #fff; font-size: 13px; cursor: pointer;
 }
+
+/* ---- Delete confirmation pop-up (shares the look of the unsaved-changes pop-up) ---- */
+#erp-delete-modal {
+  position: fixed; inset: 0; z-index: 10000; display: none;
+  align-items: center; justify-content: center; padding: 16px;
+  background: rgba(15, 23, 42, 0.55); backdrop-filter: blur(2px);
+}
+#erp-delete-modal.is-open { display: flex; animation: erp-fade 0.12s ease-out; }
+.erp-del-dialog { max-width: 460px; max-height: 90vh; overflow-y: auto; text-align: center; }
+.erp-del-icon { background: #fee2e2; color: #dc2626; }
+html.dark .erp-del-icon { background: rgba(239, 68, 68, 0.15); color: #f87171; }
+.erp-del-section { margin: 0 0 14px; text-align: left; }
+.erp-del-heading {
+  margin-bottom: 6px; font-size: 11px; font-weight: 600; letter-spacing: 0.06em;
+  text-transform: uppercase; color: #6b7280;
+}
+html.dark .erp-del-heading { color: #9ca3af; }
+.erp-del-list, .erp-del-chips { margin: 0; padding: 0; list-style: none; }
+.erp-del-list {
+  max-height: 160px; overflow-y: auto; border: 1px solid #e5e7eb; border-radius: 8px;
+}
+html.dark .erp-del-list { border-color: #1f2937; }
+.erp-del-list li { padding: 7px 12px; font-size: 13px; border-bottom: 1px solid #f3f4f6; }
+html.dark .erp-del-list li { border-bottom-color: #1f2937; }
+.erp-del-list li:last-child { border-bottom: 0; }
+.erp-del-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.erp-del-chips li {
+  padding: 3px 10px; font-size: 12px; border-radius: 999px; background: #f3f4f6; color: #374151;
+}
+html.dark .erp-del-chips li { background: #1f2937; color: #d1d5db; }
+.erp-del-go { background: #dc2626; color: #fff; }
+.erp-del-go:disabled { opacity: 0.6; cursor: wait; }

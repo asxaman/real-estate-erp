@@ -1,5 +1,10 @@
 # Changelog
 
+## Update 8 - Delete confirmation pop-up (whole app)
+- Deleting anything (the Delete button on a record, or "Delete selected" in a list) now asks in a pop-up that lists what will be deleted, instead of opening a separate page. If something cannot be deleted (other records depend on it) the pop-up explains why
+- Applies automatically to every current and future module
+- No database changes
+
 ## Module 0, update 7c - Fix
 - Fix: the Users page crashed ("no profile picture") for a user without a picture
 

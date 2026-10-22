@@ -461,14 +461,201 @@
     // Closing the tab, reloading or the Back button cannot be intercepted by a page:
     // for those the browser's own box is the only option.
     window.addEventListener("beforeunload", function (e) {
-      if (!allowLeave && isDirty()) {
+      if (!allowLeave && !window.__erpAllowLeave && isDirty()) {
         e.preventDefault();
         e.returnValue = "";
       }
     });
   }
 
+  /* ---- Delete confirmation: a pop-up instead of Django's separate "Are you sure?" page ---- */
+  function deleteGuard() {
+    var CANCEL_TEXT = /take me back|^no,|^cancel$/i;
+
+    function el(tag, cls, text) {
+      var node = document.createElement(tag);
+      if (cls) { node.className = cls; }
+      if (text) { node.textContent = text; }
+      return node;
+    }
+
+    function textLines(node) {
+      // Read the visible text line by line (needs the node to be in the page, even off-screen).
+      var holder = el("div");
+      holder.style.cssText = "position:absolute;left:-9999px;top:0;width:800px;";
+      holder.appendChild(node);
+      document.body.appendChild(holder);
+      var lines = (holder.innerText || "").split("\n")
+        .map(function (l) { return l.trim(); })
+        .filter(function (l) { return l && !CANCEL_TEXT.test(l); });
+      holder.style.display = "none";
+      return { lines: lines, holder: holder };
+    }
+
+    function closeDialog() {
+      var old = document.getElementById("erp-delete-modal");
+      if (old) { old.remove(); }
+    }
+
+    // opts: title, text, sections [{heading, items[], chips}], confirmLabel, onConfirm
+    function showDialog(opts) {
+      closeDialog();
+      var overlay = el("div");
+      overlay.id = "erp-delete-modal";
+      var dlg = el("div", "erp-leave-dialog erp-del-dialog");
+      dlg.setAttribute("role", "alertdialog");
+      dlg.setAttribute("aria-modal", "true");
+      dlg.appendChild(el("div", "erp-leave-icon erp-del-icon", "!"));
+      dlg.appendChild(el("h2", "", opts.title));
+      if (opts.text) { dlg.appendChild(el("p", "", opts.text)); }
+
+      (opts.sections || []).forEach(function (sec) {
+        if (!sec.items.length) { return; }
+        var box = el("div", "erp-del-section");
+        if (sec.heading) { box.appendChild(el("div", "erp-del-heading", sec.heading)); }
+        var list = el("ul", sec.chips ? "erp-del-chips" : "erp-del-list");
+        sec.items.forEach(function (item) { list.appendChild(el("li", "", item)); });
+        box.appendChild(list);
+        dlg.appendChild(box);
+      });
+
+      var actions = el("div", "erp-leave-actions");
+      var cancel = el("button", "erp-leave-stay", opts.confirmLabel ? "Cancel" : "Close");
+      cancel.type = "button";
+      actions.appendChild(cancel);
+      var go = null;
+      if (opts.confirmLabel) {
+        go = el("button", "erp-del-go", opts.confirmLabel);
+        go.type = "button";
+        actions.appendChild(go);
+      }
+      dlg.appendChild(actions);
+      overlay.appendChild(dlg);
+      document.body.appendChild(overlay);
+      overlay.classList.add("is-open");
+      cancel.focus();
+
+      function dismiss() {
+        closeDialog();
+        if (opts.onCancel) { opts.onCancel(); }
+      }
+      cancel.addEventListener("click", dismiss);
+      overlay.addEventListener("click", function (e) { if (e.target === overlay) { dismiss(); } });
+      overlay.addEventListener("keydown", function (e) {
+        if (e.key === "Escape") { e.stopPropagation(); dismiss(); }
+        if (e.key === "Tab" && go) {
+          if (e.shiftKey && document.activeElement === cancel) { e.preventDefault(); go.focus(); }
+          else if (!e.shiftKey && document.activeElement === go) { e.preventDefault(); cancel.focus(); }
+        }
+      });
+      if (go) {
+        go.addEventListener("click", function () {
+          go.disabled = true;
+          go.textContent = "Deleting...";
+          opts.onConfirm();
+        });
+      }
+    }
+
+    // Fetch Django's own confirmation page, read it, and show it as a pop-up.
+    function confirmDelete(url, fetchOptions, postUrl, fallback) {
+      var options = { credentials: "same-origin", headers: { "X-Requested-With": "XMLHttpRequest" } };
+      for (var key in fetchOptions) { options[key] = fetchOptions[key]; }
+      fetch(url, options).then(function (response) {
+        if (response.redirected && /login/.test(response.url)) { throw new Error("login"); }
+        return response.text();
+      }).then(function (html) {
+        var doc = new DOMParser().parseFromString(html, "text/html");
+        var confirmForm = null;
+        Array.prototype.forEach.call(doc.querySelectorAll("form"), function (f) {
+          if (!confirmForm && f.querySelector('input[name="post"]')) { confirmForm = f; }
+        });
+
+        if (!confirmForm) {
+          // Nothing can be deleted (protected records or no permission): explain it.
+          var area = doc.querySelector("main") || doc.querySelector("#content-main") || doc.querySelector("#content");
+          var info = area ? textLines(document.importNode(area, true)) : { lines: [], holder: null };
+          if (info.holder) { info.holder.remove(); }
+          var reason = info.lines.filter(function (l) { return l.length > 25; }).slice(0, 6);
+          showDialog({
+            title: "This cannot be deleted",
+            text: reason.length ? "" : "Other records depend on it, or you do not have permission to delete it.",
+            sections: [{ heading: "", items: reason }]
+          });
+          return;
+        }
+
+        var form = document.importNode(confirmForm, true);
+        form.action = postUrl;
+        form.method = "post";
+        var read = textLines(form);
+        var lines = read.lines;
+        var low = lines.map(function (l) { return l.toLowerCase(); });
+        var iSummary = low.indexOf("summary");
+        var iObjects = low.indexOf("objects");
+        var question = lines[0] || "";
+        var noun = (question.match(/delete the selected ([^?]+)\?/i) || [])[1] || "";
+        var summary = [], objects = [];
+        if (iObjects > -1) {
+          summary = iSummary > -1 ? lines.slice(iSummary + 1, iObjects) : [];
+          objects = lines.slice(iObjects + 1);
+        } else {
+          objects = lines.slice(1);
+        }
+        var count = parseInt(((summary[0] || "").match(/:\s*(\d+)/) || [])[1], 10);
+        var title = "Delete this record?";
+        if (noun) {
+          title = count > 1 ? "Delete " + count + " " + noun + "?" : "Delete this " + noun + "?";
+        }
+        showDialog({
+          title: title,
+          text: "This will permanently delete the items below, together with anything that belongs to them. This cannot be undone.",
+          sections: [
+            { heading: "Summary", items: summary, chips: true },
+            { heading: "Will be deleted", items: objects }
+          ],
+          confirmLabel: "Yes, delete",
+          onCancel: function () { read.holder.remove(); },
+          onConfirm: function () {
+            window.__erpAllowLeave = true;  // no "unsaved changes" box on the way out
+            form.submit();
+          }
+        });
+      }).catch(function () { fallback(); });
+    }
+
+    document.addEventListener("click", function (e) {
+      if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) { return; }
+      var link = e.target.closest ? e.target.closest("a[href]") : null;
+      if (!link) { return; }
+      var path = link.pathname || "";
+      if (!/\/delete\/?$/.test(path) || (link.target && link.target !== "_self")) { return; }
+      if (link.closest(".related-widget-wrapper") || /_popup=/.test(link.search)) { return; }
+      e.preventDefault();
+      e.stopPropagation();
+      confirmDelete(link.href, {}, link.href, function () { window.location.href = link.href; });
+    }, true);
+
+    // "Delete selected ..." from the list pages
+    document.addEventListener("submit", function (e) {
+      var form = e.target;
+      if (!form || form.tagName !== "FORM" || form.dataset.erpBypass) { return; }
+      var data;
+      try { data = new FormData(form); } catch (err) { return; }
+      if (data.get("action") !== "delete_selected" || data.get("post")) { return; }
+      if (!data.getAll("_selected_action").length) { return; }  // nothing ticked: Django explains
+      e.preventDefault();
+      e.stopPropagation();
+      var target = form.action || window.location.href;
+      confirmDelete(target, { method: "POST", body: data }, target, function () {
+        form.dataset.erpBypass = "1";
+        form.submit();
+      });
+    }, true);
+  }
+
   function init() {
+    deleteGuard();
     var form = document.querySelector('form[id$="_form"]');
     if (!form) {
       return;
