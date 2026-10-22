@@ -154,3 +154,12 @@ class ProfilePicture(TestCase):
         user = User.objects.create_user("asad", first_name="Asad", last_name="Zaman")
         self.assertIn("AZ", avatar_html(user))
         self.assertIn("AS", avatar_html(User.objects.create_user("asif")))
+
+    def test_sidebar_avatar_url(self):
+        from .models import UserProfile
+
+        user = User.objects.create_user("pic")
+        self.assertIsNone(getattr(user, "avatar_url", None))  # no picture: Unfold shows the initial
+        UserProfile.objects.create(user=user, photo="profile_photos/x.png")
+        user = User.objects.get(pk=user.pk)
+        self.assertTrue(user.avatar_url.endswith("profile_photos/x.png"))

@@ -1,5 +1,9 @@
 # Changelog
 
+## Module 0, update 7b - Picture in the sidebar
+- The profile picture now also shows in the account block at the bottom of the left sidebar (Unfold reads it from `avatar_url`)
+- No database changes
+
 ## Module 0, update 7 - User profile picture
 - Optional profile picture on every user (Personal info section); round photo or initials circle in the Users list
 - Pictures: JPG/PNG/WebP, max 2 MB, stored in the new `media` folder; the file is deleted when the picture is removed or the user is deleted
