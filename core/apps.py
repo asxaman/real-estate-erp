@@ -31,7 +31,7 @@ class CoreConfig(AppConfig):
             profile = getattr(user, "profile", None)
             if profile is not None and profile.photo:
                 return profile.photo.url
-            raise AttributeError("no profile picture")  # Unfold then shows the initial letter
+            return ""  # empty: Unfold then shows the person's initial letter instead
 
         User = get_user_model()
         if not hasattr(User, "avatar_url"):

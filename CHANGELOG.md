@@ -1,5 +1,8 @@
 # Changelog
 
+## Module 0, update 7c - Fix
+- Fix: the Users page crashed ("no profile picture") for a user without a picture
+
 ## Module 0, update 7b - Picture in the sidebar
 - The profile picture now also shows in the account block at the bottom of the left sidebar (Unfold reads it from `avatar_url`)
 - No database changes

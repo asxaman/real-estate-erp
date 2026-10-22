@@ -159,7 +159,7 @@ class ProfilePicture(TestCase):
         from .models import UserProfile
 
         user = User.objects.create_user("pic")
-        self.assertIsNone(getattr(user, "avatar_url", None))  # no picture: Unfold shows the initial
+        self.assertEqual(user.avatar_url, "")  # no picture: Unfold shows the initial
         UserProfile.objects.create(user=user, photo="profile_photos/x.png")
         user = User.objects.get(pk=user.pk)
         self.assertTrue(user.avatar_url.endswith("profile_photos/x.png"))
