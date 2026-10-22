@@ -1,0 +1,54 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block breadcrumbs %}{% endblock %}
+
+{% block content %}
+<style>
+  .erp-grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); margin-bottom: 24px; }
+  .erp-card { border: 1px solid rgba(128,128,128,.25); border-radius: 12px; padding: 20px; }
+  .erp-card .label { font-size: 13px; opacity: .7; margin-bottom: 6px; }
+  .erp-card .value { font-size: 30px; font-weight: 700; }
+  .erp-row { display: flex; align-items: center; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid rgba(128,128,128,.15); }
+  .erp-row:last-child { border-bottom: 0; }
+  .erp-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 8px; }
+  .erp-title { font-weight: 600; margin-bottom: 8px; }
+</style>
+
+<div class="erp-grid">
+  {% for kpi in kpis %}
+    <div class="erp-card">
+      <div class="label">{{ kpi.label }}</div>
+      <div class="value">{{ kpi.value }}</div>
+    </div>
+  {% endfor %}
+</div>
+
+<div class="erp-grid" style="grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));">
+  <div class="erp-card">
+    <div class="erp-title">Units by status</div>
+    {% for row in unit_breakdown %}
+      <div class="erp-row">
+        <span><span class="erp-dot" style="background: {{ row.color }}"></span>{{ row.label }}</span>
+        <strong>{{ row.value }}</strong>
+      </div>
+    {% endfor %}
+    <div class="erp-row">
+      <span>Asking rent of vacant units (per year)</span>
+      <strong>{{ currency }} {{ vacant_potential_rent }}</strong>
+    </div>
+  </div>
+
+  <div class="erp-card">
+    <div class="erp-title">Recently added properties</div>
+    {% for p in recent_properties %}
+      <div class="erp-row">
+        <span>{{ p.name }} <small style="opacity:.6">({{ p.get_emirate_display }})</small></span>
+        <span style="opacity:.7">{{ p.owner.name }}</span>
+      </div>
+    {% empty %}
+      <p style="opacity:.7">No properties yet. Add your first one from the sidebar.</p>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}

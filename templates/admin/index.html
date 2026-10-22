@@ -1,0 +1,43 @@
+{% extends 'admin/base.html' %}
+{% load i18n %}
+
+{% block breadcrumbs %}{% endblock %}
+{% block title %}Dashboard | {{ site_title|default:"Real Estate ERP" }}{% endblock %}
+
+{% block content %}
+<style>
+  .erp-grid { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); margin-bottom: 1.5rem; }
+  .erp-card { border: 1px solid rgba(128,128,128,.3); border-radius: 8px; padding: 1.1rem 1.25rem; }
+  .erp-card .label { font-size: .8rem; opacity: .7; }
+  .erp-card .value { font-size: 1.9rem; font-weight: 600; margin-top: .25rem; }
+  .erp-row { display: flex; gap: .75rem; align-items: center; padding: .6rem 0; border-top: 1px solid rgba(128,128,128,.2); }
+  .erp-row:first-child { border-top: 0; }
+  .erp-badge { margin-left: auto; font-size: .7rem; padding: .15rem .6rem; border-radius: 999px; border: 1px solid rgba(128,128,128,.4); }
+  .erp-badge.done { background: rgba(22,163,74,.15); border-color: rgba(22,163,74,.5); }
+  .erp-badge.next { background: rgba(37,99,235,.15); border-color: rgba(37,99,235,.5); }
+</style>
+
+<h1 style="font-size:1.4rem;font-weight:600;margin-bottom:.25rem">
+  Welcome{% if user.first_name %}, {{ user.first_name }}{% endif %}
+</h1>
+<p style="opacity:.7;margin-bottom:1.5rem">
+  {% if company %}{{ company.company_name }}{% else %}No company profile yet. Add one under Administration, Company settings.{% endif %}
+</p>
+
+<div class="erp-grid">
+  {% for kpi in kpis %}
+    <div class="erp-card"><div class="label">{{ kpi.label }}</div><div class="value">{{ kpi.value }}</div></div>
+  {% endfor %}
+</div>
+
+<div class="erp-card">
+  <div style="font-weight:600;margin-bottom:.5rem">Build roadmap</div>
+  {% for m in modules %}
+    <div class="erp-row">
+      <span style="opacity:.6;width:1.5rem">{{ m.number }}</span>
+      <span>{{ m.title }}</span>
+      <span class="erp-badge {{ m.status }}">{{ m.status }}</span>
+    </div>
+  {% endfor %}
+</div>
+{% endblock %}

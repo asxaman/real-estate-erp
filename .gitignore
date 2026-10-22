@@ -1,18 +1,8 @@
-# Python
+venv/
 __pycache__/
 *.pyc
-
-# Virtual environment (everyone rebuilds their own)
-.venv/
-venv/
-
-# Local database and secrets (never upload these)
 db.sqlite3
 .env
-
-# Uploaded documents: Emirates IDs, passports, contracts... NEVER upload these
-media/
-
-# Editor
 .vscode/
-.idea/
+staticfiles/
+media/
