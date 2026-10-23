@@ -178,8 +178,8 @@ UNFOLD = {
     "SHOW_VIEW_ON_SITE": False,
     # Our own small style/behaviour layer (info icons, compact forms).
     # Bump the ?v= number whenever these files change so browsers reload them.
-    "STYLES": [lambda request: static("core/erp.css") + "?v=7"],
-    "SCRIPTS": [lambda request: static("core/erp.js") + "?v=10"],
+    "STYLES": [lambda request: static("core/erp.css") + "?v=8"],
+    "SCRIPTS": [lambda request: static("core/erp.js") + "?v=11"],
     "SIDEBAR": {
         "show_search": True,
         "show_all_applications": True,
@@ -187,12 +187,19 @@ UNFOLD = {
             {
                 "title": "Property management",
                 "separator": True,
+                "collapsible": True,
                 "items": [
                     {
                         "title": "Owners",
                         "icon": "account_circle",
                         "link": reverse_lazy("admin:properties_owner_changelist"),
                         "permission": _can("properties.view_owner"),
+                    },
+                    {
+                        "title": "Import owners",
+                        "icon": "upload_file",
+                        "link": reverse_lazy("admin:properties_owner_import"),
+                        "permission": _can("properties.add_owner"),
                     },
                     {
                         "title": "Properties",
@@ -211,6 +218,7 @@ UNFOLD = {
             {
                 "title": "Administration",
                 "separator": True,
+                "collapsible": True,
                 "items": [
                     {
                         "title": "Users",
@@ -241,3 +249,6 @@ UNFOLD = {
         ],
     },
 }
+
+# One-time messages (such as a temporary password) are kept in the session, not in a cookie.
+MESSAGE_STORAGE = "django.contrib.messages.storage.session.SessionStorage"

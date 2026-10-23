@@ -39,18 +39,43 @@ def format_amount(value):
     return text[:-3] if text.endswith(".00") else text
 
 
-def avatar_html(user, size=32):
-    """Round profile picture, or a circle with the person's initials when there is none."""
-    profile = getattr(user, "profile", None)
-    if profile is not None and profile.photo:
+def circle_avatar(url, initials, size=32):
+    """Round picture, or a circle with initials when there is no picture."""
+    if url:
         return format_html(
             '<img src="{}" alt="" style="width:{}px;height:{}px;border-radius:50%;object-fit:cover;">',
-            profile.photo.url, size, size,
+            url, size, size,
         )
-    initials = ((user.first_name[:1] + user.last_name[:1]) or user.get_username()[:2]).upper()
     return format_html(
         '<span style="display:inline-flex;align-items:center;justify-content:center;'
         'width:{}px;height:{}px;border-radius:50%;background:#ede9fe;color:#6d28d9;'
-        'font-weight:600;font-size:{}px;">{}</span>',
+        'font-weight:600;font-size:{}px;flex-shrink:0;">{}</span>',
         size, size, int(size * 0.4), initials,
+    )
+
+
+def avatar_html(user, size=32):
+    """A user's round profile picture (or initials)."""
+    profile = getattr(user, "profile", None)
+    url = profile.photo.url if profile is not None and profile.photo else ""
+    initials = ((user.first_name[:1] + user.last_name[:1]) or user.get_username()[:2]).upper()
+    return circle_avatar(url, initials, size)
+
+
+_BADGE_TONES = {
+    "success": ("#dcfce7", "#166534"),
+    "warning": ("#fef3c7", "#92400e"),
+    "danger": ("#fee2e2", "#991b1b"),
+    "info": ("#dbeafe", "#1e40af"),
+    "neutral": ("#f3f4f6", "#374151"),
+}
+
+
+def badge(text, tone="neutral"):
+    """A small coloured pill."""
+    background, color = _BADGE_TONES.get(tone, _BADGE_TONES["neutral"])
+    return format_html(
+        '<span style="display:inline-block;padding:2px 9px;border-radius:999px;font-size:12px;'
+        'font-weight:600;background:{};color:{};white-space:nowrap;">{}</span>',
+        background, color, text,
     )

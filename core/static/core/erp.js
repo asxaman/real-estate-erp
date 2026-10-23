@@ -716,7 +716,44 @@
     }, true);
   }
 
+  // Sidebar sections: remember what the person opened or closed (Unfold forgets on every page load).
+  // Default is open; the section holding the current page is always open.
+  function sidebarMemory() {
+    var KEY = "erp-nav-closed";
+    function load() {
+      try { return JSON.parse(localStorage.getItem(KEY) || "{}"); } catch (e) { return {}; }
+    }
+    function save(state) {
+      try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) { /* storage blocked */ }
+    }
+    function apply() {
+      if (!window.Alpine || !window.Alpine.$data) { return; }
+      var state = load();
+      document.querySelectorAll("h2.cursor-pointer, h2[x-on\\:click]").forEach(function (h) {
+        var box = h.closest("[x-data]");
+        var title = (h.textContent || "").trim();
+        if (!box || !title || h.dataset.erpNav) { return; }
+        h.dataset.erpNav = "1";
+        var data = window.Alpine.$data(box);
+        if (!data || typeof data.navigationOpen === "undefined") { return; }
+        var hasActive = !!box.querySelector("a[aria-current], li.active, a.font-semibold, a.bg-base-100, [class*='active']");
+        data.navigationOpen = hasActive ? true : state[title] !== true;
+        h.addEventListener("click", function () {
+          setTimeout(function () {
+            var s2 = load();
+            s2[title] = !data.navigationOpen;  // true = closed
+            save(s2);
+          }, 0);
+        });
+      });
+    }
+    document.addEventListener("alpine:initialized", apply);
+    setTimeout(apply, 0);
+    setTimeout(apply, 300);
+  }
+
   function init() {
+    sidebarMemory();
     deleteGuard();
     var form = document.querySelector('form[id$="_form"]');
     if (!form) {

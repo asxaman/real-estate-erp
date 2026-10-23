@@ -198,3 +198,23 @@ html.dark .erp-del-list li { border-bottom-color: #1f2937; }
 html.dark .erp-del-chips li { background: #1f2937; color: #d1d5db; }
 .erp-del-go { background: #dc2626; color: #fff; }
 .erp-del-go:disabled { opacity: 0.6; cursor: wait; }
+
+/* ---- Owner summary header ---- */
+.erp-owner-header {
+  display: flex; align-items: center; gap: 18px; flex-wrap: wrap; width: 100%;
+  padding: 18px 20px; border: 1px solid #e5e7eb; border-radius: 12px; background: #fafafa;
+}
+html.dark .erp-owner-header { border-color: #1f2937; background: #111827; }
+.erp-oh-main { flex: 1 1 260px; min-width: 0; }
+.erp-oh-name { font-size: 20px; font-weight: 700; line-height: 1.2; }
+.erp-oh-pills { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 6px; }
+.erp-oh-sub { font-size: 13px; color: #6b7280; }
+html.dark .erp-oh-sub { color: #9ca3af; }
+.erp-oh-stats { display: flex; gap: 10px; flex-wrap: wrap; }
+.erp-oh-stat {
+  min-width: 96px; padding: 10px 14px; border-radius: 10px; background: #fff; border: 1px solid #e5e7eb;
+  display: flex; flex-direction: column; gap: 2px;
+}
+html.dark .erp-oh-stat { background: #0b1220; border-color: #1f2937; }
+.erp-oh-stat b { font-size: 18px; }
+.erp-oh-stat span { font-size: 11px; color: #6b7280; text-transform: uppercase; letter-spacing: .04em; }

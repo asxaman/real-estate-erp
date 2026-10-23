@@ -1,20 +1,68 @@
+import re
+import uuid
+from datetime import timedelta
+from pathlib import Path
+
 from django.conf import settings
 from django.core.exceptions import NON_FIELD_ERRORS, ValidationError
-from django.core.validators import MaxValueValidator, MinValueValidator, RegexValidator
+from django.core.validators import (
+    FileExtensionValidator,
+    MaxValueValidator,
+    MinValueValidator,
+    RegexValidator,
+)
 from django.db import models
+from django.db.models.signals import post_delete
+from django.dispatch import receiver
+from django.utils import timezone
+
+from core.models import PHOTO_VALIDATORS
 
 from .models_constants import (
     CODE_ERROR,
     CODE_REGEX,
+    COMPANY_OWNER_CODE,
     COMPANY_OWNER_NAME,
+    EXPIRY_WARNING_DAYS,
     FLOOR_ERROR,
     FLOOR_HELP,
     FLOOR_REGEX,
     PHONE_ERROR,
     PHONE_REGEX,
+    SWIFT_ERROR,
+    SWIFT_REGEX,
     floor_sort_key,
+    iban_is_valid,
+    normalise_iban,
     normalise_unit_number,
 )
+
+
+def owner_photo_path(instance, filename):
+    return f"owner_photos/{uuid.uuid4().hex}{Path(filename).suffix.lower()}"
+
+
+def owner_document_path(instance, filename):
+    return f"owner_documents/{uuid.uuid4().hex}{Path(filename).suffix.lower()}"
+
+
+def validate_document_size(file):
+    if file.size > 10 * 1024 * 1024:
+        raise ValidationError("The file is too large. The maximum size is 10 MB.")
+
+
+def validate_iban(value):
+    if not iban_is_valid(value):
+        raise ValidationError("This IBAN is not valid. Check the number (UAE IBANs start with AE and have 23 characters).")
+
+
+def next_owner_code():
+    numbers = []
+    for code in Owner.objects.exclude(code__isnull=True).values_list("code", flat=True):
+        match = re.fullmatch(r"OWN-(\d+)", code)
+        if match:
+            numbers.append(int(match.group(1)))
+    return f"OWN-{max(numbers, default=0) + 1:04d}"
 
 
 def _changed_in_db(instance, attname):
@@ -59,7 +107,24 @@ BATHROOM_VALIDATORS = [
 class Owner(models.Model):
     """A property owner (individual or company) whose properties we manage."""
 
+    class OwnerType(models.TextChoices):
+        INDIVIDUAL = "individual", "Individual"
+        COMPANY = "company", "Company"
+
     name = models.CharField("Owner name", max_length=200)
+    owner_type = models.CharField(
+        "Owner type", max_length=12, choices=OwnerType.choices, default=OwnerType.INDIVIDUAL
+    )
+    # Assigned automatically (OWN-0001, OWN-0002 ...).
+    code = models.CharField(max_length=20, unique=True, null=True, blank=True, editable=False)
+    photo = models.ImageField(
+        "Photo / logo",
+        upload_to=owner_photo_path,
+        blank=True,
+        validators=PHOTO_VALIDATORS,
+        help_text="Optional. A photo for an individual or the logo of a company "
+        "(JPG, PNG or WebP, up to 2 MB).",
+    )
     # The one built-in owner that stands for "our own company". It is created
     # automatically, cannot be renamed or deleted, and properties owned by it
     # have no management fee.
@@ -93,7 +158,33 @@ class Owner(models.Model):
 
     def save(self, *args, **kwargs):
         self.name = " ".join((self.name or "").split())
+        if not self.code:
+            self.code = COMPANY_OWNER_CODE if self.is_company else next_owner_code()
+        old_photo = ""
+        if self.pk:
+            old_photo = Owner.objects.filter(pk=self.pk).values_list("photo", flat=True).first() or ""
         super().save(*args, **kwargs)
+        if old_photo and old_photo != (self.photo.name or ""):
+            self.photo.storage.delete(old_photo)  # the picture was replaced or removed
+
+    @property
+    def portal_status(self):
+        """(key, label): none / never / active / disabled."""
+        if self.user_id is None:
+            return "none", "No login"
+        if not self.user.is_active:
+            return "disabled", "Disabled"
+        if self.user.last_login is None:
+            return "never", "Never logged in"
+        return "active", "Active"
+
+    def document_counts(self):
+        """(expired, expiring soon) among this owner's documents."""
+        today = timezone.localdate()
+        soon_limit = today + timedelta(days=EXPIRY_WARNING_DAYS)
+        expired = self.documents.filter(expiry_date__lt=today).count()
+        soon = self.documents.filter(expiry_date__gte=today, expiry_date__lte=soon_limit).count()
+        return expired, soon
 
     def clean(self):
         self.name = " ".join((self.name or "").split())  # trim and collapse repeated spaces
@@ -115,8 +206,139 @@ class Owner(models.Model):
         """Return the built-in "Company Owned" owner, creating it if it is missing."""
         owner = cls.objects.filter(is_company=True).first()
         if owner is None:
-            owner = cls.objects.create(name=COMPANY_OWNER_NAME, is_company=True)
+            owner = cls.objects.create(
+                name=COMPANY_OWNER_NAME, is_company=True, owner_type=cls.OwnerType.COMPANY
+            )
         return owner
+
+
+@receiver(post_delete, sender=Owner)
+def remove_owner_photo(sender, instance, **kwargs):
+    if instance.photo:
+        instance.photo.delete(save=False)
+
+
+class OwnerContact(models.Model):
+    """A person to talk to about an owner (the owner, a representative, an accountant ...)."""
+
+    class Role(models.TextChoices):
+        OWNER = "owner", "Owner"
+        SIGNATORY = "signatory", "Authorised signatory"
+        REPRESENTATIVE = "representative", "Representative"
+        ACCOUNTANT = "accountant", "Accountant"
+        ASSISTANT = "assistant", "Assistant"
+        OTHER = "other", "Other"
+
+    class Language(models.TextChoices):
+        ENGLISH = "en", "English"
+        ARABIC = "ar", "Arabic"
+
+    owner = models.ForeignKey(Owner, on_delete=models.CASCADE, related_name="contacts")
+    name = models.CharField(max_length=150)
+    role = models.CharField(max_length=20, choices=Role.choices, default=Role.OWNER)
+    is_primary = models.BooleanField("Primary", default=False)
+    mobile = models.CharField(
+        max_length=30, blank=True, validators=[RegexValidator(PHONE_REGEX, PHONE_ERROR)]
+    )
+    whatsapp = models.CharField(
+        "WhatsApp", max_length=30, blank=True, validators=[RegexValidator(PHONE_REGEX, PHONE_ERROR)]
+    )
+    email = models.EmailField(blank=True)
+    language = models.CharField(
+        "Language", max_length=2, choices=Language.choices, default=Language.ENGLISH
+    )
+
+    class Meta:
+        ordering = ["-is_primary", "name"]
+        verbose_name = "contact"
+        verbose_name_plural = "Contacts"
+
+    def __str__(self):
+        return f"{self.name} ({self.get_role_display()})"
+
+    def clean(self):
+        self.name = " ".join((self.name or "").split())
+        self.email = (self.email or "").strip().lower()
+
+
+class OwnerDocument(models.Model):
+    """An owner's document (Emirates ID, passport, trade licence ...) with an expiry date."""
+
+    class DocType(models.TextChoices):
+        EMIRATES_ID = "emirates_id", "Emirates ID"
+        PASSPORT = "passport", "Passport"
+        TRADE_LICENCE = "trade_licence", "Trade licence"
+        VAT_CERTIFICATE = "vat_certificate", "VAT certificate"
+        TITLE_DEED = "title_deed", "Title deed"
+        POWER_OF_ATTORNEY = "poa", "Power of attorney"
+        OTHER = "other", "Other"
+
+    owner = models.ForeignKey(Owner, on_delete=models.CASCADE, related_name="documents")
+    doc_type = models.CharField("Document", max_length=20, choices=DocType.choices)
+    number = models.CharField("Number", max_length=60, blank=True)
+    expiry_date = models.DateField("Expires on", null=True, blank=True)
+    file = models.FileField(
+        "File",
+        upload_to=owner_document_path,
+        blank=True,
+        validators=[
+            FileExtensionValidator(["pdf", "jpg", "jpeg", "png", "webp"]),
+            validate_document_size,
+        ],
+        help_text="PDF, JPG, PNG or WebP, up to 10 MB.",
+    )
+    notes = models.CharField(max_length=200, blank=True)
+
+    class Meta:
+        ordering = ["doc_type", "expiry_date"]
+        verbose_name = "document"
+        verbose_name_plural = "Documents"
+
+    def __str__(self):
+        return f"{self.get_doc_type_display()} {self.number}".strip()
+
+    @property
+    def expiry_status(self):
+        """'none' (no expiry date), 'valid', 'soon' or 'expired'."""
+        if self.expiry_date is None:
+            return "none"
+        today = timezone.localdate()
+        if self.expiry_date < today:
+            return "expired"
+        if self.expiry_date <= today + timedelta(days=EXPIRY_WARNING_DAYS):
+            return "soon"
+        return "valid"
+
+
+@receiver(post_delete, sender=OwnerDocument)
+def remove_document_file(sender, instance, **kwargs):
+    if instance.file:
+        instance.file.delete(save=False)
+
+
+class OwnerBankAccount(models.Model):
+    """Where an owner's money is paid. Sensitive: only roles with permission can see it."""
+
+    owner = models.ForeignKey(Owner, on_delete=models.CASCADE, related_name="bank_accounts")
+    account_holder = models.CharField(max_length=150)
+    bank_name = models.CharField(max_length=100)
+    iban = models.CharField("IBAN", max_length=34, validators=[validate_iban])
+    swift = models.CharField(
+        "SWIFT / BIC", max_length=11, blank=True, validators=[RegexValidator(SWIFT_REGEX, SWIFT_ERROR)]
+    )
+    is_default = models.BooleanField("Default", default=False)
+
+    class Meta:
+        ordering = ["-is_default", "bank_name"]
+        verbose_name = "bank account"
+        verbose_name_plural = "Financials"
+
+    def __str__(self):
+        return f"{self.bank_name} {self.iban[-4:]}"
+
+    def clean(self):
+        self.iban = normalise_iban(self.iban)
+        self.swift = (self.swift or "").strip().upper()
 
 
 class Property(models.Model):

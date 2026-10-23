@@ -61,6 +61,16 @@ class AuditEntry(models.Model):
     model_label = models.CharField("Record type", max_length=100)
     object_id = models.CharField(max_length=64, blank=True)
     object_repr = models.CharField("Record", max_length=300, blank=True)
+    # The owner this entry belongs to (for the Activity tab on the owner page). No database
+    # constraint on purpose: entries must survive, and never block, the deletion of an owner.
+    related_owner = models.ForeignKey(
+        "properties.Owner",
+        null=True,
+        blank=True,
+        on_delete=models.DO_NOTHING,
+        db_constraint=False,
+        related_name="audit_entries",
+    )
     # {"field name": [old value, new value], ...}
     changes = models.JSONField(default=dict, blank=True)
 

@@ -5,8 +5,16 @@ from django.core.exceptions import ValidationError
 from django.test import TestCase
 
 from .admin import UnitAdminForm, UnitInlineForm
-from .models import Owner, Property, Unit
-from .models_constants import floor_sort_key
+from datetime import timedelta
+
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.utils import timezone
+
+from core.models import AuditEntry
+
+from . import owner_tools
+from .models import Owner, OwnerBankAccount, OwnerContact, OwnerDocument, Property, Unit
+from .models_constants import floor_sort_key, iban_is_valid
 
 T = Property.PropertyType
 
@@ -271,3 +279,126 @@ class FormBehaviour(TestCase):
 
     def test_inline_units_table_has_no_long_help_texts(self):
         self.assertTrue(all(f.help_text == "" for f in UnitInlineForm().fields.values()))
+
+
+VALID_IBAN = "AE070331234567890123456"
+
+
+class OwnerProfileRules(TestCase):
+    def test_codes_are_assigned_in_order(self):
+        a = Owner.objects.create(name="Alpha")
+        b = Owner.objects.create(name="Beta")
+        self.assertRegex(a.code, r"^OWN-\d{4}$")
+        self.assertEqual(int(b.code[4:]), int(a.code[4:]) + 1)
+        self.assertEqual(Owner.company().code, "OWN-0000")
+
+    def test_iban_check(self):
+        self.assertTrue(iban_is_valid(VALID_IBAN))
+        self.assertTrue(iban_is_valid("ae07 0331 2345 6789 0123 456"))
+        self.assertFalse(iban_is_valid("AE070331234567890123457"))
+        self.assertFalse(iban_is_valid("123"))
+
+    def test_bad_iban_is_refused(self):
+        owner = Owner.objects.create(name="Alpha")
+        account = OwnerBankAccount(owner=owner, account_holder="A", bank_name="B", iban="AE0000")
+        with self.assertRaises(ValidationError):
+            account.full_clean()
+
+    def test_document_expiry_status(self):
+        owner = Owner.objects.create(name="Alpha")
+        today = timezone.localdate()
+        D = OwnerDocument.DocType
+        cases = {
+            "none": None,
+            "expired": today - timedelta(days=1),
+            "soon": today + timedelta(days=5),
+            "valid": today + timedelta(days=365),
+        }
+        for expected, when in cases.items():
+            doc = OwnerDocument(owner=owner, doc_type=D.PASSPORT, expiry_date=when)
+            self.assertEqual(doc.expiry_status, expected)
+
+    def test_document_counts(self):
+        owner = Owner.objects.create(name="Alpha")
+        OwnerDocument.objects.create(
+            owner=owner, doc_type="passport", expiry_date=timezone.localdate() - timedelta(days=2)
+        )
+        self.assertEqual(owner.document_counts(), (1, 0))
+
+    def test_audit_masks_iban_and_links_owner(self):
+        owner = Owner.objects.create(name="Alpha")
+        OwnerBankAccount.objects.create(
+            owner=owner, account_holder="A", bank_name="B", iban=VALID_IBAN
+        )
+        entry = AuditEntry.objects.filter(model_label__icontains="bank").first()
+        self.assertIsNotNone(entry)
+        self.assertEqual(entry.related_owner_id, owner.pk)
+        self.assertNotIn(VALID_IBAN, str(entry.changes))
+        self.assertIn("3456", str(entry.changes))
+
+    def test_contacts_are_deleted_with_owner(self):
+        owner = Owner.objects.create(name="Alpha")
+        OwnerContact.objects.create(owner=owner, name="X", is_primary=True)
+        owner.delete()
+        self.assertEqual(OwnerContact.objects.count(), 0)
+
+
+class OwnerImport(TestCase):
+    def _file(self, text, name="owners.csv"):
+        return SimpleUploadedFile(name, text.encode("utf-8"))
+
+    def test_good_file(self):
+        owners, errors = owner_tools.parse_owner_file(
+            self._file("Name,Type,Email,Phone\nAli Test,Individual,ali@example.com,+971 50 123 4567\nFirm LLC,Company,,\n")
+        )
+        self.assertEqual(errors, [])
+        self.assertEqual([o.name for o in owners], ["Ali Test", "Firm LLC"])
+        self.assertEqual(owners[1].owner_type, Owner.OwnerType.COMPANY)
+
+    def test_bad_rows_are_reported_and_nothing_is_saved(self):
+        owners, errors = owner_tools.parse_owner_file(
+            self._file("Name,Type,Phone\nAli,Individual,abc\nBo,Alien,\nAli,Individual,\n")
+        )
+        self.assertTrue(errors)
+        self.assertEqual(Owner.objects.filter(name__in=["Ali", "Bo"]).count(), 0)
+
+    def test_missing_name_column(self):
+        _, errors = owner_tools.parse_owner_file(self._file("Email\nx@example.com\n"))
+        self.assertTrue(errors)
+
+
+class OwnerPages(TestCase):
+    """The owner pages open without errors (list, add, change, import)."""
+
+    @classmethod
+    def setUpTestData(cls):
+        from django.contrib.auth import get_user_model
+
+        cls.admin = get_user_model().objects.create_superuser("boss", "b@example.com", "pw-12345-xyz")
+        cls.owner = Owner.objects.create(name="Alpha", email="a@example.com", phone="+971 50 123 4567")
+        OwnerDocument.objects.create(
+            owner=cls.owner, doc_type="passport", expiry_date=timezone.localdate() - timedelta(days=3)
+        )
+
+    def setUp(self):
+        self.client.force_login(self.admin)
+
+    def test_pages_open(self):
+        from django.urls import reverse
+
+        for name, args in [
+            ("admin:properties_owner_changelist", []),
+            ("admin:properties_owner_add", []),
+            ("admin:properties_owner_change", [self.owner.pk]),
+            ("admin:properties_owner_import", []),
+            ("admin:properties_owner_import_template", []),
+        ]:
+            response = self.client.get(reverse(name, args=args))
+            self.assertEqual(response.status_code, 200, name)
+
+    def test_search_filters_and_export(self):
+        from django.urls import reverse
+
+        url = reverse("admin:properties_owner_changelist")
+        for query in ("?q=Alpha", "?q=passport", "?docs=expired", "?owner_type__exact=individual"):
+            self.assertEqual(self.client.get(url + query).status_code, 200, query)

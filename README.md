@@ -137,8 +137,20 @@ Stop the server any time with **Ctrl + C** in the terminal.
 
 Sidebar > **Property management**:
 
-* **Owners** - the people or companies who own the buildings you manage. The optional
-  *Portal access* field links an owner to a login account; it will be used by the owner portal later.
+* **Owners** - the people or companies who own the buildings you manage.
+  * Every owner has a **type** (Individual or Company), an automatic **code** (`OWN-0001`, ...), and an optional **photo or logo**.
+  * An owner's page has a **summary header** (properties, units, occupancy, listed rent) and tabs:
+    **Overview, Contacts, Properties, Documents, Financials, Activity**.
+  * **Documents** (Emirates ID, passport, trade licence ...) can have an expiry date. Anything expired or
+    expiring within 30 days shows a warning on the owner page and a badge in the list.
+  * **Financials** holds bank accounts (IBAN is checked; the audit log shows only its last 4 characters).
+    Only roles given bank-account permission can see this tab.
+  * The list shows contact links, properties, units, occupancy, document status; you can
+    filter by type, active, document status and emirate, and search by name, code, phone, email,
+    contact person or document number (Emirates ID / licence).
+  * **Export**: tick owners, choose *Export selected owners to Excel / CSV*.
+    **Import**: sidebar > *Import owners* (download the template, fill it, upload). Everything is checked first; if one row is wrong, nothing is imported.
+  * Photos and documents are saved in the `media` folder: include it in your backups.
 * **Properties** - each has a short unique **code** (e.g. `RMT`), a type, an owner and an emirate
   (all required). Address, map link and notes are optional.
   * **Owner "Company Owned"** is a built-in choice (always first in the list, cannot be renamed

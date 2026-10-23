@@ -16,7 +16,22 @@ from contextlib import contextmanager
 from datetime import date, datetime
 from decimal import Decimal
 
-AUDITED_MODELS = ("properties.Owner", "properties.Property", "properties.Unit", "auth.User")
+AUDITED_MODELS = (
+    "properties.Owner",
+    "properties.Property",
+    "properties.Unit",
+    "properties.OwnerContact",
+    "properties.OwnerDocument",
+    "properties.OwnerBankAccount",
+    "auth.User",
+)
+OWNER_CHILD_LABELS = {
+    "properties.OwnerContact",
+    "properties.OwnerDocument",
+    "properties.OwnerBankAccount",
+}
+# Fields whose full value must never appear in the log (only the last 4 characters).
+MASKED_FIELDS = {"iban"}
 
 # Fields that are technical noise or secret; they never appear in the log.
 IGNORED_FIELDS = {"password", "last_login", "created_at", "date_joined", "floor_sort"}
@@ -101,11 +116,39 @@ def snapshot(instance):
     return data
 
 
+def _mask(changes):
+    masked = {}
+    for field, pair in changes.items():
+        if field in MASKED_FIELDS:
+            pair = [("****" + str(v)[-4:]) if v else v for v in pair]
+        masked[field] = pair
+    return masked
+
+
+def related_owner_id(instance):
+    """Which owner does this record belong to? (None when it is not owner-related.)"""
+    label = instance._meta.label
+    try:
+        if label == "properties.Owner":
+            return instance.pk
+        if label == "properties.Property":
+            return instance.owner_id
+        if label == "properties.Unit":
+            return instance.property.owner_id
+        if label in OWNER_CHILD_LABELS:
+            return instance.owner_id
+    except Exception:
+        return None
+    return None
+
+
 def _write(action, instance, changes):
     from .models import AuditEntry
 
     user = current_user()
+    changes = _mask(changes)
     AuditEntry.objects.create(
+        related_owner_id=related_owner_id(instance),
         user_id=user.pk if user is not None else None,
         username=user.get_username() if user is not None else "(system)",
         action=action,

@@ -1,4 +1,18 @@
 # Changelog
+## Update 9c
+- Sidebar section headers (Property management, Administration) can be collapsed and expanded
+- The sidebar remembers which sections you opened or closed (default: open; the section with the current page stays open)
+
+
+## Update 9 - Owners module upgrade
+- Owner type (Individual / Company), automatic owner code, photo or logo
+- Summary header and tabs: Overview, Contacts, Properties, Documents, Financials, Activity
+- Contacts, documents (with expiry warnings) and bank accounts (IBAN checked and masked in the audit log)
+- Better list columns, filters, and search by phone, email, Emirates ID or licence number
+- Export to Excel / CSV and import from Excel / CSV (all-or-nothing)
+- Owner / tenant portals are postponed until the ERP modules are complete (no portal items on the owner screens)
+- Owner activity tab fed by the audit log
+- New requirement: openpyxl. Run `pip install -r requirements.txt`, then `makemigrations` and `migrate`
 
 ## Update 8d - Audit of the delete pop-up
 - "Cannot be deleted" is now decided from the page's main content only

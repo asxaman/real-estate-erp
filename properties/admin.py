@@ -51,42 +51,7 @@ class UnitInline(TabularInline):
     ordering = ("floor_sort", "unit_number")
 
 
-@admin.register(Owner)
-class OwnerAdmin(TooltipHelpMixin, ModelAdmin):
-    list_display = ("name", "email", "phone", "property_count", "is_active")
-    list_filter = ("is_active",)
-    search_fields = ("name", "email", "phone")
-    fieldsets = (
-        (None, {"fields": ("name", "is_active")}),
-        ("Contact", {"fields": ("email", "phone", "address")}),
-        ("Portal access", {"fields": ("user",)}),
-        ("Other", {"fields": ("notes",)}),
-    )
-
-    def get_queryset(self, request):
-        return super().get_queryset(request).annotate(_property_count=Count("properties"))
-
-    def get_search_results(self, request, queryset, search_term):
-        queryset, may_have_duplicates = super().get_search_results(request, queryset, search_term)
-        # The owner dropdown on the Property form offers active owners only.
-        if request.GET.get("model_name") == "property" and request.GET.get("field_name") == "owner":
-            queryset = queryset.filter(is_active=True)
-        return queryset, may_have_duplicates
-
-    def get_readonly_fields(self, request, obj=None):
-        # The built-in "Company Owned" owner cannot be renamed or deactivated.
-        if obj is not None and obj.is_company:
-            return ("name", "is_active")
-        return ()
-
-    def has_delete_permission(self, request, obj=None):
-        if obj is not None and obj.is_company:
-            return False
-        return super().has_delete_permission(request, obj)
-
-    @admin.display(description="Properties", ordering="_property_count")
-    def property_count(self, obj):
-        return obj._property_count
+from . import owner_admin  # noqa: E402,F401  (registers the Owner pages)
 
 
 class PropertyAdminForm(forms.ModelForm):

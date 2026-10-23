@@ -1,6 +1,35 @@
 """Plain constants and helpers for the properties app (no Django imports needed)."""
 
 COMPANY_OWNER_NAME = "Company Owned"
+COMPANY_OWNER_CODE = "OWN-0000"  # the built-in owner; real owners get OWN-0001, OWN-0002 ...
+
+# Documents that expire within this many days show a warning.
+EXPIRY_WARNING_DAYS = 30
+
+# ---- Bank details ----
+SWIFT_REGEX = r"^[A-Za-z]{4}[A-Za-z]{2}[A-Za-z0-9]{2}([A-Za-z0-9]{3})?$"
+SWIFT_ERROR = "Enter a valid SWIFT/BIC code (8 or 11 letters and numbers), for example EBILAEAD."
+
+
+def normalise_iban(value):
+    return "".join((value or "").split()).upper()
+
+
+def iban_is_valid(value):
+    """Standard IBAN check: length, characters and the mod-97 checksum (any country)."""
+    iban = normalise_iban(value)
+    if not (15 <= len(iban) <= 34) or not iban[:2].isalpha() or not iban[2:4].isdigit():
+        return False
+    if not iban.isalnum():
+        return False
+    moved = iban[4:] + iban[:4]
+    digits = "".join(str(int(ch, 36)) for ch in moved)
+    return int(digits) % 97 == 1
+
+
+def mask_iban(value):
+    iban = normalise_iban(value)
+    return f"{iban[:2]}** **** {iban[-4:]}" if len(iban) > 8 else iban
 
 # ---- Owner phone: optional "+", then digits, spaces, brackets or dashes (6 to 30 characters) ----
 PHONE_REGEX = r"^\+?[0-9][0-9 ()\-]{5,28}$"

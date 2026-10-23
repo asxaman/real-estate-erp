@@ -1,11 +1,13 @@
 """Sample data, eraser and role permissions for Module 1 (properties)."""
+from datetime import timedelta
 from decimal import Decimal
 
 from django.contrib.auth.models import Group, Permission
+from django.utils import timezone
 
 from core.data_registry import register_eraser, register_seeder
 
-from .models import Owner, Property, Unit
+from .models import Owner, OwnerBankAccount, OwnerContact, OwnerDocument, Property, Unit
 
 U = Unit.UnitType
 
@@ -53,14 +55,15 @@ def _make_unit(prop, number, floor, unit_type, counter, premium=0):
 def seed_properties() -> str:
     company = Owner.company()  # the built-in "Company Owned" owner
     owners = {}
-    for name, email, phone in [
-        ("Khalifa Al Mansoori", "khalifa@example.com", "+971 50 000 0001"),
-        ("Gulf Horizon Investments LLC", "info@gulfhorizon.example.com", "+971 2 000 0002"),
-        ("Noura Al Suwaidi", "noura@example.com", "+971 55 000 0003"),
+    for name, email, phone, owner_type in [
+        ("Khalifa Al Mansoori", "khalifa@example.com", "+971 50 000 0001", Owner.OwnerType.INDIVIDUAL),
+        ("Gulf Horizon Investments LLC", "info@gulfhorizon.example.com", "+971 2 000 0002", Owner.OwnerType.COMPANY),
+        ("Noura Al Suwaidi", "noura@example.com", "+971 55 000 0003", Owner.OwnerType.INDIVIDUAL),
     ]:
         owners[name], _ = Owner.objects.get_or_create(
-            name=name, defaults={"email": email, "phone": phone}
+            name=name, defaults={"email": email, "phone": phone, "owner_type": owner_type}
         )
+    _seed_owner_details(owners)
 
     def prop(code, **fields):
         obj, _ = Property.objects.get_or_create(code=code, defaults=fields)
@@ -173,6 +176,33 @@ def seed_properties() -> str:
     )
 
 
+def _seed_owner_details(owners):
+    """Sample contacts, documents (valid / expiring / expired) and a bank account."""
+    today = timezone.localdate()
+    khalifa = owners["Khalifa Al Mansoori"]
+    gulf = owners["Gulf Horizon Investments LLC"]
+    noura = owners["Noura Al Suwaidi"]
+    D = OwnerDocument.DocType
+    if not khalifa.contacts.exists():
+        OwnerContact.objects.create(owner=khalifa, name="Khalifa Al Mansoori", role="Owner",
+                                    is_primary=True, mobile="+971 50 000 0001")
+        OwnerContact.objects.create(owner=gulf, name="Mariam Hassan", role="Finance Manager",
+                                    is_primary=True, mobile="+971 50 000 0010", email="mariam@gulfhorizon.example.com")
+    if not khalifa.documents.exists():
+        OwnerDocument.objects.create(owner=khalifa, doc_type=D.EMIRATES_ID, number="784-1980-0000001-1",
+                                     expiry_date=today + timedelta(days=400))
+        OwnerDocument.objects.create(owner=khalifa, doc_type=D.PASSPORT, number="P1234567",
+                                     expiry_date=today + timedelta(days=20))
+        OwnerDocument.objects.create(owner=gulf, doc_type=D.TRADE_LICENCE, number="CN-1234567",
+                                     expiry_date=today - timedelta(days=10))
+        OwnerDocument.objects.create(owner=noura, doc_type=D.EMIRATES_ID, number="784-1990-0000002-2",
+                                     expiry_date=today + timedelta(days=700))
+    if not khalifa.bank_accounts.exists():
+        OwnerBankAccount.objects.create(owner=khalifa, account_holder="Khalifa Al Mansoori",
+                                        bank_name="Emirates NBD", iban="AE070331234567890123456",
+                                        swift="EBILAEAD", is_default=True)
+
+
 def _grant_role_permissions():
     """Give the demo roles sensible permissions on this module's data."""
 
@@ -181,13 +211,15 @@ def _grant_role_permissions():
             content_type__app_label="properties", codename__in=codenames
         )
 
-    models_ = ("owner", "property", "unit")
+    models_ = ("owner", "property", "unit", "ownercontact", "ownerdocument")
     everything = [f"{action}_{m}" for m in models_ for action in ("add", "change", "delete", "view")]
+    everything += [f"{a}_ownerbankaccount" for a in ("add", "change", "delete", "view")]  # bank details
     view_only = [f"view_{m}" for m in models_]
+    view_only_money = view_only + ["view_ownerbankaccount"]  # only the Accountant sees bank accounts
 
     role_perms = {
         "Property Manager": everything,
-        "Accountant": view_only,
+        "Accountant": view_only_money,
         "Leasing Agent": view_only + ["change_unit"],
         "Maintenance Supervisor": ["view_property", "view_unit"],
     }
