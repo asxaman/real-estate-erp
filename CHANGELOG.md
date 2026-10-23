@@ -1,4 +1,11 @@
 # Changelog
+## Update 9f
+- The Import page is reached from an *Import* button on the Owners list (the sidebar item is gone)
+- New: import Properties and Units from Excel or CSV (template with an Allowed values sheet, every row checked, all-or-nothing)
+
+## Update 9e
+- New property form: the Owner field starts as "Company Owned"
+
 ## Update 9c
 - Sidebar section headers (Property management, Administration) can be collapsed and expanded
 - The sidebar remembers which sections you opened or closed (default: open; the section with the current page stays open)

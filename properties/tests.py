@@ -12,7 +12,7 @@ from django.utils import timezone
 
 from core.models import AuditEntry
 
-from . import owner_tools
+from . import import_tools, owner_tools
 from .models import Owner, OwnerBankAccount, OwnerContact, OwnerDocument, Property, Unit
 from .models_constants import floor_sort_key, iban_is_valid
 
@@ -402,3 +402,81 @@ class OwnerPages(TestCase):
         url = reverse("admin:properties_owner_changelist")
         for query in ("?q=Alpha", "?q=passport", "?docs=expired", "?owner_type__exact=individual"):
             self.assertEqual(self.client.get(url + query).status_code, 200, query)
+
+
+class PropertyAddDefaults(TestCase):
+    def test_new_property_defaults_to_company_owned(self):
+        from django.contrib.auth import get_user_model
+        from django.urls import reverse
+
+        user = get_user_model().objects.create_superuser("boss2", "b2@example.com", "pw-12345-xyz")
+        self.client.force_login(user)
+        response = self.client.get(reverse("admin:properties_property_add"))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.context["adminform"].form.initial["owner"], Owner.company().pk)
+
+
+class PropertyUnitImport(TestCase):
+    def _file(self, text):
+        return SimpleUploadedFile("data.csv", text.encode("utf-8"))
+
+    def setUp(self):
+        self.owner = Owner.objects.create(name="Alpha")
+
+    def test_good_property_file(self):
+        props, errors = import_tools.parse_property_file(self._file(
+            "Code,Name,Type,Owner,Emirate,Fee type,Fee percent\n"
+            "RMT,Rimal Tower,Residential Building,,Dubai,,\n"
+            "VIL1,Palm Villa,Villa,Alpha,Abu Dhabi,Percent,5\n"
+        ))
+        self.assertEqual(errors, [])
+        self.assertEqual([p.code for p in props], ["RMT", "VIL1"])
+        self.assertTrue(props[0].owner.is_company)
+        self.assertEqual(props[1].status, "vacant")
+        for p in props:
+            p.save()
+        self.assertEqual(Property.objects.count(), 2)
+
+    def test_bad_property_rows(self):
+        props, errors = import_tools.parse_property_file(self._file(
+            "Code,Name,Type,Owner\n"
+            "RMT,One,Residential Building,Nobody\n"
+            "X,Two,Villa,Alpha\n"
+            "ABC,Three,Spaceship,Alpha\n"
+            "VIL1,Four,Villa,Alpha\n"
+        ))
+        self.assertEqual(len(errors), 4)  # unknown owner, bad code, bad type, missing fee
+        self.assertEqual(Property.objects.count(), 0)
+
+    def test_unit_file(self):
+        Property.objects.create(
+            name="Tower", code="TWR", property_type="residential_building", owner=Owner.company(),
+        )
+        units, errors = import_tools.parse_unit_file(self._file(
+            "Property code,Unit number,Floor,Type,Furnished,Asking rent\n"
+            "TWR,101,1,2BHK,Yes,\n"
+            "TWR,102,1,Office,,\n"
+            "TWR, 101 ,1,1BHK,,\n"
+            "ZZZ,1,1,Studio,,\n"
+        ))
+        self.assertEqual(len(errors), 3)  # wrong type for building, duplicate number, unknown property
+        units, errors = import_tools.parse_unit_file(self._file(
+            "Property code,Unit number,Floor,Type,Furnished,Asking rent\n"
+            'TWR, 101 ,1,2BHK,Yes,"95,000"\n'
+        ))
+        self.assertEqual(errors, [])
+        self.assertEqual(units[0].unit_number, "101")
+        self.assertTrue(units[0].furnished)
+        self.assertEqual(units[0].asking_rent, Decimal("95000"))
+
+    def test_import_pages_open(self):
+        from django.contrib.auth import get_user_model
+        from django.urls import reverse
+
+        user = get_user_model().objects.create_superuser("boss3", "b3@example.com", "pw-12345-xyz")
+        self.client.force_login(user)
+        for model in ("owner", "property", "unit"):
+            for suffix in ("", "_template"):
+                response = self.client.get(reverse(f"admin:properties_{model}_import{suffix}"))
+                self.assertEqual(response.status_code, 200, model + suffix)
+            self.assertEqual(self.client.get(reverse(f"admin:properties_{model}_changelist")).status_code, 200)

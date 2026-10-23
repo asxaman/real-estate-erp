@@ -19,6 +19,7 @@ from core.admin_utils import TooltipHelpMixin, badge, circle_avatar, format_amou
 from core.models import AuditEntry
 
 from . import owner_tools
+from .import_admin import ImportMixin
 from .models import (
     Owner,
     OwnerBankAccount,
@@ -212,7 +213,7 @@ class OwnerAdminForm(forms.ModelForm):
 
 
 @admin.register(Owner)
-class OwnerAdmin(TooltipHelpMixin, ModelAdmin):
+class OwnerAdmin(ImportMixin, TooltipHelpMixin, ModelAdmin):
     form = OwnerAdminForm
     compressed_fields = True
     list_display = (
@@ -227,6 +228,7 @@ class OwnerAdmin(TooltipHelpMixin, ModelAdmin):
     )
     inlines = [ContactInline, PropertyListInline, DocumentInline, BankInline, ActivityInline]
     actions = ["export_excel", "export_csv"]
+    actions_list = ["import_button"]
 
     # ---- form layout ---------------------------------------------------------------
     _header = (None, {"fields": ("summary_header",)})
@@ -419,46 +421,15 @@ class OwnerAdmin(TooltipHelpMixin, ModelAdmin):
     def export_csv(self, request, queryset):
         return owner_tools.csv_response(queryset)
 
-    def get_urls(self):
-        custom = [
-            path("import/", self.admin_site.admin_view(self.import_view), name="properties_owner_import"),
-            path(
-                "import/template/",
-                self.admin_site.admin_view(self.import_template_view),
-                name="properties_owner_import_template",
-            ),
-        ]
-        return custom + super().get_urls()
+    # ---- import (button on the list page; shared page in import_admin.py) ---------------
+    import_noun = "owners"
+    import_headers = owner_tools.IMPORT_HEADERS
+    import_notes = [
+        "Only Name is required. Type is Individual or Company (blank = Individual).",
+    ]
 
-    def import_template_view(self, request):
-        if not self.has_add_permission(request):
-            raise PermissionDenied
+    def import_parse(self, upload):
+        return owner_tools.parse_owner_file(upload)
+
+    def import_template(self):
         return owner_tools.template_response()
-
-    def import_view(self, request):
-        if not self.has_add_permission(request):
-            raise PermissionDenied
-        context = {
-            **self.admin_site.each_context(request),
-            "title": "Import owners",
-            "errors": [],
-            "headers": owner_tools.IMPORT_HEADERS,
-            "max_rows": owner_tools.MAX_IMPORT_ROWS,
-        }
-        if request.method == "POST":
-            upload = request.FILES.get("file")
-            if not upload:
-                context["errors"] = ["Choose a file first."]
-            else:
-                owners, errors = owner_tools.parse_owner_file(upload)
-                if errors:
-                    context["errors"] = errors
-                elif not owners:
-                    context["errors"] = ["The file has no owners in it."]
-                else:
-                    with transaction.atomic():
-                        for owner in owners:
-                            owner.save()
-                    messages.success(request, f"Imported {len(owners)} owner(s).")
-                    return redirect("admin:properties_owner_changelist")
-        return render(request, "properties/owner_import.html", context)

@@ -6,6 +6,8 @@ from unfold.decorators import display
 
 from core.admin_utils import TooltipHelpMixin, format_amount
 
+from . import import_tools
+from .import_admin import ImportMixin
 from .models import Owner, Property, Unit
 from .models_constants import normalise_unit_number
 
@@ -101,8 +103,23 @@ class PropertyAdminForm(forms.ModelForm):
 
 
 @admin.register(Property)
-class PropertyAdmin(TooltipHelpMixin, ModelAdmin):
+class PropertyAdmin(ImportMixin, TooltipHelpMixin, ModelAdmin):
     form = PropertyAdminForm
+    actions_list = ["import_button"]
+    import_noun = "properties"
+    import_headers = import_tools.PROPERTY_HEADERS
+    import_notes = [
+        "Required: Code, Name, Type.",
+        "Owner is the exact owner name (blank = Company Owned).",
+        "Fee type (Percent or Fixed) and the fee are needed for properties with another owner.",
+        "See the \"Allowed values\" sheet in the template for Type, Emirate and Status.",
+    ]
+
+    def import_parse(self, upload):
+        return import_tools.parse_property_file(upload)
+
+    def import_template(self):
+        return import_tools.property_template_response()
     compressed_fields = True  # tighter spacing between fields
     # The unsaved-changes warning is our own pop-up (core/static/core/erp.js).
     autocomplete_fields = ["owner"]  # searchable owner dropdown
@@ -121,6 +138,12 @@ class PropertyAdmin(TooltipHelpMixin, ModelAdmin):
     search_fields = ("name", "code", "owner__name")
     list_select_related = ("owner",)
     inlines = [UnitInline]
+
+    def get_changeform_initial_data(self, request):
+        # A new property starts with "Company Owned" selected (change it if someone else owns it).
+        initial = super().get_changeform_initial_data(request)
+        initial.setdefault("owner", Owner.company().pk)
+        return initial
     fieldsets = (
         (
             "Basic information",
@@ -228,7 +251,22 @@ class BuildingFilter(admin.RelatedFieldListFilter):
 
 
 @admin.register(Unit)
-class UnitAdmin(TooltipHelpMixin, ModelAdmin):
+class UnitAdmin(ImportMixin, TooltipHelpMixin, ModelAdmin):
+    actions_list = ["import_button"]
+    import_noun = "units"
+    import_headers = import_tools.UNIT_HEADERS
+    import_notes = [
+        "Required: Property code, Unit number, Type. The property must already exist and be a building.",
+        "Type must fit the building (residential: Studio, 1BHK-5BHK; commercial: Office, Shop).",
+        "See the \"Allowed values\" sheet in the template.",
+    ]
+
+    def import_parse(self, upload):
+        return import_tools.parse_unit_file(upload)
+
+    def import_template(self):
+        return import_tools.unit_template_response()
+
     form = UnitAdminForm
     compressed_fields = True
     list_display = (

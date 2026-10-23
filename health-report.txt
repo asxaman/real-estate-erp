@@ -1,0 +1,116 @@
+﻿=== DATE ===
+
+Friday, October 23, 2026 4:43:32 PM
+=== PYTHON / PACKAGES ===
+Python 3.15.0
+
+IgnoreCase : True
+LineNumber : 4
+Line       : Django         6.1.2
+Filename   : InputStream
+Path       : InputStream
+Pattern    : Django|unfold|psycopg|Pillow|openpyxl
+Context    : 
+Matches    : {0}
+
+
+IgnoreCase : True
+LineNumber : 5
+Line       : django-unfold  0.110.0
+Filename   : InputStream
+Path       : InputStream
+Pattern    : Django|unfold|psycopg|Pillow|openpyxl
+Context    : 
+Matches    : {0}
+
+
+IgnoreCase : True
+LineNumber : 7
+Line       : openpyxl       3.1.5
+Filename   : InputStream
+Path       : InputStream
+Pattern    : Django|unfold|psycopg|Pillow|openpyxl
+Context    : 
+Matches    : {0}
+
+
+IgnoreCase : True
+LineNumber : 8
+Line       : pillow         13.0.0
+Filename   : InputStream
+Path       : InputStream
+Pattern    : Django|unfold|psycopg|Pillow|openpyxl
+Context    : 
+Matches    : {0}
+
+
+IgnoreCase : True
+LineNumber : 10
+Line       : psycopg        3.3.6
+Filename   : InputStream
+Path       : InputStream
+Pattern    : Django|unfold|psycopg|Pillow|openpyxl
+Context    : 
+Matches    : {0}
+
+
+IgnoreCase : True
+LineNumber : 11
+Line       : psycopg-binary 3.3.6
+Filename   : InputStream
+Path       : InputStream
+Pattern    : Django|unfold|psycopg|Pillow|openpyxl
+Context    : 
+Matches    : {0}
+
+=== DATABASE ===
+Database type : postgresql
+Database name : real_estate_erp
+Server        : localhost:5432
+User          : erp_user
+Version       : PostgreSQL 18.6 on x86_64-windows, compiled by msvc-19.44.35229, 64-bit
+Connection OK
+=== DJANGO CHECK ===
+System check identified no issues (0 silenced).
+=== PENDING MODEL CHANGES (should say No changes) ===
+No changes detected
+=== MIGRATIONS ===
+properties
+ [X] 0001_initial
+ [X] 0002_convert_property_types
+ [X] 0003_remove_property_area_and_more
+ [X] 0004_alter_owner_options_owner_is_company_and_more
+ [X] 0005_alter_unit_options_remove_unit_bedrooms_and_more
+ [X] 0006_alter_owner_phone
+ [X] 0007_owner_code_owner_owner_type_owner_photo_and_more
+core
+ [X] 0001_initial
+ [X] 0002_userprofile
+ [X] 0003_auditentry_related_owner
+=== TESTS ===
+python : Creating test database for alias 'default'...
+At line:1 char:471
++ ... erties core 2>&1; "=== TESTS ==="; python manage.py test 2>&1; "=== G ...
++                                        ~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Creating test d...as 'default'...:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+
+...............................................................
+----------------------------------------------------------------------
+Ran 63 tests in 8.766s
+
+OK
+Destroying test database for alias 'default'...
+
+Found 63 test(s).
+System check identified no issues (0 silenced).
+=== GIT ===
+?? health-report.txt
+0427ac2 latest update
+8012e1a Update 8d: delete pop-up audit fixes
+a29a124 Update 8c: fix list delete, clearer wording
+3cb1223 Update 8b: fix delete from list
+d061ff2 Update 8: delete confirmation pop-up
+
+

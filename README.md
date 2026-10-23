@@ -149,7 +149,7 @@ Sidebar > **Property management**:
     filter by type, active, document status and emirate, and search by name, code, phone, email,
     contact person or document number (Emirates ID / licence).
   * **Export**: tick owners, choose *Export selected owners to Excel / CSV*.
-    **Import**: sidebar > *Import owners* (download the template, fill it, upload). Everything is checked first; if one row is wrong, nothing is imported.
+    **Import**: the *Import* button at the top of the Owners, Properties and Units lists (download the template, fill it, upload). Everything is checked first; if one row is wrong, nothing is imported.
   * Photos and documents are saved in the `media` folder: include it in your backups.
 * **Properties** - each has a short unique **code** (e.g. `RMT`), a type, an owner and an emirate
   (all required). Address, map link and notes are optional.

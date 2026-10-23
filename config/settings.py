@@ -196,12 +196,6 @@ UNFOLD = {
                         "permission": _can("properties.view_owner"),
                     },
                     {
-                        "title": "Import owners",
-                        "icon": "upload_file",
-                        "link": reverse_lazy("admin:properties_owner_import"),
-                        "permission": _can("properties.add_owner"),
-                    },
-                    {
                         "title": "Properties",
                         "icon": "apartment",
                         "link": reverse_lazy("admin:properties_property_changelist"),
