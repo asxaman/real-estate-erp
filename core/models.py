@@ -71,6 +71,15 @@ class AuditEntry(models.Model):
         db_constraint=False,
         related_name="audit_entries",
     )
+    # The tenant this entry belongs to (Activity tab on the tenant page); no database constraint.
+    related_tenant = models.ForeignKey(
+        "tenants.Tenant",
+        null=True,
+        blank=True,
+        on_delete=models.DO_NOTHING,
+        db_constraint=False,
+        related_name="audit_entries",
+    )
     # {"field name": [old value, new value], ...}
     changes = models.JSONField(default=dict, blank=True)
 
@@ -125,3 +134,37 @@ def remove_photo_file(sender, instance, **kwargs):
     """When a profile (or its user) is deleted, delete the picture file too."""
     if instance.photo:
         instance.photo.delete(save=False)
+
+
+class SystemSettings(models.Model):
+    """The system-wide settings (only one row exists). For now: how dates and times are shown."""
+
+    date_format = models.CharField(
+        "Date format",
+        max_length=12,
+        default="iso",
+        help_text="How dates are shown and typed everywhere in the system.",
+    )
+    time_format = models.CharField(
+        "Time format", max_length=4, default="24h", help_text="24-hour or 12-hour clock."
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "system settings"
+        verbose_name_plural = "system settings"
+
+    def __str__(self):
+        return "System settings"
+
+    def save(self, *args, **kwargs):
+        self.pk = 1  # there is only ever one row
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        pass  # the settings row cannot be deleted
+
+    @classmethod
+    def load(cls):
+        obj, _ = cls.objects.get_or_create(pk=1)
+        return obj

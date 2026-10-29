@@ -186,6 +186,21 @@ Sidebar > **Property management**:
   Log in as `demo.manager` / `demo.leasing` etc. to see what each role can see.
 * **Erase all data** now also deletes all owners, properties and units.
 
+## What you can do in Module 2 (Tenants)
+
+Sidebar > **Tenancy** > **Tenants** (leases are the next step of this module):
+
+* Every tenant has a **type** (Individual or Company), an automatic **code** (`TEN-0001`, ...), an optional photo or logo and notes. **Email, contact number and nationality are required** (for a company, nationality means the country where it is registered). Two tenants may share a name.
+* A tenant's page has a summary header and tabs: **Overview, Contacts, Documents, Activity**.
+* **Documents** (Emirates ID, passport, residence visa, trade licence ...) have an expiry date. Anything expired or expiring within 30 days shows a warning on the page and a badge in the list.
+* The list can be filtered by type, active and document status, and searched by name, code, phone, email, nationality, contact person or document number (Emirates ID, licence).
+* **Export**: tick tenants, choose *Export selected tenants to Excel / CSV*. **Import**: the *Import* button at the top of the list.
+* Photos and documents are saved in the `media` folder: include it in your backups.
+
+## System settings (superusers)
+
+Sidebar > Administration > **System settings**: choose how dates and times are shown and typed everywhere (for example `2028-06-20`, `20-06-2028`, `20/06/2028`, `06/20/2028` or `20 Jun 2028`; 24-hour or 12-hour clock). The change applies to everyone straight away. Saved data is not changed, only how it looks. ISO dates (`2028-06-20`) are always accepted when typing.
+
 ## Safety and records (update 6)
 
 * **Audit log** (sidebar > Administration > Audit log, superusers only): every time an owner, property, unit or user

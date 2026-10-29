@@ -64,6 +64,7 @@ INSTALLED_APPS = [
     # ERP modules
     "core",  # Module 0: foundation (users, roles, data tools)
     "properties",  # Module 1: owners, properties, units
+    "tenants",  # Module 2: tenants (leases next)
 ]
 
 MIDDLEWARE = [
@@ -73,6 +74,8 @@ MIDDLEWARE = [
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
+    "core.toasts.ToastMiddleware",  # pop-up notifications (after messages are read)
+    "core.middleware.SystemSettingsMiddleware",  # date / time format from System settings
     "core.audit.AuditMiddleware",  # remembers who is logged in, for the audit log
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
@@ -88,7 +91,8 @@ TEMPLATES = [
             "context_processors": [
                 "django.template.context_processors.request",
                 "django.contrib.auth.context_processors.auth",
-                "django.contrib.messages.context_processors.messages",
+                "django.contrib.messages.context_processors.messages",  # required by the admin check
+                "core.toasts.toast_messages",  # runs after the one above: pop-ups instead of message bars
             ],
         },
     },
@@ -178,8 +182,8 @@ UNFOLD = {
     "SHOW_VIEW_ON_SITE": False,
     # Our own small style/behaviour layer (info icons, compact forms).
     # Bump the ?v= number whenever these files change so browsers reload them.
-    "STYLES": [lambda request: static("core/erp.css") + "?v=8"],
-    "SCRIPTS": [lambda request: static("core/erp.js") + "?v=11"],
+    "STYLES": [lambda request: static("core/erp.css") + "?v=12"],
+    "SCRIPTS": [lambda request: static("core/erp.js") + "?v=14"],
     "SIDEBAR": {
         "show_search": True,
         "show_all_applications": True,
@@ -210,6 +214,19 @@ UNFOLD = {
                 ],
             },
             {
+                "title": "Tenancy",
+                "separator": True,
+                "collapsible": True,
+                "items": [
+                    {
+                        "title": "Tenants",
+                        "icon": "groups",
+                        "link": reverse_lazy("admin:tenants_tenant_changelist"),
+                        "permission": _can("tenants.view_tenant"),
+                    },
+                ],
+            },
+            {
                 "title": "Administration",
                 "separator": True,
                 "collapsible": True,
@@ -230,6 +247,12 @@ UNFOLD = {
                         "title": "Audit log",
                         "icon": "history",
                         "link": reverse_lazy("admin:core_auditentry_changelist"),
+                        "permission": _is_superuser,
+                    },
+                    {
+                        "title": "System settings",
+                        "icon": "settings",
+                        "link": reverse_lazy("admin:core_systemsettings_changelist"),
                         "permission": _is_superuser,
                     },
                     {

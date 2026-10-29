@@ -1,4 +1,29 @@
 # Changelog
+
+## Update 11 - Required tenant fields and System settings
+- Tenants: Email, Contact number and Nationality are now required (also in import)
+- New System settings page (superusers): choose the date format and time format for the whole system
+- Run `python manage.py makemigrations` and `migrate` (new migrations in `tenants` and `core`)
+
+## Update 10f - File fields (photo, documents)
+- Owner and tenant photo/logo and the Documents tabs now have a preview and clear View / Edit / Delete buttons (Delete is applied when you save, with an Undo); pictures open in an in-app viewer
+
+## Update 10e - Pop-ups moved to the bottom right corner
+
+## Update 10d - Pop-up links
+- Messages that contain a link ("The unit SHJ3-302 was added") show the name as a clickable link instead of raw HTML
+
+## Update 10b - Pop-up notifications
+- Success, warning and error messages across the whole app now appear as pop-up notifications (top right, auto-dismiss with a progress bar, pause on hover, close button, light/dark) instead of coloured bars
+
+## Update 10 - Tenants module (part 1)
+- New `tenants` app: Tenant, contacts, documents with expiry warnings
+- Tenant page with summary header and tabs (Overview, Contacts, Documents, Activity), list columns, filters, search (including Emirates ID / licence number)
+- Excel/CSV export and import for tenants
+- Sample tenants in the seed data; roles get tenant permissions
+- Audit log covers tenants (with an Activity tab)
+- New sidebar section: Tenancy > Tenants
+- Run `python manage.py makemigrations` and `migrate` (new migrations in `tenants` and `core`)
 ## Update 9f
 - The Import page is reached from an *Import* button on the Owners list (the sidebar item is gone)
 - New: import Properties and Units from Excel or CSV (template with an Allowed values sheet, every row checked, all-or-nothing)

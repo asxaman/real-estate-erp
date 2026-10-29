@@ -17,8 +17,13 @@ from unfold.admin import ModelAdmin
 from unfold.decorators import display
 from unfold.forms import AdminPasswordChangeForm, UserChangeForm, UserCreationForm
 
+from django.shortcuts import redirect
+from django.urls import reverse
+from django.utils import timezone
+
+from . import formats
 from .admin_utils import avatar_html
-from .models import PHOTO_VALIDATORS, AuditEntry, UserProfile
+from .models import PHOTO_VALIDATORS, AuditEntry, SystemSettings, UserProfile
 from .safety import superuser_change_problem, user_delete_problem
 
 admin.site.unregister(User)
@@ -177,3 +182,52 @@ class AuditEntryAdmin(ModelAdmin):
         return format_html_join(
             mark_safe("<br>"), "<b>{}</b>: {} &rarr; {}", obj.change_lines()
         ) or "-"
+
+
+class SystemSettingsForm(forms.ModelForm):
+    date_format = forms.ChoiceField(label="Date format", choices=formats.date_choices())
+    time_format = forms.ChoiceField(label="Time format", choices=formats.time_choices())
+
+    class Meta:
+        model = SystemSettings
+        fields = ("date_format", "time_format")
+
+
+@admin.register(SystemSettings)
+class SystemSettingsAdmin(SuperuserOnlyMixin, ModelAdmin):
+    """One page of system-wide settings (superusers only). Today: date and time format."""
+
+    form = SystemSettingsForm
+    fieldsets = (
+        (
+            "Date and time",
+            {
+                "fields": ("date_format", "time_format", "preview"),
+                "description": "Applies to the whole system: dates and times on pages, lists and "
+                "date pickers, and what people type into date fields. Saved data is not changed.",
+            },
+        ),
+    )
+    readonly_fields = ("preview",)
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    def changelist_view(self, request, extra_context=None):
+        # There is only one settings record, so go straight to it.
+        obj = SystemSettings.load()
+        return redirect(reverse("admin:core_systemsettings_change", args=[obj.pk]))
+
+    @admin.display(description="Preview (saved choice)")
+    def preview(self, obj):
+        if obj is None or not obj.pk:
+            return "-"
+        sample = formats.preview(obj.date_format, obj.time_format, timezone.localtime())
+        return f"Date: {sample['date']}   |   Time: {sample['time']}   |   Both: {sample['both']}"
+
+    def save_model(self, request, obj, form, change):
+        super().save_model(request, obj, form, change)
+        formats.apply(obj.date_format, obj.time_format)  # takes effect at once on this server

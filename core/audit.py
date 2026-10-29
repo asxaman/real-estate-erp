@@ -23,6 +23,10 @@ AUDITED_MODELS = (
     "properties.OwnerContact",
     "properties.OwnerDocument",
     "properties.OwnerBankAccount",
+    "tenants.Tenant",
+    "tenants.TenantContact",
+    "tenants.TenantDocument",
+    "core.SystemSettings",
     "auth.User",
 )
 OWNER_CHILD_LABELS = {
@@ -30,6 +34,7 @@ OWNER_CHILD_LABELS = {
     "properties.OwnerDocument",
     "properties.OwnerBankAccount",
 }
+TENANT_CHILD_LABELS = {"tenants.TenantContact", "tenants.TenantDocument"}
 # Fields whose full value must never appear in the log (only the last 4 characters).
 MASKED_FIELDS = {"iban"}
 
@@ -142,6 +147,16 @@ def related_owner_id(instance):
     return None
 
 
+def related_tenant_id(instance):
+    """Which tenant does this record belong to? (None when it is not tenant-related.)"""
+    label = instance._meta.label
+    if label == "tenants.Tenant":
+        return instance.pk
+    if label in TENANT_CHILD_LABELS:
+        return instance.tenant_id
+    return None
+
+
 def _write(action, instance, changes):
     from .models import AuditEntry
 
@@ -149,6 +164,7 @@ def _write(action, instance, changes):
     changes = _mask(changes)
     AuditEntry.objects.create(
         related_owner_id=related_owner_id(instance),
+        related_tenant_id=related_tenant_id(instance),
         user_id=user.pk if user is not None else None,
         username=user.get_username() if user is not None else "(system)",
         action=action,

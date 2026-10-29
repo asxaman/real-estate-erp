@@ -752,7 +752,229 @@
     setTimeout(apply, 300);
   }
 
+  // Pop-up notifications: the server hands over Django's messages as window.__erpToasts.
+  var TOAST_STYLE = {
+    success: { title: "Success", icon: "M5 13l4 4L19 7" },
+    error: { title: "Error", icon: "M6 6l12 12M18 6L6 18" },
+    warning: { title: "Warning", icon: "M12 8v5m0 3h.01" },
+    info: { title: "Information", icon: "M12 11v5m0-8h.01" }
+  };
+
+  function toastHost() {
+    var host = document.getElementById("erp-toasts");
+    if (!host) {
+      host = document.createElement("div");
+      host.id = "erp-toasts";
+      host.setAttribute("aria-live", "polite");
+      document.body.appendChild(host);
+    }
+    return host;
+  }
+
+  function showToast(level, parts) {
+    var style = TOAST_STYLE[level] || TOAST_STYLE.info;
+    var kind = TOAST_STYLE[level] ? level : "info";
+    var toast = document.createElement("div");
+    toast.className = "erp-toast erp-toast-" + kind;
+    toast.setAttribute("role", kind === "error" ? "alert" : "status");
+
+    var icon = document.createElement("div");
+    icon.className = "erp-toast-icon";
+    icon.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" ' +
+      'stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="' + style.icon + '"/></svg>';
+
+    var body = document.createElement("div");
+    body.className = "erp-toast-body";
+    var title = document.createElement("div");
+    title.className = "erp-toast-title";
+    title.textContent = style.title;
+    var message = document.createElement("div");
+    message.className = "erp-toast-text";
+    (parts || []).forEach(function (part) {
+      if (part.href) {
+        var link = document.createElement("a");
+        link.href = part.href;
+        link.textContent = part.t;
+        link.className = "erp-toast-link";
+        message.appendChild(link);
+      } else {
+        message.appendChild(document.createTextNode(part.t));
+      }
+    });
+    body.appendChild(title);
+    body.appendChild(message);
+
+    var close = document.createElement("button");
+    close.type = "button";
+    close.className = "erp-toast-close";
+    close.setAttribute("aria-label", "Close");
+    close.innerHTML = "&times;";
+
+    var bar = document.createElement("div");
+    bar.className = "erp-toast-bar";
+
+    toast.appendChild(icon);
+    toast.appendChild(body);
+    toast.appendChild(close);
+    toast.appendChild(bar);
+    toastHost().appendChild(toast);
+
+    // Success and information fade away by themselves; warnings and errors stay longer.
+    var total = kind === "success" ? 4500 : kind === "info" ? 6000 : 9000;
+    var left = total;
+    var started = Date.now();
+    var timer = null;
+    bar.style.animationDuration = total + "ms";
+
+    function dismiss() {
+      clearTimeout(timer);
+      toast.classList.add("is-leaving");
+      setTimeout(function () { toast.remove(); }, 220);
+    }
+    function start() {
+      started = Date.now();
+      bar.style.animationPlayState = "running";
+      timer = setTimeout(dismiss, left);
+    }
+    function pause() {
+      clearTimeout(timer);
+      left -= Date.now() - started;
+      bar.style.animationPlayState = "paused";
+    }
+    toast.addEventListener("mouseenter", pause);
+    toast.addEventListener("mouseleave", start);
+    close.addEventListener("click", dismiss);
+    requestAnimationFrame(function () { toast.classList.add("is-in"); });
+    start();
+  }
+
+  function showToasts() {
+    var list = window.__erpToasts;
+    if (!list || !list.length || !document.body) { return; }
+    window.__erpToasts = [];
+    list.forEach(function (item, i) {
+      setTimeout(function () { showToast(item.level, item.parts); }, i * 150);
+    });
+  }
+  window.erpShowToasts = showToasts;
+
+  // File fields (photos, documents): View / Edit / Delete buttons. Delete only ticks a hidden
+  // "clear" box; the file is really removed when the form is saved.
+  function fileWidgets() {
+    var lightbox = null;
+    function openLightbox(src) {
+      if (!lightbox) {
+        lightbox = document.createElement("div");
+        lightbox.id = "erp-lightbox";
+        lightbox.innerHTML = '<button type="button" class="erp-lightbox-close" aria-label="Close">&times;</button><img alt="">';
+        document.body.appendChild(lightbox);
+        lightbox.addEventListener("click", function () { lightbox.classList.remove("is-open"); });
+        document.addEventListener("keydown", function (e) {
+          if (e.key === "Escape") { lightbox.classList.remove("is-open"); }
+        });
+      }
+      lightbox.querySelector("img").src = src;
+      lightbox.classList.add("is-open");
+    }
+
+    function parts(box) {
+      return {
+        input: box.querySelector(".erp-file-input"),
+        clear: box.querySelector(".erp-file-clear"),
+        view: box.querySelector("[data-erp-view]"),
+        edit: box.querySelector("[data-erp-edit]"),
+        del: box.querySelector("[data-erp-delete]"),
+        name: box.querySelector(".erp-file-name"),
+        note: box.querySelector(".erp-file-note"),
+        img: box.querySelector(".erp-file-preview img")
+      };
+    }
+
+    function label(btn, text) {
+      var l = btn.querySelector(".erp-fbtn-label");
+      if (l) { l.textContent = text; }
+      btn.title = text;
+    }
+
+    function setNote(p, text) {
+      p.note.hidden = !text;
+      p.note.textContent = text || "";
+    }
+
+    function refresh(box) {
+      var p = parts(box);
+      var hasInitial = !!p.clear || !!p.view;
+      var chosen = p.input.files && p.input.files.length ? p.input.files[0] : null;
+      var deleted = !!(p.clear && p.clear.checked);
+      box.classList.toggle("is-deleted", deleted);
+      if (p.del) {
+        if (hasInitial) {
+          label(p.del, deleted ? "Undo delete" : "Delete");
+          p.del.hidden = false;
+        } else {
+          p.del.hidden = !chosen;
+        }
+      }
+      if (p.view) { p.view.hidden = deleted; }
+      if (!hasInitial && p.name) {
+        p.name.textContent = chosen ? chosen.name : "No file";
+        p.name.classList.toggle("erp-file-empty", !chosen);
+      }
+      if (deleted) {
+        setNote(p, "Will be deleted when you save.");
+      } else if (chosen) {
+        setNote(p, "New file selected. It is saved when you press Save.");
+      } else {
+        setNote(p, "");
+      }
+    }
+
+    document.addEventListener("click", function (e) {
+      var target = e.target.closest ? e.target.closest("[data-erp-view],[data-erp-edit],[data-erp-delete]") : null;
+      if (!target) { return; }
+      var box = target.closest("[data-erp-file]");
+      if (!box) { return; }
+      var p = parts(box);
+      if (target.hasAttribute("data-erp-view")) {
+        if (box.getAttribute("data-image") === "1") {
+          e.preventDefault();
+          openLightbox(target.getAttribute("href"));
+        }
+        return;  // documents (PDF) open in a new tab
+      }
+      e.preventDefault();
+      if (target.hasAttribute("data-erp-edit")) {
+        p.input.click();
+        return;
+      }
+      // Delete / Undo / Remove
+      if (p.clear) {
+        p.clear.checked = !p.clear.checked;
+        if (p.clear.checked) { p.input.value = ""; }
+      } else {
+        p.input.value = "";
+      }
+      if (p.img && p.img.getAttribute("data-original")) { p.img.src = p.img.getAttribute("data-original"); }
+      refresh(box);
+    });
+
+    document.addEventListener("change", function (e) {
+      if (!e.target.classList || !e.target.classList.contains("erp-file-input")) { return; }
+      var box = e.target.closest("[data-erp-file]");
+      var p = parts(box);
+      if (p.clear && e.target.files.length) { p.clear.checked = false; }  // a new file replaces the delete
+      var file = e.target.files && e.target.files[0];
+      if (p.img && file && /^image\//.test(file.type)) {
+        if (!p.img.getAttribute("data-original")) { p.img.setAttribute("data-original", p.img.src); }
+        p.img.src = URL.createObjectURL(file);
+      }
+      refresh(box);
+    });
+  }
+
   function init() {
+    fileWidgets();
+    showToasts();
     sidebarMemory();
     deleteGuard();
     var form = document.querySelector('form[id$="_form"]');

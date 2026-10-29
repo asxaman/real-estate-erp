@@ -1,0 +1,33 @@
+<div class="erp-file{% if widget.erp_compact %} erp-file-compact{% endif %}" data-erp-file data-image="{% if widget.erp_is_image %}1{% else %}0{% endif %}">
+  <input type="file" name="{{ widget.name }}"{% if widget.attrs.id %} id="{{ widget.attrs.id }}"{% endif %}{% if widget.attrs.accept %} accept="{{ widget.attrs.accept }}"{% endif %} class="erp-file-input" hidden>
+  {% if widget.is_initial %}
+    {% if not widget.required %}<input type="checkbox" name="{{ widget.checkbox_name }}" id="{{ widget.checkbox_id }}" class="erp-file-clear" hidden>{% endif %}
+    {% if widget.erp_preview and widget.erp_is_image %}
+      <div class="erp-file-preview"><img src="{{ widget.erp_url }}" alt=""></div>
+    {% endif %}
+    <div class="erp-file-row">
+      <span class="erp-file-name">{{ widget.erp_kind }}</span>
+      <span class="erp-file-actions">
+        <a class="erp-fbtn" href="{{ widget.erp_url }}" target="_blank" rel="noopener" data-erp-view title="View">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg><span class="erp-fbtn-label">View</span></a>
+        <button type="button" class="erp-fbtn" data-erp-edit title="Edit (choose a new file)">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 013 3L7 19l-4 1 1-4z"/></svg><span class="erp-fbtn-label">Edit</span></button>
+        {% if not widget.required %}
+        <button type="button" class="erp-fbtn erp-fbtn-danger" data-erp-delete title="Delete">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/></svg><span class="erp-fbtn-label">Delete</span></button>
+        {% endif %}
+      </span>
+    </div>
+  {% else %}
+    <div class="erp-file-row">
+      <span class="erp-file-name erp-file-empty">No file</span>
+      <span class="erp-file-actions">
+        <button type="button" class="erp-fbtn" data-erp-edit title="Upload a file">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4"/><path d="M7 9l5-5 5 5"/><path d="M4 20h16"/></svg><span class="erp-fbtn-label">Upload</span></button>
+        <button type="button" class="erp-fbtn erp-fbtn-danger" data-erp-delete title="Remove the chosen file" hidden>
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/></svg><span class="erp-fbtn-label">Remove</span></button>
+      </span>
+    </div>
+  {% endif %}
+  <div class="erp-file-note" hidden></div>
+</div>

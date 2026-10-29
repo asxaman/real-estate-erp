@@ -10,6 +10,11 @@ class CoreConfig(AppConfig):
         # Register this module's seed (and, in later modules, erase) steps.
         from . import seed  # noqa: F401
 
+        # Date and time format chosen on the System settings page.
+        from . import formats
+
+        formats.install()
+
         # Audit trail: watch owners, properties, units and users.
         from django.apps import apps
         from django.db.models.signals import post_delete, post_save, pre_save

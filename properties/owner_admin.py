@@ -16,7 +16,9 @@ from unfold.admin import ModelAdmin, TabularInline
 from unfold.decorators import display
 
 from core.admin_utils import TooltipHelpMixin, badge, circle_avatar, format_amount
+from core.formats import fmt_date
 from core.models import AuditEntry
+from core.widgets import use_file_widget
 
 from . import owner_tools
 from .import_admin import ImportMixin
@@ -83,8 +85,19 @@ class ContactInline(TabularInline):
     fields = ("name", "role", "is_primary", "mobile", "whatsapp", "email", "language")
 
 
+class OwnerDocumentForm(forms.ModelForm):
+    class Meta:
+        model = OwnerDocument
+        fields = "__all__"
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        use_file_widget(self, "file", compact=True, accept=".pdf,.jpg,.jpeg,.png,.webp")
+
+
 class DocumentInline(TabularInline):
     model = OwnerDocument
+    form = OwnerDocumentForm
     tab = True
     extra = 0
     fields = ("doc_type", "number", "expiry_date", "status", "file", "notes")
@@ -210,6 +223,7 @@ class OwnerAdminForm(forms.ModelForm):
         for name in ("address", "notes"):
             if name in self.fields:
                 self.fields[name].widget.attrs["rows"] = 3
+        use_file_widget(self, "photo", preview=True, accept="image/png,image/jpeg,image/webp")
 
 
 @admin.register(Owner)
@@ -405,7 +419,7 @@ class OwnerAdmin(ImportMixin, TooltipHelpMixin, ModelAdmin):
             today = timezone.localdate()
             limit = today + timedelta(days=EXPIRY_WARNING_DAYS)
             for doc in OwnerDocument.objects.filter(owner_id=object_id, expiry_date__lte=limit):
-                when = f"{doc.expiry_date:%d %b %Y}"
+                when = fmt_date(doc.expiry_date)
                 if doc.expiry_date < today:
                     messages.error(request, f"{doc} expired on {when}.")
                 else:
