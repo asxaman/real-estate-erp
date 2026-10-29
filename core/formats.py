@@ -9,8 +9,8 @@ come from the database (SystemSettings). So dates shown on pages, in lists, in d
 accepted in forms all follow the chosen format. Stored data is never changed: only how it is
 shown and typed.
 
-`ensure_current()` is called on every request (core.middleware.SystemSettingsMiddleware) so
-every server process notices a change straight away.
+`core.sysconf.ensure_current()` runs on every request (core.middleware) so every server process
+notices a change straight away.
 """
 import types
 
@@ -90,19 +90,6 @@ def install():
 
     formats.get_format_modules = get_format_modules
     _installed = True
-
-
-def ensure_current():
-    """Re-read the saved choice when it differs from what this process is using."""
-    from .models import SystemSettings  # imported late: models are not ready at import time
-
-    try:
-        row = SystemSettings.objects.values_list("date_format", "time_format").first()
-    except Exception:  # table missing (before migrate) or database not reachable
-        return
-    wanted = row or (DEFAULT_DATE, DEFAULT_TIME)
-    if wanted != _applied:
-        apply(*wanted)
 
 
 def preview(date_key, time_key, when):

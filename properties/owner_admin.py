@@ -16,6 +16,7 @@ from unfold.admin import ModelAdmin, TabularInline
 from unfold.decorators import display
 
 from core.admin_utils import TooltipHelpMixin, badge, circle_avatar, format_amount
+from core import sysconf
 from core.formats import fmt_date
 from core.models import AuditEntry
 from core.widgets import use_file_widget
@@ -30,7 +31,6 @@ from .models import (
     Property,
     Unit,
 )
-from .models_constants import EXPIRY_WARNING_DAYS
 
 STANDALONE_TYPES = [t for t in Property.PropertyType.values if t not in Property.BUILDING_TYPES]
 
@@ -191,7 +191,7 @@ class DocumentsFilter(admin.SimpleListFilter):
     parameter_name = "docs"
 
     def lookups(self, request, model_admin):
-        return (("expired", "Has expired documents"), ("soon", f"Expiring within {EXPIRY_WARNING_DAYS} days"))
+        return (("expired", "Has expired documents"), ("soon", f"Expiring within {sysconf.expiry_days()} days"))
 
     def queryset(self, request, queryset):
         today = timezone.localdate()
@@ -284,7 +284,7 @@ class OwnerAdmin(ImportMixin, TooltipHelpMixin, ModelAdmin):
     # ---- queries ---------------------------------------------------------------------
     def get_queryset(self, request):
         today = timezone.localdate()
-        limit = today + timedelta(days=EXPIRY_WARNING_DAYS)
+        limit = today + timedelta(days=sysconf.expiry_days())
         return super().get_queryset(request).annotate(
             _property_count=Count("properties", distinct=True),
             _unit_count=Count("properties__units", distinct=True),
@@ -417,7 +417,7 @@ class OwnerAdmin(ImportMixin, TooltipHelpMixin, ModelAdmin):
     def change_view(self, request, object_id, form_url="", extra_context=None):
         if request.method == "GET" and str(object_id).isdigit():
             today = timezone.localdate()
-            limit = today + timedelta(days=EXPIRY_WARNING_DAYS)
+            limit = today + timedelta(days=sysconf.expiry_days())
             for doc in OwnerDocument.objects.filter(owner_id=object_id, expiry_date__lte=limit):
                 when = fmt_date(doc.expiry_date)
                 if doc.expiry_date < today:

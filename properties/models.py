@@ -16,6 +16,7 @@ from django.db.models.signals import post_delete
 from django.dispatch import receiver
 from django.utils import timezone
 
+from core import sysconf
 from core.models import PHOTO_VALIDATORS
 
 from .models_constants import (
@@ -23,7 +24,6 @@ from .models_constants import (
     CODE_REGEX,
     COMPANY_OWNER_CODE,
     COMPANY_OWNER_NAME,
-    EXPIRY_WARNING_DAYS,
     FLOOR_ERROR,
     FLOOR_HELP,
     FLOOR_REGEX,
@@ -47,8 +47,11 @@ def owner_document_path(instance, filename):
 
 
 def validate_document_size(file):
-    if file.size > 10 * 1024 * 1024:
-        raise ValidationError("The file is too large. The maximum size is 10 MB.")
+    from core import sysconf
+
+    limit = sysconf.get("max_document_mb")  # set on the System settings page
+    if file.size > limit * 1024 * 1024:
+        raise ValidationError(f"The file is too large. The maximum size is {limit} MB.")
 
 
 def validate_iban(value):
@@ -123,7 +126,7 @@ class Owner(models.Model):
         blank=True,
         validators=PHOTO_VALIDATORS,
         help_text="Optional. A photo for an individual or the logo of a company "
-        "(JPG, PNG or WebP, up to 2 MB).",
+        "(JPG, PNG or WebP).",
     )
     # The one built-in owner that stands for "our own company". It is created
     # automatically, cannot be renamed or deleted, and properties owned by it
@@ -181,7 +184,7 @@ class Owner(models.Model):
     def document_counts(self):
         """(expired, expiring soon) among this owner's documents."""
         today = timezone.localdate()
-        soon_limit = today + timedelta(days=EXPIRY_WARNING_DAYS)
+        soon_limit = today + timedelta(days=sysconf.expiry_days())
         expired = self.documents.filter(expiry_date__lt=today).count()
         soon = self.documents.filter(expiry_date__gte=today, expiry_date__lte=soon_limit).count()
         return expired, soon
@@ -285,7 +288,7 @@ class OwnerDocument(models.Model):
             FileExtensionValidator(["pdf", "jpg", "jpeg", "png", "webp"]),
             validate_document_size,
         ],
-        help_text="PDF, JPG, PNG or WebP, up to 10 MB.",
+        help_text="PDF, JPG, PNG or WebP.",
     )
     notes = models.CharField(max_length=200, blank=True)
 
@@ -305,7 +308,7 @@ class OwnerDocument(models.Model):
         today = timezone.localdate()
         if self.expiry_date < today:
             return "expired"
-        if self.expiry_date <= today + timedelta(days=EXPIRY_WARNING_DAYS):
+        if self.expiry_date <= today + timedelta(days=sysconf.expiry_days()):
             return "soon"
         return "valid"
 

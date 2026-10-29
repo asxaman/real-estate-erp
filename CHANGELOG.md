@@ -1,5 +1,15 @@
 # Changelog
 
+## Update 12d - Fixes
+- System settings: the Address box has the theme's normal border again (I had replaced it with a bare text box)
+- Users: the profile picture now has the same preview with View / Edit / Delete buttons as owners and tenants (round preview)
+
+## Update 12 - System settings page and new dropdowns
+- System settings now has four tabs: Company, Date and time (format, clock, time zone), Documents and files (expiry warning days, upload size limits), Notifications (pop-up time)
+- The company name is used in the sidebar and browser tab
+- Every dropdown in the system is now a styled menu with a fade animation, keyboard support and a search box for long lists
+- Run `python manage.py makemigrations` and `migrate` (new fields in the settings table; help texts changed)
+
 ## Update 11 - Required tenant fields and System settings
 - Tenants: Email, Contact number and Nationality are now required (also in import)
 - New System settings page (superusers): choose the date format and time format for the whole system

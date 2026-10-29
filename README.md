@@ -199,7 +199,18 @@ Sidebar > **Tenancy** > **Tenants** (leases are the next step of this module):
 
 ## System settings (superusers)
 
-Sidebar > Administration > **System settings**: choose how dates and times are shown and typed everywhere (for example `2028-06-20`, `20-06-2028`, `20/06/2028`, `06/20/2028` or `20 Jun 2028`; 24-hour or 12-hour clock). The change applies to everyone straight away. Saved data is not changed, only how it looks. ISO dates (`2028-06-20`) are always accepted when typing.
+Sidebar > Administration > **System settings**: every system-wide setting on one page, one tab per topic.
+
+* **Company** - name (shown in the sidebar and browser tab), tax registration number, phone, email, address. The other details are for invoices, receipts and agreements later.
+* **Date and time** - date format (`2028-06-20`, `20-06-2028`, `20/06/2028`, `06/20/2028` or `20 Jun 2028`), 12-hour or 24-hour clock, and the time zone. A preview shows your saved choice. Saved data is not changed, only how it looks. ISO dates (`2028-06-20`) are always accepted when typing.
+* **Documents and files** - how many days before expiry a document shows a warning (default 30), and the largest photo (default 2 MB) and document (default 10 MB) that can be uploaded.
+* **Notifications** - how long success pop-ups stay on screen (warnings and errors stay twice as long).
+
+Changes apply to everyone straight away. Every change is written to the audit log.
+
+## Dropdown menus
+
+Every dropdown list in the app is a styled, animated menu: it fades in and out, shows a tick on the chosen item, supports the keyboard (arrow keys, Enter, Esc, typing the first letters), and adds a search box when a list has more than 9 entries. Dropdowns that already search the server (such as the owner on the Property form) keep their own search.
 
 ## Safety and records (update 6)
 

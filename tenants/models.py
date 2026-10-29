@@ -9,9 +9,10 @@ from django.db.models.signals import post_delete
 from django.dispatch import receiver
 from django.utils import timezone
 
+from core import sysconf
 from core.models import PHOTO_VALIDATORS
 from properties.models import validate_document_size
-from properties.models_constants import EXPIRY_WARNING_DAYS, PHONE_ERROR, PHONE_REGEX
+from properties.models_constants import PHONE_ERROR, PHONE_REGEX
 
 
 def tenant_photo_path(instance, filename):
@@ -50,7 +51,7 @@ class Tenant(models.Model):
         blank=True,
         validators=PHOTO_VALIDATORS,
         help_text="Optional. A photo for an individual or the logo of a company "
-        "(JPG, PNG or WebP, up to 2 MB).",
+        "(JPG, PNG or WebP).",
     )
     nationality = models.CharField(
         max_length=60, help_text="For a company: the country where it is registered."
@@ -91,7 +92,7 @@ class Tenant(models.Model):
     def document_counts(self):
         """(expired, expiring soon) among this tenant's documents."""
         today = timezone.localdate()
-        soon_limit = today + timedelta(days=EXPIRY_WARNING_DAYS)
+        soon_limit = today + timedelta(days=sysconf.expiry_days())
         expired = self.documents.filter(expiry_date__lt=today).count()
         soon = self.documents.filter(expiry_date__gte=today, expiry_date__lte=soon_limit).count()
         return expired, soon
@@ -169,7 +170,7 @@ class TenantDocument(models.Model):
             FileExtensionValidator(["pdf", "jpg", "jpeg", "png", "webp"]),
             validate_document_size,
         ],
-        help_text="PDF, JPG, PNG or WebP, up to 10 MB.",
+        help_text="PDF, JPG, PNG or WebP.",
     )
     notes = models.CharField(max_length=200, blank=True)
 
@@ -189,7 +190,7 @@ class TenantDocument(models.Model):
         today = timezone.localdate()
         if self.expiry_date < today:
             return "expired"
-        if self.expiry_date <= today + timedelta(days=EXPIRY_WARNING_DAYS):
+        if self.expiry_date <= today + timedelta(days=sysconf.expiry_days()):
             return "soon"
         return "valid"
 

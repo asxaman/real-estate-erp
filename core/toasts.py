@@ -15,6 +15,8 @@ from html.parser import HTMLParser
 from django.contrib.messages import get_messages
 from django.contrib.messages.constants import DEFAULT_LEVELS
 
+from . import sysconf
+
 
 class _Parts(HTMLParser):
     """Turn a message that contains simple HTML (Django's own "unit added" link) into plain
@@ -86,7 +88,8 @@ class ToastMiddleware:
             return response
         html = response.content.decode(response.charset or "utf-8")
         script = (
-            "<script>window.__erpToasts=" + _safe_json(items) + ";"
+            "<script>window.__erpToastSeconds=" + str(int(sysconf.get("toast_seconds"))) + ";"
+            "window.__erpToasts=" + _safe_json(items) + ";"
             "if(window.erpShowToasts){window.erpShowToasts();}</script>"
         )
         index = html.rfind("</body>")

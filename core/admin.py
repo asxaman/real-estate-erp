@@ -5,24 +5,26 @@ Only superusers can see or manage Users and Roles (groups). That is how the
 superuser creates other users, and it stops ordinary staff from giving
 themselves extra permissions.
 """
+from zoneinfo import ZoneInfo
+
 from django import forms
 from django.contrib import admin
 from django.contrib.auth.admin import GroupAdmin as BaseGroupAdmin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.contrib.auth.models import Group, User
 from django.core.files.uploadedfile import UploadedFile
+from django.shortcuts import redirect
+from django.urls import reverse
+from django.utils import timezone
 from django.utils.html import format_html_join
 from django.utils.safestring import mark_safe
 from unfold.admin import ModelAdmin
 from unfold.decorators import display
 from unfold.forms import AdminPasswordChangeForm, UserChangeForm, UserCreationForm
 
-from django.shortcuts import redirect
-from django.urls import reverse
-from django.utils import timezone
-
-from . import formats
-from .admin_utils import avatar_html
+from . import formats, sysconf
+from .admin_utils import TooltipHelpMixin, avatar_html
+from .widgets import use_file_widget
 from .models import PHOTO_VALIDATORS, AuditEntry, SystemSettings, UserProfile
 from .safety import superuser_change_problem, user_delete_problem
 
@@ -53,14 +55,22 @@ class SafeUserChangeForm(UserChangeForm):
     current_user = None  # set per request in UserAdmin.get_form
 
     # Optional profile picture (saved to the user's profile in UserAdmin.save_model).
+    # After saving: a new file, False (the Delete button was used), or the unchanged current picture.
     photo = forms.ImageField(
-        label="Change picture",
+        label="Profile picture",
         required=False,
         validators=PHOTO_VALIDATORS,
-        widget=forms.FileInput(attrs={"accept": "image/png,image/jpeg,image/webp"}),
-        help_text="Optional. JPG, PNG or WebP, up to 2 MB.",
+        help_text="Optional. JPG, PNG or WebP.",
     )
-    remove_photo = forms.BooleanField(required=False, label="Remove current picture")
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        profile = getattr(self.instance, "profile", None) if self.instance.pk else None
+        if profile is not None and profile.photo:
+            self.initial["photo"] = profile.photo  # lets the control show the current picture
+        use_file_widget(
+            self, "photo", preview=True, round=True, accept="image/png,image/jpeg,image/webp"
+        )
 
     def clean(self):
         cleaned = super().clean() or self.cleaned_data
@@ -85,12 +95,11 @@ class UserAdmin(SuperuserOnlyMixin, BaseUserAdmin, ModelAdmin):
     list_display_links = ("avatar", "username")
     list_select_related = ("profile",)
     list_filter = ("is_staff", "is_superuser", "is_active", "groups")
-    readonly_fields = ("photo_preview",)
     fieldsets = (
         (None, {"fields": ("username", "password")}),
         (
             "Personal info",
-            {"fields": ("photo_preview", "photo", "remove_photo", "first_name", "last_name", "email")},
+            {"fields": ("photo", "first_name", "last_name", "email")},
         ),
         (
             "Permissions",
@@ -103,21 +112,18 @@ class UserAdmin(SuperuserOnlyMixin, BaseUserAdmin, ModelAdmin):
     def avatar(self, obj):
         return avatar_html(obj, 32)
 
-    @admin.display(description="Current picture")
-    def photo_preview(self, obj):
-        return avatar_html(obj, 72) if obj is not None and obj.pk else "-"
-
     def save_model(self, request, obj, form, change):
         super().save_model(request, obj, form, change)
         photo = form.cleaned_data.get("photo")
-        remove = form.cleaned_data.get("remove_photo")
-        if not (photo or remove):
+        replace = isinstance(photo, UploadedFile)  # a new picture was chosen
+        remove = photo is False  # the Delete button was used
+        if not (replace or remove):
             return
         profile, _ = UserProfile.objects.get_or_create(user=obj)
         if profile.photo:  # replacing or removing: delete the old file
             profile.photo.delete(save=False)
             profile.photo = ""
-        if isinstance(photo, UploadedFile) and not remove:
+        if replace:
             profile.photo = photo
         profile.save()
 
@@ -187,25 +193,57 @@ class AuditEntryAdmin(ModelAdmin):
 class SystemSettingsForm(forms.ModelForm):
     date_format = forms.ChoiceField(label="Date format", choices=formats.date_choices())
     time_format = forms.ChoiceField(label="Time format", choices=formats.time_choices())
+    timezone = forms.ChoiceField(
+        label="Time zone",
+        choices=sysconf.TIMEZONES,
+        help_text="Times are shown in this time zone.",
+    )
 
     class Meta:
         model = SystemSettings
-        fields = ("date_format", "time_format")
+        fields = "__all__"
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Keep the theme's own text box (border, colours); only make it 3 lines high.
+        self.fields["company_address"].widget.attrs["rows"] = 3
 
 
 @admin.register(SystemSettings)
-class SystemSettingsAdmin(SuperuserOnlyMixin, ModelAdmin):
-    """One page of system-wide settings (superusers only). Today: date and time format."""
+class SystemSettingsAdmin(SuperuserOnlyMixin, TooltipHelpMixin, ModelAdmin):
+    """All system-wide settings in one place (superusers only), one tab per topic."""
 
     form = SystemSettingsForm
+    compressed_fields = True
     fieldsets = (
+        (
+            "Company",
+            {
+                "classes": ["tab"],
+                "description": "Your company's details. The name appears in the sidebar and the browser "
+                "tab; the other details will be used on invoices, receipts and agreements.",
+                "fields": ("company_name", "company_trn", ("company_phone", "company_email"), "company_address"),
+            },
+        ),
         (
             "Date and time",
             {
-                "fields": ("date_format", "time_format", "preview"),
-                "description": "Applies to the whole system: dates and times on pages, lists and "
-                "date pickers, and what people type into date fields. Saved data is not changed.",
+                "classes": ["tab"],
+                "description": "Applies to the whole system: pages, lists, date pickers and what people "
+                "type into date fields. Saved data is not changed.",
+                "fields": ("date_format", "time_format", "timezone", "preview"),
             },
+        ),
+        (
+            "Documents and files",
+            {
+                "classes": ["tab"],
+                "fields": ("expiry_warning_days", "max_photo_mb", "max_document_mb"),
+            },
+        ),
+        (
+            "Notifications",
+            {"classes": ["tab"], "fields": ("toast_seconds",)},
         ),
     )
     readonly_fields = ("preview",)
@@ -216,6 +254,10 @@ class SystemSettingsAdmin(SuperuserOnlyMixin, ModelAdmin):
     def has_delete_permission(self, request, obj=None):
         return False
 
+    def change_view(self, request, object_id, form_url="", extra_context=None):
+        SystemSettings.load()  # make sure the single record exists, even on a brand-new database
+        return super().change_view(request, object_id, form_url, extra_context)
+
     def changelist_view(self, request, extra_context=None):
         # There is only one settings record, so go straight to it.
         obj = SystemSettings.load()
@@ -225,9 +267,15 @@ class SystemSettingsAdmin(SuperuserOnlyMixin, ModelAdmin):
     def preview(self, obj):
         if obj is None or not obj.pk:
             return "-"
-        sample = formats.preview(obj.date_format, obj.time_format, timezone.localtime())
+        try:
+            now = timezone.now().astimezone(ZoneInfo(obj.timezone))
+        except Exception:
+            now = timezone.localtime()
+        sample = formats.preview(obj.date_format, obj.time_format, now)
         return f"Date: {sample['date']}   |   Time: {sample['time']}   |   Both: {sample['both']}"
 
     def save_model(self, request, obj, form, change):
         super().save_model(request, obj, form, change)
-        formats.apply(obj.date_format, obj.time_format)  # takes effect at once on this server
+        sysconf.refresh(
+            {name: getattr(obj, name) for name in sysconf.DEFAULTS}
+        )  # takes effect at once on this server; other servers pick it up on their next request

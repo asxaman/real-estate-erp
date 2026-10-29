@@ -820,7 +820,8 @@
     toastHost().appendChild(toast);
 
     // Success and information fade away by themselves; warnings and errors stay longer.
-    var total = kind === "success" ? 4500 : kind === "info" ? 6000 : 9000;
+    var base = (window.__erpToastSeconds || 5) * 1000;
+    var total = kind === "success" || kind === "info" ? base : base * 2;
     var left = total;
     var started = Date.now();
     var timer = null;
@@ -972,7 +973,375 @@
     });
   }
 
+  // Dropdowns: every normal <select> in the app is shown as our own styled, animated dropdown.
+  // The real <select> stays in the page (hidden), so forms, validation and other scripts keep
+  // working: choosing an option sets its value and fires a normal "change" event.
+  function customSelects() {
+    var SEARCH_FROM = 9;  // show a search box when there are more options than this
+    var CHECK = '<svg class="erp-opt-check" viewBox="0 0 24 24" width="16" height="16" fill="none" ' +
+      'stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">' +
+      '<path d="M5 13l4 4L19 7"/></svg>';
+    var CHEVRON = '<svg class="erp-select-chevron" viewBox="0 0 24 24" width="18" height="18" fill="none" ' +
+      'stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+      '<path d="M6 9l6 6 6-6"/></svg>';
+    var uid = 0;
+    var current = null;  // the open dropdown: {select, trigger, panel, list, search, items, active}
+
+    function eligible(sel) {
+      if (sel.dataset.erpSelect || sel.multiple || sel.size > 1) { return false; }
+      if (sel.hasAttribute("data-erp-native")) { return false; }
+      if (/__prefix__/.test((sel.name || "") + (sel.id || ""))) { return false; }
+      if (sel.closest(".empty-form, .select2, .select2-container")) { return false; }
+      if (sel.classList.contains("select2-hidden-accessible")) { return false; }
+      if (/autocomplete|select2|tom-select/i.test(sel.className)) { return false; }
+      var attrs = sel.attributes;  // searchable (ajax) dropdowns have their own widget
+      for (var i = 0; i < attrs.length; i += 1) {
+        if (/^data-(ajax|autocomplete|tom|select2)/i.test(attrs[i].name)) { return false; }
+      }
+      return true;
+    }
+
+    function isPlaceholder(option) {
+      return !option || option.value === "" && /^[-–—\s]*$/.test(option.text);
+    }
+
+    function sync(sel) {
+      var trigger = sel._erpTrigger;
+      if (!trigger) { return; }
+      var option = sel.options[sel.selectedIndex];
+      var label = trigger.querySelector(".erp-select-label");
+      var empty = isPlaceholder(option);
+      label.textContent = empty ? "Select an option" : option.text;
+      trigger.classList.toggle("is-placeholder", empty);
+      trigger.disabled = sel.disabled;
+      trigger.classList.toggle("is-invalid", sel.getAttribute("aria-invalid") === "true");
+    }
+
+    function enhance(sel) {
+      if (!eligible(sel)) { return; }
+      sel.dataset.erpSelect = "1";
+      var width = sel.offsetWidth;
+      var wrap = document.createElement("div");
+      wrap.className = "erp-select";
+      if (width > 0) {
+        wrap.style.width = width + "px";
+        wrap.style.maxWidth = "100%";
+      } else {
+        wrap.classList.add("erp-select-fluid");  // inside a hidden tab: measured later by CSS
+      }
+      var trigger = document.createElement("button");
+      trigger.type = "button";
+      trigger.className = "erp-select-trigger";
+      trigger.setAttribute("aria-haspopup", "listbox");
+      trigger.setAttribute("aria-expanded", "false");
+      trigger.innerHTML = '<span class="erp-select-label"></span>' + CHEVRON;
+      var labelEl = sel.id ? document.querySelector('label[for="' + sel.id + '"]') : null;
+      if (labelEl) {
+        if (!labelEl.id) { labelEl.id = "erp-label-" + (++uid); }
+        trigger.setAttribute("aria-labelledby", labelEl.id);
+      }
+      var holder = sel.parentNode;
+      holder.insertBefore(wrap, sel);
+      wrap.appendChild(sel);
+      wrap.appendChild(trigger);
+      // The theme draws its own little arrow next to a select: hide it, ours replaces it.
+      Array.prototype.forEach.call(holder.children, function (sibling) {
+        if (sibling !== wrap && sibling.matches &&
+            sibling.matches('[class*="material-symbols"], svg, .select-arrow')) {
+          sibling.style.display = "none";
+        }
+      });
+      sel.classList.add("erp-select-native");
+      sel.tabIndex = -1;
+      sel.setAttribute("aria-hidden", "true");
+      sel._erpTrigger = trigger;
+
+      trigger.addEventListener("click", function () {
+        if (current && current.select === sel) { closePanel(); } else { openPanel(sel); }
+      });
+      trigger.addEventListener("keydown", function (e) {
+        if (current) { return; }  // the open dropdown handles keys itself
+        if (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          openPanel(sel);
+        }
+      });
+      sel.addEventListener("focus", function () { trigger.focus(); });  // label click / validation
+      sel.addEventListener("change", function () { sync(sel); });
+      new MutationObserver(function () { sync(sel); }).observe(sel, {
+        childList: true, subtree: true, attributes: true, attributeFilter: ["disabled", "aria-invalid"]
+      });
+      sync(sel);
+    }
+
+    function enhanceAll(root) {
+      if (root.matches && root.matches("select")) { enhance(root); }
+      if (root.querySelectorAll) {
+        Array.prototype.forEach.call(root.querySelectorAll("select"), enhance);
+      }
+    }
+
+    // ---- the open dropdown ----------------------------------------------------------------
+    function buildItems(sel, list) {
+      var items = [];
+      function addOption(option, group) {
+        var li = document.createElement("li");
+        li.className = "erp-opt";
+        li.setAttribute("role", "option");
+        li.id = "erp-opt-" + (++uid);
+        li.dataset.index = String(option.index);
+        var selected = option.index === sel.selectedIndex;
+        li.setAttribute("aria-selected", selected ? "true" : "false");
+        if (selected) { li.classList.add("is-selected"); }
+        if (option.disabled || (group && group.disabled)) {
+          li.classList.add("is-disabled");
+          li.setAttribute("aria-disabled", "true");
+        }
+        var text = document.createElement("span");
+        text.className = "erp-opt-text";
+        var placeholder = isPlaceholder(option);
+        text.textContent = placeholder ? "None" : option.text;
+        if (placeholder) { li.classList.add("is-none"); }
+        li.appendChild(text);
+        li.insertAdjacentHTML("beforeend", CHECK);
+        list.appendChild(li);
+        items.push(li);
+      }
+      Array.prototype.forEach.call(sel.children, function (child) {
+        if (child.tagName === "OPTGROUP") {
+          var head = document.createElement("li");
+          head.className = "erp-opt-group";
+          head.setAttribute("role", "presentation");
+          head.textContent = child.label;
+          list.appendChild(head);
+          Array.prototype.forEach.call(child.children, function (o) { addOption(o, child); });
+        } else if (child.tagName === "OPTION") {
+          addOption(child, null);
+        }
+      });
+      return items;
+    }
+
+    function place() {
+      if (!current) { return; }
+      var rect = current.trigger.getBoundingClientRect();
+      var panel = current.panel;
+      var gap = 6;
+      var vh = window.innerHeight;
+      var below = vh - rect.bottom - gap - 8;
+      var above = rect.top - gap - 8;
+      panel.style.minWidth = rect.width + "px";
+      panel.style.maxWidth = Math.max(rect.width, Math.min(480, window.innerWidth - 16)) + "px";
+      current.list.style.maxHeight = "0px";  // measure the natural height of the search box etc.
+      var chrome = panel.offsetHeight;
+      var natural = current.list.scrollHeight + chrome;
+      var openUp = natural > below && above > below;
+      var room = Math.max(120, openUp ? above : below);
+      current.list.style.maxHeight = Math.min(280, room - chrome) + "px";
+      var height = panel.offsetHeight;
+      var left = Math.min(Math.max(8, rect.left), window.innerWidth - panel.offsetWidth - 8);
+      panel.style.left = left + "px";
+      panel.style.top = (openUp ? rect.top - gap - height : rect.bottom + gap) + "px";
+      panel.classList.toggle("is-up", openUp);
+    }
+
+    function setActive(index, scroll) {
+      if (!current) { return; }
+      var visible = current.items.filter(function (li) { return !li.hidden; });
+      if (!visible.length) { current.active = null; return; }
+      var li = visible[Math.max(0, Math.min(index, visible.length - 1))];
+      if (current.active) { current.active.classList.remove("is-active"); }
+      current.active = li;
+      li.classList.add("is-active");
+      current.trigger.setAttribute("aria-activedescendant", li.id);
+      if (scroll !== false) { li.scrollIntoView({ block: "nearest" }); }
+    }
+
+    function move(step) {
+      if (!current) { return; }
+      var visible = current.items.filter(function (li) {
+        return !li.hidden && !li.classList.contains("is-disabled");
+      });
+      if (!visible.length) { return; }
+      var at = visible.indexOf(current.active);
+      var next = at === -1 ? (step > 0 ? 0 : visible.length - 1) : at + step;
+      next = Math.max(0, Math.min(next, visible.length - 1));
+      var all = current.items.filter(function (li) { return !li.hidden; });
+      setActive(all.indexOf(visible[next]));
+    }
+
+    function choose(li) {
+      if (!current || !li || li.classList.contains("is-disabled")) { return; }
+      var sel = current.select;
+      var index = parseInt(li.dataset.index, 10);
+      var changed = sel.selectedIndex !== index;
+      sel.selectedIndex = index;
+      var trigger = current.trigger;
+      closePanel();
+      sync(sel);
+      if (changed) {
+        sel.dispatchEvent(new Event("input", { bubbles: true }));
+        sel.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+      trigger.focus();
+    }
+
+    function openPanel(sel) {
+      closePanel(true);
+      var trigger = sel._erpTrigger;
+      if (!trigger || trigger.disabled) { return; }
+      var panel = document.createElement("div");
+      panel.className = "erp-select-panel";
+      var search = null;
+      if (sel.options.length > SEARCH_FROM) {
+        search = document.createElement("input");
+        search.type = "text";
+        search.className = "erp-select-search";
+        search.placeholder = "Search...";
+        search.setAttribute("aria-label", "Search options");
+        search.autocomplete = "off";
+        panel.appendChild(search);
+      }
+      var list = document.createElement("ul");
+      list.className = "erp-select-list";
+      list.setAttribute("role", "listbox");
+      panel.appendChild(list);
+      var empty = document.createElement("div");
+      empty.className = "erp-select-empty";
+      empty.textContent = "No matches";
+      empty.hidden = true;
+      panel.appendChild(empty);
+      var items = buildItems(sel, list);
+      document.body.appendChild(panel);
+      current = { select: sel, trigger: trigger, panel: panel, list: list, search: search,
+                  items: items, empty: empty, active: null, typed: "", typedAt: 0 };
+      trigger.setAttribute("aria-expanded", "true");
+      trigger.classList.add("is-open");
+      place();
+      var selected = items.filter(function (li) { return li.classList.contains("is-selected"); })[0];
+      setActive(selected ? items.indexOf(selected) : 0);
+      requestAnimationFrame(function () { panel.classList.add("is-open"); });
+      if (search) { search.focus(); }
+
+      list.addEventListener("mousemove", function (e) {
+        var li = e.target.closest ? e.target.closest(".erp-opt") : null;
+        if (li && li !== current.active && !li.classList.contains("is-disabled")) {
+          setActive(current.items.filter(function (x) { return !x.hidden; }).indexOf(li), false);
+        }
+      });
+      list.addEventListener("click", function (e) {
+        var li = e.target.closest ? e.target.closest(".erp-opt") : null;
+        if (li) { choose(li); }
+      });
+      if (search) {
+        search.addEventListener("input", function () {
+          var q = search.value.trim().toLowerCase();
+          var shown = 0;
+          current.items.forEach(function (li) {
+            var match = !q || li.textContent.toLowerCase().indexOf(q) !== -1;
+            li.hidden = !match;
+            if (match) { shown += 1; }
+          });
+          Array.prototype.forEach.call(list.querySelectorAll(".erp-opt-group"), function (g) {
+            g.hidden = !!q;
+          });
+          current.empty.hidden = shown > 0;
+          setActive(0);
+          place();
+        });
+      }
+    }
+
+    function closePanel(immediate) {
+      if (!current) { return; }
+      var c = current;
+      current = null;
+      c.trigger.setAttribute("aria-expanded", "false");
+      c.trigger.removeAttribute("aria-activedescendant");
+      c.trigger.classList.remove("is-open");
+      c.panel.classList.remove("is-open");
+      if (immediate) { c.panel.remove(); } else { setTimeout(function () { c.panel.remove(); }, 160); }
+    }
+
+    document.addEventListener("keydown", function (e) {
+      if (!current) { return; }
+      var key = e.key;
+      if (key === "Escape") {
+        e.preventDefault(); e.stopPropagation();
+        var t = current.trigger; closePanel(); t.focus();
+      } else if (key === "ArrowDown") { e.preventDefault(); move(1); }
+      else if (key === "ArrowUp") { e.preventDefault(); move(-1); }
+      else if (key === "Home") { e.preventDefault(); setActive(0); }
+      else if (key === "End") { e.preventDefault(); setActive(current.items.length); }
+      else if (key === "Enter" || (key === " " && !current.search)) {
+        e.preventDefault(); e.stopPropagation(); choose(current.active);
+      } else if (key === "Tab") { closePanel(); }
+      else if (!current.search && key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        var now = Date.now();
+        current.typed = (now - current.typedAt > 700 ? "" : current.typed) + key.toLowerCase();
+        current.typedAt = now;
+        var hit = current.items.filter(function (li) {
+          return !li.classList.contains("is-disabled") && li.textContent.trim().toLowerCase().indexOf(current.typed) === 0;
+        })[0];
+        if (hit) { setActive(current.items.indexOf(hit)); }
+      }
+    }, true);
+
+    document.addEventListener("mousedown", function (e) {
+      if (current && !current.panel.contains(e.target) && !current.trigger.contains(e.target)) {
+        closePanel();
+      }
+    }, true);
+    window.addEventListener("resize", function () { if (current) { place(); } });
+    window.addEventListener("scroll", function (e) {
+      if (!current) { return; }
+      if (current.panel.contains(e.target)) { return; }
+      place();
+    }, true);
+
+    // Scripts that set select.value / selectedIndex directly (no event) still update the display.
+    ["value", "selectedIndex"].forEach(function (prop) {
+      var desc = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, prop);
+      if (!desc || !desc.set) { return; }
+      Object.defineProperty(HTMLSelectElement.prototype, prop, {
+        configurable: true,
+        enumerable: desc.enumerable,
+        get: desc.get,
+        set: function (v) {
+          desc.set.call(this, v);
+          if (this._erpTrigger) { sync(this); }
+        }
+      });
+    });
+
+    document.addEventListener("reset", function (e) {
+      setTimeout(function () {
+        Array.prototype.forEach.call(e.target.querySelectorAll("select"), sync);
+      }, 0);
+    }, true);
+
+    enhanceAll(document);
+    var queued = false;
+    var added = [];
+    new MutationObserver(function (records) {
+      records.forEach(function (r) {
+        Array.prototype.forEach.call(r.addedNodes, function (n) {
+          if (n.nodeType === 1) { added.push(n); }
+        });
+      });
+      if (queued || !added.length) { return; }
+      queued = true;
+      requestAnimationFrame(function () {
+        queued = false;
+        var nodes = added; added = [];
+        nodes.forEach(function (n) { if (n.isConnected) { enhanceAll(n); } });
+      });
+    }).observe(document.body, { childList: true, subtree: true });
+    window.addEventListener("load", function () { enhanceAll(document); });
+  }
+
   function init() {
+    customSelects();
     fileWidgets();
     showToasts();
     sidebarMemory();

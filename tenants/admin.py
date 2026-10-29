@@ -11,11 +11,11 @@ from unfold.admin import ModelAdmin
 from unfold.decorators import display
 
 from core.admin_utils import TooltipHelpMixin, badge, circle_avatar
+from core import sysconf
 from core.formats import fmt_date
 from core.models import AuditEntry
 from core.widgets import use_file_widget
 from properties.import_admin import ImportMixin
-from properties.models_constants import EXPIRY_WARNING_DAYS
 from properties.owner_admin import (
     ActivityInline,
     ContactInline,
@@ -123,7 +123,7 @@ class TenantAdmin(ImportMixin, TooltipHelpMixin, ModelAdmin):
 
     def get_queryset(self, request):
         today = timezone.localdate()
-        limit = today + timedelta(days=EXPIRY_WARNING_DAYS)
+        limit = today + timedelta(days=sysconf.expiry_days())
         return super().get_queryset(request).annotate(
             _docs_expired=Count("documents", filter=Q(documents__expiry_date__lt=today), distinct=True),
             _docs_soon=Count(
@@ -198,7 +198,7 @@ class TenantAdmin(ImportMixin, TooltipHelpMixin, ModelAdmin):
     def change_view(self, request, object_id, form_url="", extra_context=None):
         if request.method == "GET" and str(object_id).isdigit():
             today = timezone.localdate()
-            limit = today + timedelta(days=EXPIRY_WARNING_DAYS)
+            limit = today + timedelta(days=sysconf.expiry_days())
             for doc in TenantDocument.objects.filter(tenant_id=object_id, expiry_date__lte=limit):
                 when = fmt_date(doc.expiry_date)
                 if doc.expiry_date < today:

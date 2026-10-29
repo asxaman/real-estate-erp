@@ -308,3 +308,77 @@ html.dark .erp-file-note { color: #fbbf24; }
   position: absolute; top: 16px; right: 20px; border: 0; background: transparent; color: #fff;
   font-size: 34px; line-height: 1; cursor: pointer;
 }
+
+/* ---- Dropdowns (replace the browser's plain select list) ---- */
+.erp-select { position: relative; display: block; width: 100%; max-width: 100%; }
+.erp-select.erp-select-fluid { max-width: 28rem; }
+.erp-select-native {
+  position: absolute !important; left: 0; bottom: 0; width: 1px !important; height: 1px !important;
+  min-width: 0 !important; padding: 0 !important; border: 0 !important; margin: 0 !important;
+  opacity: 0; pointer-events: none; overflow: hidden;
+}
+.erp-select-trigger {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%;
+  min-height: 40px; padding: 8px 10px 8px 12px; font: inherit; font-size: 14px; line-height: 1.3;
+  text-align: left; color: inherit; background: #fff; border: 1px solid #d1d5db;
+  border-radius: 8px; cursor: pointer;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+}
+html.dark .erp-select-trigger { background: transparent; border-color: #374151; }
+.erp-select-trigger:hover:not(:disabled) { border-color: #9ca3af; }
+html.dark .erp-select-trigger:hover:not(:disabled) { border-color: #6b7280; }
+.erp-select-trigger:focus-visible, .erp-select-trigger.is-open {
+  outline: none; border-color: #8b5cf6; box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.22);
+}
+.erp-select-trigger.is-invalid { border-color: #dc2626; }
+.erp-select-trigger:disabled { opacity: 0.55; cursor: not-allowed; }
+.erp-select-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.erp-select-trigger.is-placeholder .erp-select-label { color: #9ca3af; }
+.erp-select-chevron { flex: none; color: #9ca3af; transition: transform 0.18s ease; }
+.erp-select-trigger.is-open .erp-select-chevron { transform: rotate(180deg); color: #8b5cf6; }
+
+.erp-select-panel {
+  position: fixed; z-index: 100002; box-sizing: border-box; padding: 6px;
+  background: #fff; color: #111827; border: 1px solid #e5e7eb; border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(17, 24, 39, 0.16), 0 2px 6px rgba(17, 24, 39, 0.06);
+  opacity: 0; transform: translateY(-6px) scale(0.98); transform-origin: top center;
+  transition: opacity 0.15s ease, transform 0.15s ease; pointer-events: none;
+}
+.erp-select-panel.is-up { transform: translateY(6px) scale(0.98); transform-origin: bottom center; }
+.erp-select-panel.is-open { opacity: 1; transform: none; pointer-events: auto; }
+html.dark .erp-select-panel {
+  background: #111827; color: #f3f4f6; border-color: #1f2937;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+}
+.erp-select-search {
+  display: block; width: 100%; box-sizing: border-box; margin: 0 0 6px; padding: 8px 10px; font-size: 13px;
+  color: inherit; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; outline: none;
+}
+.erp-select-search:focus { border-color: #8b5cf6; box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.18); }
+html.dark .erp-select-search { background: #0b1220; border-color: #1f2937; }
+.erp-select-list { margin: 0; padding: 0; list-style: none; overflow-y: auto; overscroll-behavior: contain; }
+.erp-opt {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 8px 10px; font-size: 14px; line-height: 1.3; border-radius: 8px; cursor: pointer;
+  transition: background 0.1s ease;
+}
+.erp-opt-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.erp-opt.is-none .erp-opt-text { color: #9ca3af; }
+.erp-opt.is-active { background: #f3f4f6; }
+html.dark .erp-opt.is-active { background: #1f2937; }
+.erp-opt.is-selected { color: #6d28d9; font-weight: 600; }
+html.dark .erp-opt.is-selected { color: #c4b5fd; }
+.erp-opt.is-selected.is-active { background: #ede9fe; }
+html.dark .erp-opt.is-selected.is-active { background: rgba(124, 58, 237, 0.25); }
+.erp-opt-check { flex: none; opacity: 0; }
+.erp-opt.is-selected .erp-opt-check { opacity: 1; }
+.erp-opt.is-disabled { opacity: 0.45; cursor: not-allowed; }
+.erp-opt-group {
+  padding: 8px 10px 4px; font-size: 11px; font-weight: 600; letter-spacing: 0.06em;
+  text-transform: uppercase; color: #9ca3af;
+}
+.erp-select-empty { padding: 12px 10px; font-size: 13px; text-align: center; color: #9ca3af; }
+@media (prefers-reduced-motion: reduce) {
+  .erp-select-panel, .erp-select-chevron, .erp-select-trigger { transition: none; }
+}
+.erp-file-preview.erp-file-round { width: 140px; height: 140px; border-radius: 50%; }

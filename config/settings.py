@@ -9,6 +9,7 @@ from pathlib import Path
 
 from django.templatetags.static import static
 from django.urls import reverse_lazy
+from django.utils.functional import lazy
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -173,17 +174,26 @@ def _can(permission):
     return check
 
 
+def _read_company_name():
+    from core import sysconf  # imported late: settings are loaded before the apps
+
+    return sysconf.get("company_name")
+
+
+_company_name = lazy(_read_company_name, str)
+
 UNFOLD = {
-    "SITE_TITLE": "Real Estate ERP",
-    "SITE_HEADER": "Real Estate ERP",
+    # The company name comes from the System settings page.
+    "SITE_TITLE": _company_name(),
+    "SITE_HEADER": _company_name(),
     "SITE_SUBHEADER": "Property management suite",
     "SITE_URL": "/",
     "SHOW_HISTORY": True,
     "SHOW_VIEW_ON_SITE": False,
     # Our own small style/behaviour layer (info icons, compact forms).
     # Bump the ?v= number whenever these files change so browsers reload them.
-    "STYLES": [lambda request: static("core/erp.css") + "?v=12"],
-    "SCRIPTS": [lambda request: static("core/erp.js") + "?v=14"],
+    "STYLES": [lambda request: static("core/erp.css") + "?v=14"],
+    "SCRIPTS": [lambda request: static("core/erp.js") + "?v=15"],
     "SIDEBAR": {
         "show_search": True,
         "show_all_applications": True,

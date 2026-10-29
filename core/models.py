@@ -3,17 +3,17 @@ from pathlib import Path
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
-from django.core.validators import FileExtensionValidator
+from django.core.validators import FileExtensionValidator, MaxValueValidator, MinValueValidator
 from django.db import models
 from django.db.models.signals import post_delete
 from django.dispatch import receiver
 
-MAX_PHOTO_BYTES = 2 * 1024 * 1024  # 2 MB
-
-
 def validate_photo_size(file):
-    if file.size > MAX_PHOTO_BYTES:
-        raise ValidationError("The picture is too large. The maximum size is 2 MB.")
+    from . import sysconf
+
+    limit = sysconf.get("max_photo_mb")  # set on the System settings page
+    if file.size > limit * 1024 * 1024:
+        raise ValidationError(f"The picture is too large. The maximum size is {limit} MB.")
 
 
 PHOTO_VALIDATORS = [FileExtensionValidator(["jpg", "jpeg", "png", "webp"]), validate_photo_size]
@@ -122,7 +122,7 @@ class UserProfile(models.Model):
         upload_to=profile_photo_path,
         blank=True,
         validators=PHOTO_VALIDATORS,
-        help_text="Optional. JPG, PNG or WebP, up to 2 MB.",
+        help_text="Optional. JPG, PNG or WebP.",
     )
 
     def __str__(self):
@@ -137,16 +137,54 @@ def remove_photo_file(sender, instance, **kwargs):
 
 
 class SystemSettings(models.Model):
-    """The system-wide settings (only one row exists). For now: how dates and times are shown."""
+    """The system-wide settings (only one row exists). Edited on the System settings page."""
 
+    # Company profile
+    company_name = models.CharField(
+        "Company name", max_length=120, default="Real Estate ERP",
+        help_text="Shown in the sidebar and the browser tab.",
+    )
+    company_trn = models.CharField(
+        "Tax registration number (TRN)", max_length=30, blank=True,
+        help_text="Used later on invoices, receipts and agreements.",
+    )
+    company_phone = models.CharField("Phone", max_length=30, blank=True)
+    company_email = models.EmailField("Email", blank=True)
+    company_address = models.TextField("Address", blank=True)
+
+    # Date, time and time zone
     date_format = models.CharField(
-        "Date format",
-        max_length=12,
-        default="iso",
+        "Date format", max_length=12, default="iso",
         help_text="How dates are shown and typed everywhere in the system.",
     )
     time_format = models.CharField(
         "Time format", max_length=4, default="24h", help_text="24-hour or 12-hour clock."
+    )
+    timezone = models.CharField(
+        "Time zone", max_length=40, default="Asia/Dubai",
+        help_text="Times are shown in this time zone.",
+    )
+
+    # Documents and files
+    expiry_warning_days = models.PositiveSmallIntegerField(
+        "Warn before a document expires (days)", default=30,
+        validators=[MinValueValidator(1), MaxValueValidator(365)],
+        help_text="Documents expiring within this many days show a warning.",
+    )
+    max_photo_mb = models.PositiveSmallIntegerField(
+        "Largest photo / logo (MB)", default=2,
+        validators=[MinValueValidator(1), MaxValueValidator(10)],
+    )
+    max_document_mb = models.PositiveSmallIntegerField(
+        "Largest document file (MB)", default=10,
+        validators=[MinValueValidator(1), MaxValueValidator(50)],
+    )
+
+    # Notifications
+    toast_seconds = models.PositiveSmallIntegerField(
+        "Pop-up notification time (seconds)", default=5,
+        validators=[MinValueValidator(2), MaxValueValidator(30)],
+        help_text="How long success messages stay on screen. Warnings and errors stay twice as long.",
     )
     updated_at = models.DateTimeField(auto_now=True)
 

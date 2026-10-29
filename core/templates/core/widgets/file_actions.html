@@ -3,7 +3,7 @@
   {% if widget.is_initial %}
     {% if not widget.required %}<input type="checkbox" name="{{ widget.checkbox_name }}" id="{{ widget.checkbox_id }}" class="erp-file-clear" hidden>{% endif %}
     {% if widget.erp_preview and widget.erp_is_image %}
-      <div class="erp-file-preview"><img src="{{ widget.erp_url }}" alt=""></div>
+      <div class="erp-file-preview{% if widget.erp_round %} erp-file-round{% endif %}"><img src="{{ widget.erp_url }}" alt=""></div>
     {% endif %}
     <div class="erp-file-row">
       <span class="erp-file-name">{{ widget.erp_kind }}</span>
