@@ -1,5 +1,15 @@
 # Changelog
 
+## Update 12g - Fix
+- System settings page crashed with an error when there were no roles yet (Django 6 rejects an HTML snippet with no values). Fixed, and a test now covers a page with no roles.
+
+## Update 12f - Simple passwords
+- One password rule: at least 8 characters, 1 capital letter, 1 number, 1 special character
+- Add user and Change password forms no longer show the Enabled / Disabled choice
+
+## Update 12e - Administration tidy-up
+- Roles, Audit log and Data tools moved into System settings (three new tabs); their sidebar entries are gone. The full pages are one button away.
+
 ## Update 12d - Fixes
 - System settings: the Address box has the theme's normal border again (I had replaced it with a bare text box)
 - Users: the profile picture now has the same preview with View / Edit / Delete buttons as owners and tenants (round preview)

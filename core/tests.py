@@ -371,6 +371,20 @@ class SystemSettingsValues(TestCase):
         sysconf.refresh({"company_name": "Gulf Property Group"})
         self.assertEqual(str(settings.UNFOLD["SITE_HEADER"]), "Gulf Property Group")
 
+    def test_settings_page_opens_with_no_roles(self):
+        from django.contrib.auth import get_user_model
+        from django.contrib.auth.models import Group
+        from django.urls import reverse
+
+        Group.objects.all().delete()
+        admin_user = get_user_model().objects.create_superuser("boss7", "b7@example.com", "pw-12345-xyz")
+        self.client.force_login(admin_user)
+        response = self.client.get(reverse("admin:core_systemsettings_change", args=[1]))
+        self.assertEqual(response.status_code, 200)
+        html = response.content.decode()
+        self.assertIn("No roles yet.", html)
+        self.assertIn("Open the full audit log", html)
+
     def test_settings_page_has_every_setting(self):
         from django.contrib.auth import get_user_model
         from django.urls import reverse
@@ -427,3 +441,64 @@ class ThemedFormFields(TestCase):
         page = self.client.get(reverse("admin:auth_user_change", args=[user.pk]))
         self.assertEqual(page.status_code, 200)
         self.assertIn("data-erp-delete", page.content.decode())
+
+
+class SettingsHub(TestCase):
+    def test_roles_audit_and_data_tools_live_in_system_settings(self):
+        from django.conf import settings
+        from django.contrib.auth.models import Group
+        from django.urls import reverse
+
+        boss = User.objects.create_superuser("boss8", "b8@example.com", "pw-12345-xyz")
+        Group.objects.create(name="Clerks")
+        self.client.force_login(boss)
+        html = self.client.get(reverse("admin:core_systemsettings_change", args=[1]), follow=True).content.decode()
+        for text in ("Clerks", "Manage roles", "Open the full audit log", "Open Data tools"):
+            self.assertIn(text, html)
+        titles = [
+            item["title"]
+            for group in settings.UNFOLD["SIDEBAR"]["navigation"]
+            for item in group["items"]
+        ]
+        for gone in ("Roles (groups)", "Audit log", "Data tools"):
+            self.assertNotIn(gone, titles)
+        self.assertIn("System settings", titles)
+
+
+class PasswordRule(TestCase):
+    def test_rule(self):
+        from django.contrib.auth.password_validation import validate_password
+
+        for bad in ("Sh0rt!", "alllowercase1!", "NoNumber!!", "NoSpecial123", "Password"):
+            with self.assertRaises(ValidationError, msg=bad):
+                validate_password(bad)
+        validate_password("Good#Pass1")
+        validate_password("Abcdef1_")  # exactly 8 characters
+
+    def test_add_user_form_is_simple(self):
+        from django.urls import reverse
+
+        from .admin import SimpleUserCreationForm
+
+        form = SimpleUserCreationForm()
+        self.assertNotIn("usable_password", form.fields)
+        self.assertEqual(
+            [m for m in form.fields["password1"].help_text.replace("<ul>", "").replace("</ul>", "").split("<li>") if m.strip()],
+            ["Minimum 8 characters, with at least 1 capital letter, 1 number and 1 special character.</li>"],
+        )
+        data = {"username": "newbie", "password1": "Good#Pass1", "password2": "Good#Pass1"}
+        form = SimpleUserCreationForm(data)
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertTrue(form.save().has_usable_password())
+        weak = SimpleUserCreationForm({"username": "weak", "password1": "password1", "password2": "password1"})
+        self.assertFalse(weak.is_valid())
+
+        boss = User.objects.create_superuser("boss9", "b9@example.com", "Pw-12345-xyz")
+        self.client.force_login(boss)
+        page = self.client.get(reverse("admin:auth_user_add"))
+        self.assertEqual(page.status_code, 200)
+        self.assertNotIn("usable_password", page.content.decode())
+        user = User.objects.create_user("someone", password="Good#Pass1")
+        page = self.client.get(reverse("admin:auth_user_password_change", args=[user.pk]))
+        self.assertEqual(page.status_code, 200)
+        self.assertNotIn("usable_password", page.content.decode())

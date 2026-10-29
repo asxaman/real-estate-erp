@@ -197,6 +197,10 @@ Sidebar > **Tenancy** > **Tenants** (leases are the next step of this module):
 * **Export**: tick tenants, choose *Export selected tenants to Excel / CSV*. **Import**: the *Import* button at the top of the list.
 * Photos and documents are saved in the `media` folder: include it in your backups.
 
+## Passwords
+
+Every password must have at least 8 characters, 1 capital letter, 1 number and 1 special character (for example `Good#Pass1`). The rule is checked when a user is added and when a password is changed.
+
 ## System settings (superusers)
 
 Sidebar > Administration > **System settings**: every system-wide setting on one page, one tab per topic.
@@ -205,6 +209,10 @@ Sidebar > Administration > **System settings**: every system-wide setting on one
 * **Date and time** - date format (`2028-06-20`, `20-06-2028`, `20/06/2028`, `06/20/2028` or `20 Jun 2028`), 12-hour or 24-hour clock, and the time zone. A preview shows your saved choice. Saved data is not changed, only how it looks. ISO dates (`2028-06-20`) are always accepted when typing.
 * **Documents and files** - how many days before expiry a document shows a warning (default 30), and the largest photo (default 2 MB) and document (default 10 MB) that can be uploaded.
 * **Notifications** - how long success pop-ups stay on screen (warnings and errors stay twice as long).
+
+* **Roles** - the roles with their user and permission counts, and buttons to manage or add roles.
+* **Audit log** - the latest entries, with a button to open the full log.
+* **Data tools** - a button to the sample-data and erase tools.
 
 Changes apply to everyone straight away. Every change is written to the audit log.
 

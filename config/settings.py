@@ -130,11 +130,9 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # --------------------------------------------------------------------------
 # Authentication
 # --------------------------------------------------------------------------
+# One simple rule: 8+ characters with a capital letter, a number and a special character.
 AUTH_PASSWORD_VALIDATORS = [
-    {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
-    {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
-    {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
-    {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
+    {"NAME": "core.validators.ComplexPasswordValidator"},
 ]
 LOGIN_URL = "/admin/login/"
 LOGIN_REDIRECT_URL = "/admin/"
@@ -248,27 +246,9 @@ UNFOLD = {
                         "permission": _is_superuser,
                     },
                     {
-                        "title": "Roles (groups)",
-                        "icon": "badge",
-                        "link": reverse_lazy("admin:auth_group_changelist"),
-                        "permission": _is_superuser,
-                    },
-                    {
-                        "title": "Audit log",
-                        "icon": "history",
-                        "link": reverse_lazy("admin:core_auditentry_changelist"),
-                        "permission": _is_superuser,
-                    },
-                    {
                         "title": "System settings",
                         "icon": "settings",
                         "link": reverse_lazy("admin:core_systemsettings_changelist"),
-                        "permission": _is_superuser,
-                    },
-                    {
-                        "title": "Data tools",
-                        "icon": "database",
-                        "link": reverse_lazy("data_tools"),
                         "permission": _is_superuser,
                     },
                 ],
