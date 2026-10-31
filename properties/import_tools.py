@@ -50,6 +50,21 @@ def _number(text, field, integer=False):
     return value
 
 
+def _date(text, field):
+    """2024-05-31, 31/05/2024 or an Excel date (2024-05-31 00:00:00)."""
+    from datetime import datetime
+
+    if not text:
+        return None
+    word = text.strip()[:10] if re.match(r"\d{4}-\d{2}-\d{2}", text.strip()) else text.strip()
+    for pattern in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%d.%m.%Y"):
+        try:
+            return datetime.strptime(word, pattern).date()
+        except ValueError:
+            continue
+    raise RowError(f'{field} "{text}" is not a date. Use 2024-05-31 or 31/05/2024.')
+
+
 def _yes_no(text, field):
     if not text:
         return False
@@ -109,6 +124,7 @@ PROPERTY_HEADERS = [
     "Code", "Name", "Type", "Owner", "Emirate", "Address", "Map link", "Year built",
     "Total floors", "Apartment type", "Bathrooms", "Annual rent (AED)", "Status",
     "Fee type", "Fee percent", "Fee fixed (AED)", "Notes",
+    "Area / community", "Parking spaces", "Title deed no.", "Plot no.", "Makani no.", "Utility premise no.",
 ]
 _PROPERTY_ALIASES = {
     "code": "code", "property code": "code",
@@ -128,76 +144,119 @@ _PROPERTY_ALIASES = {
     "fee percent": "fee_percent", "fee": "fee_percent", "management fee": "fee_percent",
     "fee fixed aed": "fee_fixed", "fee fixed": "fee_fixed",
     "notes": "notes", "note": "notes",
+    "area community": "community", "community": "community", "area": "community",
+    "parking spaces": "parking_spaces", "parking": "parking_spaces",
+    "title deed no": "title_deed", "title deed": "title_deed", "title deed number": "title_deed",
+    "plot no": "plot", "plot": "plot", "plot number": "plot",
+    "makani no": "makani", "makani": "makani", "makani number": "makani",
+    "utility premise no": "premise", "premise no": "premise", "dewa premise no": "premise",
 }
 _PROPERTY_REQUIRED = [("Code", "*code"), ("Name", "*name"), ("Type", "*type")]
+_PROPERTY_REQUIRED_WHEN_UPDATING = [("Code", "*code")]
 
 
-def parse_property_file(upload):
-    """Returns (properties, errors). Nothing is saved; the caller saves when there are no errors."""
-    columns, body, errors = _load(upload, _PROPERTY_REQUIRED, _PROPERTY_ALIASES)
+def _property_values(get, row, owners, company, choices):
+    """Only the cells that are filled in, turned into field values (blank cells are left out)."""
+    values = {}
+    owner_name = get(row, "owner")
+    if owner_name:
+        if owner_name.lower() == company.name.lower():
+            values["owner"] = company
+        else:
+            owner = owners.get(owner_name.lower())
+            if owner is None:
+                raise RowError(
+                    f'Owner "{owner_name}" does not exist. Create the owner first (or leave blank for Company Owned).'
+                )
+            values["owner"] = owner
+    for key, attr, kind in (
+        ("name", "name", "text"), ("address", "address", "text"), ("map_link", "map_link", "text"),
+        ("notes", "notes", "text"), ("community", "community", "text"),
+        ("title_deed", "title_deed_number", "text"), ("plot", "plot_number", "text"),
+        ("makani", "makani_number", "text"), ("premise", "dewa_premise_number", "text"),
+    ):
+        if get(row, key):
+            values[attr] = get(row, key)
+    for key, attr, label in (
+        ("year_built", "year_built", "Year built"), ("total_floors", "total_floors", "Total floors"),
+        ("bathrooms", "bathrooms", "Bathrooms"), ("parking_spaces", "parking_spaces", "Parking spaces"),
+    ):
+        if get(row, key):
+            values[attr] = _number(get(row, key), label, integer=True)
+    if get(row, "annual_rent"):
+        values["annual_rent"] = _number(get(row, "annual_rent"), "Annual rent (AED)")
+    for key, attr, label, options in (
+        ("type", "property_type", "Type", choices["type"]),
+        ("emirate", "emirate", "Emirate", choices["emirate"]),
+        ("status", "status", "Status", choices["status"]),
+        ("apartment_type", "apartment_type", "Apartment type", choices["apartment"]),
+    ):
+        if get(row, key):
+            values[attr] = _pick(get(row, key), options, label)
+
+    fee_text = get(row, "fee_type").lower()
+    fee_percent = _number(get(row, "fee_percent"), "Fee percent")
+    fee_fixed = _number(get(row, "fee_fixed"), "Fee fixed (AED)")
+    if fee_text or fee_percent is not None or fee_fixed is not None:
+        if fee_text.startswith(("perc", "%")):
+            fee_type = Property.FeeType.PERCENT
+        elif fee_text.startswith("fix"):
+            fee_type = Property.FeeType.FIXED
+        elif fee_text:
+            raise RowError(f'Fee type "{get(row, "fee_type")}" is not valid. Use Percent or Fixed.')
+        elif fee_fixed:
+            fee_type = Property.FeeType.FIXED
+        elif fee_percent:
+            fee_type = Property.FeeType.PERCENT
+        else:
+            fee_type = ""
+        values["management_fee_type"] = fee_type
+        values["management_fee_percent"] = fee_percent if fee_percent is not None else 0
+        values["management_fee_fixed"] = fee_fixed
+    return values
+
+
+def parse_property_file(upload, update=False):
+    """
+    Returns (properties, errors). Nothing is saved; the caller saves when there are no errors.
+    With update=True a row whose Code already exists changes that property (blank cells are left alone).
+    """
+    required = _PROPERTY_REQUIRED_WHEN_UPDATING if update else _PROPERTY_REQUIRED
+    columns, body, errors = _load(upload, required, _PROPERTY_ALIASES)
     if errors:
         return [], errors
     get = _getter(columns)
     owners = {o.name.lower(): o for o in Owner.objects.all()}
     company = Owner.company()
-    type_choices = Property.PropertyType.choices
-    emirate_choices = Property.Emirate.choices
-    status_choices = Property.Status.choices
-    apartment_choices = Property._meta.get_field("apartment_type").choices
+    choices = {
+        "type": Property.PropertyType.choices,
+        "emirate": Property.Emirate.choices,
+        "status": Property.Status.choices,
+        "apartment": Property._meta.get_field("apartment_type").choices,
+    }
+    existing = {p.code.upper(): p for p in Property.objects.select_related("owner")} if update else {}
 
     result, seen = [], set()
     for line, row in body:
         try:
-            owner_name = get(row, "owner")
-            if not owner_name or owner_name.lower() == company.name.lower():
-                owner = company
+            code = get(row, "code").upper()
+            values = _property_values(get, row, owners, company, choices)
+            current = existing.get(code)
+            if current is not None:
+                prop = current
+                for attr, value in values.items():
+                    setattr(prop, attr, value)
             else:
-                owner = owners.get(owner_name.lower())
-                if owner is None:
-                    raise RowError(f'Owner "{owner_name}" does not exist. Create the owner first (or leave blank for Company Owned).')
-            ptype = _pick(get(row, "type"), type_choices, "Type")
-            if not ptype:
-                raise RowError("Type is required.")
-            has_units = ptype in Property.BUILDING_TYPES
-            status = _pick(get(row, "status"), status_choices, "Status")
-            if not has_units and not status:
-                status = Property.Status.VACANT
-
-            fee_text = get(row, "fee_type").lower()
-            fee_percent = _number(get(row, "fee_percent"), "Fee percent")
-            fee_fixed = _number(get(row, "fee_fixed"), "Fee fixed (AED)")
-            if fee_text.startswith(("perc", "%")):
-                fee_type = Property.FeeType.PERCENT
-            elif fee_text.startswith("fix"):
-                fee_type = Property.FeeType.FIXED
-            elif fee_text:
-                raise RowError(f'Fee type "{get(row, "fee_type")}" is not valid. Use Percent or Fixed.')
-            elif fee_fixed:
-                fee_type = Property.FeeType.FIXED
-            elif fee_percent:
-                fee_type = Property.FeeType.PERCENT
-            else:
-                fee_type = ""
-
-            prop = Property(
-                code=get(row, "code").upper(),
-                name=get(row, "name"),
-                property_type=ptype,
-                owner=owner,
-                emirate=_pick(get(row, "emirate"), emirate_choices, "Emirate") or Property.Emirate.ABU_DHABI,
-                address=get(row, "address"),
-                map_link=get(row, "map_link"),
-                year_built=_number(get(row, "year_built"), "Year built", integer=True),
-                total_floors=_number(get(row, "total_floors"), "Total floors", integer=True),
-                apartment_type=_pick(get(row, "apartment_type"), apartment_choices, "Apartment type"),
-                bathrooms=_number(get(row, "bathrooms"), "Bathrooms", integer=True),
-                annual_rent=_number(get(row, "annual_rent"), "Annual rent (AED)"),
-                status=status,
-                management_fee_type=fee_type,
-                management_fee_percent=fee_percent if fee_percent is not None else 0,
-                management_fee_fixed=fee_fixed,
-                notes=get(row, "notes"),
-            )
+                if not values.get("property_type"):
+                    raise RowError("Type is required.")
+                fields = dict(
+                    owner=company, emirate=Property.Emirate.ABU_DHABI, management_fee_type="",
+                    management_fee_percent=0,
+                )
+                fields.update(values)
+                prop = Property(code=code, **fields)
+                if not prop.has_units and not prop.status:
+                    prop.status = Property.Status.VACANT
             prop.full_clean(exclude=["created_at"])
             if prop.code in seen:
                 raise RowError(f'Code "{prop.code}" appears twice in the file.')
@@ -212,6 +271,7 @@ def parse_property_file(upload):
 UNIT_HEADERS = [
     "Property code", "Unit number", "Floor", "Type", "Bathrooms", "Area (sq ft)",
     "Furnished", "Status", "Asking rent (AED / year)", "Notes",
+    "Parking spaces", "View", "Utility account no.",
 ]
 _UNIT_ALIASES = {
     "property code": "property", "property": "property", "code": "property", "building": "property",
@@ -224,18 +284,26 @@ _UNIT_ALIASES = {
     "status": "status",
     "asking rent aed year": "rent", "asking rent": "rent", "rent": "rent",
     "notes": "notes", "note": "notes",
+    "parking spaces": "parking_spaces", "parking": "parking_spaces",
+    "view": "view",
+    "utility account no": "account", "dewa account no": "account", "account no": "account",
 }
 _UNIT_REQUIRED = [("Property code", "*property"), ("Unit number", "*number"), ("Type", "*type")]
+_UNIT_REQUIRED_WHEN_UPDATING = [("Property code", "*property"), ("Unit number", "*number")]
 
 
-def parse_unit_file(upload):
-    columns, body, errors = _load(upload, _UNIT_REQUIRED, _UNIT_ALIASES)
+def parse_unit_file(upload, update=False):
+    """Like parse_property_file: with update=True a row for an existing unit changes only what it fills in."""
+    required = _UNIT_REQUIRED_WHEN_UPDATING if update else _UNIT_REQUIRED
+    columns, body, errors = _load(upload, required, _UNIT_ALIASES)
     if errors:
         return [], errors
     get = _getter(columns)
     properties = {p.code.upper(): p for p in Property.objects.all()}
     type_choices = Unit.UnitType.choices
     status_choices = Unit.Status.choices
+    view_choices = Unit.View.choices
+    existing = {(u.property_id, u.unit_number): u for u in Unit.objects.select_related("property")} if update else {}
 
     result, seen = [], set()
     for line, row in body:
@@ -244,21 +312,42 @@ def parse_unit_file(upload):
             prop = properties.get(code)
             if prop is None:
                 raise RowError(f'Property code "{get(row, "property")}" does not exist.')
-            unit_type = _pick(get(row, "type"), type_choices, "Type")
-            if not unit_type:
-                raise RowError("Type is required.")
-            unit = Unit(
-                property=prop,
-                unit_number=normalise_unit_number(get(row, "number")),
-                floor=get(row, "floor").upper(),
-                unit_type=unit_type,
-                bathrooms=_number(get(row, "bathrooms"), "Bathrooms", integer=True),
-                area_sqft=_number(get(row, "area"), "Area (sq ft)"),
-                furnished=_yes_no(get(row, "furnished"), "Furnished"),
-                status=_pick(get(row, "status"), status_choices, "Status") or Unit.Status.VACANT,
-                asking_rent=_number(get(row, "rent"), "Asking rent"),
-                notes=get(row, "notes"),
-            )
+            number = normalise_unit_number(get(row, "number"))
+            values = {}
+            if get(row, "floor"):
+                values["floor"] = get(row, "floor").upper()
+            if get(row, "type"):
+                values["unit_type"] = _pick(get(row, "type"), type_choices, "Type")
+            if get(row, "bathrooms"):
+                values["bathrooms"] = _number(get(row, "bathrooms"), "Bathrooms", integer=True)
+            if get(row, "area"):
+                values["area_sqft"] = _number(get(row, "area"), "Area (sq ft)")
+            if get(row, "furnished"):
+                values["furnished"] = _yes_no(get(row, "furnished"), "Furnished")
+            if get(row, "status"):
+                values["status"] = _pick(get(row, "status"), status_choices, "Status")
+            if get(row, "rent"):
+                values["asking_rent"] = _number(get(row, "rent"), "Asking rent")
+            if get(row, "notes"):
+                values["notes"] = get(row, "notes")
+            if get(row, "parking_spaces"):
+                values["parking_spaces"] = _number(get(row, "parking_spaces"), "Parking spaces", integer=True)
+            if get(row, "view"):
+                values["view"] = _pick(get(row, "view"), view_choices, "View")
+            if get(row, "account"):
+                values["dewa_account_number"] = get(row, "account")
+
+            current = existing.get((prop.pk, number))
+            if current is not None:
+                unit = current
+                for attr, value in values.items():
+                    setattr(unit, attr, value)
+            else:
+                if not values.get("unit_type"):
+                    raise RowError("Type is required.")
+                fields = dict(floor="", furnished=False, status=Unit.Status.VACANT)
+                fields.update(values)
+                unit = Unit(property=prop, unit_number=number, **fields)
             unit.full_clean(exclude=["floor_sort", "created_at"])
             key = (prop.pk, unit.unit_number)
             if key in seen:
@@ -301,7 +390,7 @@ def property_template_response():
     return _template(
         "Properties", PROPERTY_HEADERS,
         ["RMT", "Rimal Tower", "Residential Building", "", "Abu Dhabi", "Corniche Road", "", 2015, 12,
-         "", "", "", "", "", "", "", ""],
+         "", "", "", "", "", "", "", "", "", "", "", "", "", ""],
         "properties-import-template.xlsx",
         [
             ("Type", [label for _, label in Property.PropertyType.choices]),
@@ -316,7 +405,7 @@ def property_template_response():
 def unit_template_response():
     return _template(
         "Units", UNIT_HEADERS,
-        ["RMT", "101", "1", "2BHK", 3, 1200, "No", "Vacant", 95000, ""],
+        ["RMT", "101", "1", "2BHK", 3, 1200, "No", "Vacant", 95000, "", 1, "Sea", ""],
         "units-import-template.xlsx",
         [
             ("Type", [label for _, label in Unit.UnitType.choices]),

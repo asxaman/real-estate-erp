@@ -14,7 +14,7 @@ EXPORT_HEADERS = [
     "Code", "Name", "Type", "Active", "Email", "Phone", "Address",
     "Active properties", "Units", "Documents", "Notes",
 ]
-IMPORT_HEADERS = ["Name", "Type", "Email", "Phone", "Address", "Notes"]
+IMPORT_HEADERS = ["Name", "Type", "Email", "Phone", "Address", "Notes", "TRN"]
 MAX_IMPORT_ROWS = 1000
 
 _ALIASES = {
@@ -24,6 +24,7 @@ _ALIASES = {
     "phone": "phone", "mobile": "phone", "telephone": "phone",
     "address": "address",
     "notes": "notes", "note": "notes",
+    "trn": "trn", "tax registration number": "trn",
 }
 
 
@@ -110,10 +111,10 @@ def template_response():
     sheet.append(IMPORT_HEADERS)
     for cell in sheet[1]:
         cell.font = Font(bold=True)
-    sheet.append(["Example Owner LLC", "Company", "owner@example.com", "+971 50 123 4567", "Abu Dhabi", ""])
+    sheet.append(["Example Owner LLC", "Company", "owner@example.com", "+971 50 123 4567", "Abu Dhabi", "", ""])
     for row in range(2, 1002):  # Phone column as Text, so Excel keeps a leading 0 or +
         sheet.cell(row=row, column=4).number_format = "@"
-    for column, width in zip("ABCDEF", [30, 12, 28, 18, 34, 36]):
+    for column, width in zip("ABCDEFG", [30, 12, 28, 18, 34, 36, 18]):
         sheet.column_dimensions[column].width = width
     response = HttpResponse(
         content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -150,10 +151,12 @@ def _read_rows(upload):
     raise ValueError("Please upload an Excel (.xlsx) or CSV (.csv) file.")
 
 
-def parse_owner_file(upload):
+def parse_owner_file(upload, update=False):
     """
     Read the file and check every row. Returns (owners, errors).
     Nothing is saved here; the caller saves only when `errors` is empty.
+    With update=True a row whose Name matches an existing owner changes that owner
+    (blank cells are left alone).
     """
     try:
         rows = _read_rows(upload)
@@ -180,6 +183,7 @@ def parse_owner_file(upload):
         index = columns.get(key)
         return row[index].strip() if index is not None and index < len(row) else ""
 
+    existing = {" ".join(o.name.split()).lower(): o for o in Owner.objects.all()} if update else {}
     owners, errors, seen = [], [], set()
     for line, row in body:
         problem = lost_zero_problem(get(row, "phone"))
@@ -188,16 +192,31 @@ def parse_owner_file(upload):
             continue
         raw_type = get(row, "type").lower()
         if raw_type in ("", "individual", "person"):
-            owner_type = Owner.OwnerType.INDIVIDUAL
+            owner_type = Owner.OwnerType.INDIVIDUAL if raw_type else None
         elif raw_type in ("company", "corporate", "business"):
             owner_type = Owner.OwnerType.COMPANY
         else:
             errors.append(f'Row {line}: type "{get(row, "type")}" is not valid. Use Individual or Company.')
             continue
-        owner = Owner(
-            name=get(row, "name"), owner_type=owner_type, email=get(row, "email"),
-            phone=get(row, "phone"), address=get(row, "address"), notes=get(row, "notes"),
-        )
+        values = {
+            attr: get(row, key)
+            for key, attr in (("email", "email"), ("phone", "phone"), ("address", "address"),
+                              ("notes", "notes"), ("trn", "trn"))
+            if get(row, key)
+        }
+        if owner_type:
+            values["owner_type"] = owner_type
+        current = existing.get(" ".join(get(row, "name").split()).lower())
+        if current is not None:
+            if current.is_company:
+                errors.append(f'Row {line}: "{current.name}" is the built-in owner and cannot be changed by an import.')
+                continue
+            owner = current
+            for attr, value in values.items():
+                setattr(owner, attr, value)
+        else:
+            values.setdefault("owner_type", Owner.OwnerType.INDIVIDUAL)
+            owner = Owner(name=get(row, "name"), **values)
         try:
             owner.full_clean(exclude=["user", "photo"])
         except Exception as exc:  # ValidationError

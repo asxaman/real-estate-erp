@@ -13,7 +13,7 @@ from core import sysconf
 from core.admin_utils import TooltipHelpMixin, badge, circle_avatar, format_amount
 from core.widgets import use_file_widget
 
-from . import export_tools, import_tools
+from . import bulk, export_tools, import_tools
 from .import_admin import ImportMixin
 from .models import (
     Owner,
@@ -221,19 +221,27 @@ class PropertyAdminForm(forms.ModelForm):
 @admin.register(Property)
 class PropertyAdmin(ImportMixin, TooltipHelpMixin, ModelAdmin):
     form = PropertyAdminForm
-    actions = ["export_excel", "export_csv"]
+    make_active, make_inactive = bulk.make_actions("properties")
+    actions = ["export_excel", "export_csv", "make_active", "make_inactive", "change_owner"]
+
+    @admin.action(description="Change owner of selected properties", permissions=["change"])
+    def change_owner(self, request, queryset):
+        return bulk.change_owner(self, request, queryset)
     actions_list = ["import_button"]
     import_noun = "properties"
+    import_update_hint = "an existing property is found by its Code"
     import_headers = import_tools.PROPERTY_HEADERS
     import_notes = [
         "Required: Code, Name, Type.",
         "Owner is the exact owner name (blank = Company Owned).",
         "Fee type (Percent or Fixed) and the fee are needed for properties with another owner.",
         "See the \"Allowed values\" sheet in the template for Type, Emirate and Status.",
+        "Optional columns: Area / community, Parking spaces, Title deed no., Plot no., Makani no. (10 digits), Utility premise no.",
+        "To change existing properties, tick \"Update existing records\": only Code is needed, plus the columns you want to change.",
     ]
 
-    def import_parse(self, upload):
-        return import_tools.parse_property_file(upload)
+    def import_parse(self, upload, update=False):
+        return import_tools.parse_property_file(upload, update=update)
 
     def import_template(self):
         return import_tools.property_template_response()
@@ -465,15 +473,18 @@ class UnitAdmin(ImportMixin, TooltipHelpMixin, ModelAdmin):
     actions = ["export_excel", "export_csv"]
     actions_list = ["import_button"]
     import_noun = "units"
+    import_update_hint = "an existing unit is found by its Property code and Unit number"
     import_headers = import_tools.UNIT_HEADERS
     import_notes = [
         "Required: Property code, Unit number, Type. The property must already exist and be a building.",
         "Type must fit the building (residential: Studio, 1BHK-5BHK; commercial: Office, Shop).",
         "See the \"Allowed values\" sheet in the template.",
+        "Optional columns: Parking spaces, View (Sea, City, Garden ...), Utility account no.",
+        "To change existing units, tick \"Update existing records\": only Property code and Unit number are needed, plus the columns you want to change.",
     ]
 
-    def import_parse(self, upload):
-        return import_tools.parse_unit_file(upload)
+    def import_parse(self, upload, update=False):
+        return import_tools.parse_unit_file(upload, update=update)
 
     def import_template(self):
         return import_tools.unit_template_response()

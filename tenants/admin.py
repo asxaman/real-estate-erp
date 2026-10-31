@@ -15,6 +15,7 @@ from core import sysconf
 from core.formats import fmt_date
 from core.models import AuditEntry
 from core.widgets import use_file_widget
+from properties import bulk
 from properties.import_admin import ImportMixin
 from properties.owner_admin import (
     ActivityInline,
@@ -122,7 +123,8 @@ class TenantAdmin(ImportMixin, TooltipHelpMixin, ModelAdmin):
         "trade_licence_number", "trn", "contacts__name", "contacts__email", "contacts__mobile", "documents__number",
     )
     inlines = [TenantContactInline, TenantDocumentInline, TenantActivityInline]
-    actions = ["export_excel", "export_csv"]
+    make_active, make_inactive = bulk.make_actions("tenants")
+    actions = ["export_excel", "export_csv", "make_active", "make_inactive"]
     actions_list = ["import_button"]
 
     _header = (None, {"fields": ("summary_header",)})
@@ -297,16 +299,19 @@ class TenantAdmin(ImportMixin, TooltipHelpMixin, ModelAdmin):
         return tenant_tools.csv_response(queryset)
 
     import_noun = "tenants"
+    import_update_hint = "an existing tenant is found by its Email"
     import_headers = tenant_tools.IMPORT_HEADERS
     import_notes = [
         "Required: Name, Nationality, Email and Phone. Type is Individual or Company (blank = Individual).",
         "Nationality: a country name such as Egypt or United Kingdom (a nationality such as Egyptian also works).",
         "A tenant who already exists (same email, or same name and phone) is refused, so importing a file twice does no harm.",
         "Phone numbers: keep the leading + or 0 (the template's Phone column is already set to Text).",
+        "Optional columns: Emirates ID, Passport, Date of birth (2024-05-31 or 31/05/2024), Trade licence, Authorised signatory, TRN.",
+        "To change existing tenants, tick \"Update existing records\": only Email is needed, plus the columns you want to change.",
     ]
 
-    def import_parse(self, upload):
-        return tenant_tools.parse_tenant_file(upload)
+    def import_parse(self, upload, update=False):
+        return tenant_tools.parse_tenant_file(upload, update=update)
 
     def import_template(self):
         return tenant_tools.template_response()

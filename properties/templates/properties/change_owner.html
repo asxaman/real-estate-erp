@@ -1,0 +1,81 @@
+{% extends "admin/base_site.html" %}
+
+{% block content %}
+<div style="max-width: 820px; display: grid; gap: 20px;">
+
+  {% if errors %}
+  <div style="border: 1px solid #dc2626; border-radius: 12px; padding: 20px 24px;">
+    <h2 style="font-size: 16px; font-weight: 600; margin: 0 0 8px; color: #dc2626;">Nothing was changed - please fix these first</h2>
+    <ul style="margin: 0 0 0 18px; line-height: 1.7;">{% for e in errors %}<li>{{ e }}</li>{% endfor %}</ul>
+  </div>
+  {% endif %}
+
+  <div class="erp-panel">
+    <h2 style="font-size: 18px; font-weight: 600; margin: 0 0 6px;">Change owner</h2>
+    <p style="margin: 0 0 14px; opacity: .85;">
+      {{ properties|length }} propert{{ properties|length|pluralize:"y,ies" }} selected. They are all moved to the owner you choose,
+      or none are moved if any of them breaks a rule.
+    </p>
+    <div class="erp-filterbar" style="margin-bottom: 18px;">
+      {% for p in properties %}<span class="erp-chip">{{ p.code }} &middot; {{ p.name }} <small style="opacity:.7;">(now {{ p.owner.name }})</small></span>{% endfor %}
+    </div>
+
+    <form method="post" style="display: grid; gap: 16px;">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="change_owner">
+      <input type="hidden" name="index" value="0">
+      <input type="hidden" name="select_across" value="0">
+      <input type="hidden" name="apply" value="1">
+      {% for pk in selected %}<input type="hidden" name="_selected_action" value="{{ pk }}">{% endfor %}
+
+      <label style="display: grid; gap: 6px;">
+        <span><strong>New owner</strong> (active owners only)</span>
+        <select name="owner" id="erp-new-owner" class="erp-search" style="max-width: 360px;" required>
+          <option value="">Choose an owner...</option>
+          {% for o in owners %}
+          <option value="{{ o.pk }}" data-company="{% if o.is_company %}1{% endif %}"{% if form.owner == o.pk|stringformat:"s" %} selected{% endif %}>{{ o.name }}{% if o.is_company %} (the company){% endif %}</option>
+          {% endfor %}
+        </select>
+      </label>
+
+      <div id="erp-fee-box" style="display: none; gap: 12px; border: 1px dashed rgba(128,128,128,.5); border-radius: 10px; padding: 14px 16px;">
+        <div style="opacity:.85;">Management fee for the new owner. Leave all blank to keep each property's current fee
+          (a property that has none cannot be moved until a fee is given).</div>
+        <div class="erp-filterbar">
+          <select name="fee_type" id="erp-fee-type" class="erp-search">
+            <option value="">Keep current fee</option>
+            {% for value, label in fee_types %}<option value="{{ value }}"{% if form.fee_type == value %} selected{% endif %}>{{ label }}</option>{% endfor %}
+          </select>
+          <input class="erp-search" type="number" step="0.01" min="0" max="100" name="fee_percent" id="erp-fee-percent" placeholder="Percent, e.g. 5" value="{{ form.fee_percent }}">
+          <input class="erp-search" type="number" step="0.01" min="0" name="fee_fixed" id="erp-fee-fixed" placeholder="AED per year, e.g. 6000" value="{{ form.fee_fixed }}">
+        </div>
+      </div>
+
+      <div class="erp-filterbar">
+        <button type="submit" class="erp-btn">Move properties</button>
+        <a class="erp-btn erp-btn-light" href="{{ back_url }}">Cancel</a>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+  (function () {
+    var owner = document.getElementById("erp-new-owner");
+    var box = document.getElementById("erp-fee-box");
+    var type = document.getElementById("erp-fee-type");
+    var percent = document.getElementById("erp-fee-percent");
+    var fixed = document.getElementById("erp-fee-fixed");
+    function refresh() {
+      var option = owner.options[owner.selectedIndex];
+      var showFee = option && option.value && !option.getAttribute("data-company");
+      box.style.display = showFee ? "grid" : "none";
+      percent.style.display = type.value === "percent" ? "" : "none";
+      fixed.style.display = type.value === "fixed" ? "" : "none";
+    }
+    owner.addEventListener("change", refresh);
+    type.addEventListener("change", refresh);
+    refresh();
+  })();
+</script>
+{% endblock %}

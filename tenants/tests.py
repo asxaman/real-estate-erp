@@ -395,3 +395,59 @@ class WhatsAppButton(TestCase):
         html = str(whatsapp_link("050 123 4567"))
         self.assertIn('href="https://wa.me/971501234567"', html)
         self.assertIn("<svg", html)
+
+
+class TenantUpdateImportAndBulk(TestCase):
+    def _file(self, text):
+        return SimpleUploadedFile("t.csv", text.encode("utf-8"))
+
+    def setUp(self):
+        self.tenant = _tenant()
+        self.tenant.full_clean(exclude=["photo", "code"])
+        self.tenant.save()
+
+    def test_existing_email_is_refused_without_the_tick(self):
+        _, errors = tenant_tools.parse_tenant_file(self._file(
+            "Name,Nationality,Email,Phone\nAlpha Two,India,alpha@example.com,+971 50 999 8888\n"
+        ))
+        self.assertEqual(len(errors), 1)
+
+    def test_update_by_email_changes_only_filled_cells(self):
+        tenants, errors = tenant_tools.parse_tenant_file(self._file(
+            "Email,Passport,Date of birth,TRN,Name\nALPHA@example.com,B999,31/05/1990,100 2003 0040 0003,\n"
+        ), update=True)
+        self.assertEqual(errors, [])
+        tenants[0].save()
+        self.tenant.refresh_from_db()
+        self.assertEqual(self.tenant.passport_number, "B999")
+        self.assertEqual(self.tenant.date_of_birth.isoformat(), "1990-05-31")
+        self.assertEqual(self.tenant.trn, "100200300400003")
+        self.assertEqual((self.tenant.name, self.tenant.nationality, self.tenant.phone), ("Alpha", "India", "+971 50 123 4567"))
+        self.assertEqual(Tenant.objects.count(), 1)
+
+    def test_update_can_add_new_tenants_and_bad_dates_are_reported(self):
+        tenants, errors = tenant_tools.parse_tenant_file(self._file(
+            "Name,Nationality,Email,Phone,Date of birth\n"
+            "Newcomer,Egypt,new@example.com,+971 50 777 6666,1991-02-03\n"
+            "Wrong,Egypt,wrong@example.com,+971 50 777 5555,32/13/1990\n"
+        ), update=True)
+        self.assertEqual(len(tenants), 1)
+        self.assertEqual(len(errors), 1)
+        self.assertIn("is not a date", errors[0])
+
+    def test_bulk_active_and_inactive(self):
+        admin_user = get_user_model().objects.create_superuser("boss14", "b14@example.com", "pw-12345-xyz")
+        self.client.force_login(admin_user)
+        url = reverse("admin:tenants_tenant_changelist")
+        data = {"action": "make_inactive", "index": 0, "_selected_action": [self.tenant.pk]}
+        self.assertEqual(self.client.post(url, data).status_code, 302)
+        self.tenant.refresh_from_db()
+        self.assertFalse(self.tenant.is_active)
+        data["action"] = "make_active"
+        self.client.post(url, data)
+        self.tenant.refresh_from_db()
+        self.assertTrue(self.tenant.is_active)
+
+    def test_template_has_the_new_columns(self):
+        self.assertIn("Emirates ID", tenant_tools.IMPORT_HEADERS)
+        self.assertEqual(len(tenant_tools.IMPORT_HEADERS), 13)

@@ -7,7 +7,7 @@ from django.http import HttpResponse
 
 from core import countries
 from core.exports import safe_cell
-from properties.import_tools import RowError, _describe, _getter, _load, _pick
+from properties.import_tools import RowError, _date, _describe, _getter, _load, _pick
 from properties.models_constants import lost_zero_problem
 
 from .models import Tenant, same_person
@@ -17,8 +17,12 @@ EXPORT_HEADERS = [
     "Emirates ID", "Passport", "Date of birth", "Trade licence", "Authorised signatory", "TRN",
     "Documents", "Notes",
 ]
-IMPORT_HEADERS = ["Name", "Type", "Nationality", "Email", "Phone", "Address", "Notes"]
+IMPORT_HEADERS = [
+    "Name", "Type", "Nationality", "Email", "Phone", "Address", "Notes",
+    "Emirates ID", "Passport", "Date of birth", "Trade licence", "Authorised signatory", "TRN",
+]
 _REQUIRED = [("Name", "*name"), ("Nationality", "*nationality"), ("Email", "*email"), ("Phone", "*phone")]
+_REQUIRED_WHEN_UPDATING = [("Email", "*email")]
 _ALIASES = {
     "name": "name", "tenant name": "name",
     "type": "type", "tenant type": "type",
@@ -27,6 +31,12 @@ _ALIASES = {
     "phone": "phone", "mobile": "phone", "telephone": "phone",
     "address": "address",
     "notes": "notes", "note": "notes",
+    "emirates id": "eid", "emirates id no": "eid", "emirates id number": "eid",
+    "passport": "passport", "passport no": "passport", "passport number": "passport",
+    "date of birth": "dob", "birth date": "dob", "dob": "dob",
+    "trade licence": "licence", "trade license": "licence", "trade licence no": "licence",
+    "authorised signatory": "signatory", "authorized signatory": "signatory", "signatory": "signatory",
+    "trn": "trn", "tax registration number": "trn",
 }
 _XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
@@ -97,12 +107,13 @@ def template_response():
     sheet = workbook.active
     sheet.title = "Tenants"
     sheet.append(IMPORT_HEADERS)
-    sheet.append(["Example Tenant", "Individual", "Egypt", "tenant@example.com", "+971 50 123 4567", "Abu Dhabi", ""])
+    sheet.append(["Example Tenant", "Individual", "Egypt", "tenant@example.com", "+971 50 123 4567", "Abu Dhabi", "",
+                  "784-1990-1234567-1", "A1234567", "1990-05-31", "", "", ""])
     for row in range(2, 1002):  # Phone column as Text, so Excel keeps a leading 0 or +
         sheet.cell(row=row, column=5).number_format = "@"
     for cell in sheet[1]:
         cell.font = Font(bold=True)
-    for column, width in zip("ABCDEFG", [30, 12, 16, 28, 18, 34, 36]):
+    for column, width in zip("ABCDEFGHIJKLM", [30, 12, 16, 28, 18, 34, 36, 22, 14, 14, 16, 22, 18]):
         sheet.column_dimensions[column].width = width
     response = HttpResponse(content_type=_XLSX)
     response["Content-Disposition"] = 'attachment; filename="tenants-import-template.xlsx"'
@@ -122,28 +133,47 @@ def _country(text):
     return country
 
 
-def parse_tenant_file(upload):
-    """Returns (tenants, errors). Nothing is saved; the caller saves when there are no errors."""
-    columns, body, errors = _load(upload, _REQUIRED, _ALIASES)
+def parse_tenant_file(upload, update=False):
+    """
+    Returns (tenants, errors). Nothing is saved; the caller saves when there are no errors.
+    With update=True a row whose Email matches an existing tenant changes that tenant
+    (blank cells are left alone).
+    """
+    columns, body, errors = _load(upload, _REQUIRED_WHEN_UPDATING if update else _REQUIRED, _ALIASES)
     if errors:
         return [], errors
     get = _getter(columns)
     types = Tenant.TenantType.choices
+    existing = {t.email.lower(): t for t in Tenant.objects.all() if t.email} if update else {}
     result, seen = [], []
     for line, row in body:
         try:
             problem = lost_zero_problem(get(row, "phone"))
             if problem:
                 raise RowError(f'Phone "{get(row, "phone")}" {problem}')
-            tenant = Tenant(
-                name=get(row, "name"),
-                tenant_type=_pick(get(row, "type"), types, "Type") or Tenant.TenantType.INDIVIDUAL,
-                nationality=_country(get(row, "nationality")),
-                email=get(row, "email"),
-                phone=get(row, "phone"),
-                address=get(row, "address"),
-                notes=get(row, "notes"),
-            )
+            values = {}
+            for key, attr in (("name", "name"), ("email", "email"), ("phone", "phone"), ("address", "address"),
+                              ("notes", "notes"), ("eid", "emirates_id_number"), ("passport", "passport_number"),
+                              ("licence", "trade_licence_number"), ("signatory", "authorised_signatory"),
+                              ("trn", "trn")):
+                if get(row, key):
+                    values[attr] = get(row, key)
+            if get(row, "type"):
+                values["tenant_type"] = _pick(get(row, "type"), types, "Type")
+            if get(row, "nationality"):
+                values["nationality"] = _country(get(row, "nationality"))
+            if get(row, "dob"):
+                values["date_of_birth"] = _date(get(row, "dob"), "Date of birth")
+
+            current = existing.get(get(row, "email").lower())
+            if current is not None:
+                tenant = current
+                for attr, value in values.items():
+                    setattr(tenant, attr, value)
+            else:
+                values.setdefault("tenant_type", Tenant.TenantType.INDIVIDUAL)
+                values.setdefault("nationality", "")
+                tenant = Tenant(**values)
             tenant.full_clean(exclude=["photo", "code"])
             person = (tenant.name, tenant.email, tenant.phone)
             if any(same_person(person, earlier) for earlier in seen):

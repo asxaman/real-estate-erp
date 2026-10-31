@@ -913,3 +913,201 @@ class PropertyAndUnitPages(TestCase):
         UnitPhoto.objects.create(unit=self.unit, image="unit_photos/x.jpg")
         self.unit.delete()
         self.assertEqual((UnitDocument.objects.count(), UnitPhoto.objects.count()), (0, 0))
+
+
+class UpdateExistingImport(TestCase):
+    def _file(self, text, name="data.csv"):
+        return SimpleUploadedFile(name, text.encode("utf-8"))
+
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+
+        self.admin = get_user_model().objects.create_superuser("boss12", "b12@example.com", "pw-12345-xyz")
+        self.client.force_login(self.admin)
+        self.owner = Owner.objects.create(name="Alpha", phone="+971 50 111 2222")
+        self.prop = Property.objects.create(
+            name="Tower", code="TWR", property_type=T.RESIDENTIAL_BUILDING, owner=Owner.company(),
+            emirate="dubai", address="Old road",
+        )
+        self.unit = Unit.objects.create(
+            property=self.prop, unit_number="101", floor="1", unit_type="studio", status="occupied", asking_rent=90000,
+        )
+
+    def test_without_the_tick_an_existing_property_is_refused(self):
+        _, errors = import_tools.parse_property_file(self._file("Code,Name,Type\nTWR,Tower,Residential Building\n"))
+        self.assertEqual(len(errors), 1)
+
+    def test_property_update_changes_only_filled_cells(self):
+        props, errors = import_tools.parse_property_file(
+            self._file("Code,Address,Makani no.,Name\nTWR,New road,1234567890,\n"), update=True
+        )
+        self.assertEqual(errors, [])
+        self.assertEqual(len(props), 1)
+        self.assertEqual(props[0].pk, self.prop.pk)
+        props[0].save()
+        self.prop.refresh_from_db()
+        self.assertEqual((self.prop.address, self.prop.makani_number), ("New road", "1234567890"))
+        self.assertEqual((self.prop.name, self.prop.emirate), ("Tower", "dubai"))  # untouched
+
+    def test_update_can_still_create_new_properties(self):
+        props, errors = import_tools.parse_property_file(self._file(
+            "Code,Name,Type,Community\nTWR,,,Marina\nNEW1,New one,Residential Building,JVC\n"
+        ), update=True)
+        self.assertEqual(errors, [])
+        self.assertEqual([bool(p.pk) for p in props], [True, False])
+        self.assertEqual(props[1].community, "JVC")
+
+    def test_new_row_still_needs_a_type_when_updating(self):
+        _, errors = import_tools.parse_property_file(self._file("Code,Name\nNEW2,Nameless type\n"), update=True)
+        self.assertEqual(len(errors), 1)
+        self.assertIn("Type is required", errors[0])
+
+    def test_unit_update(self):
+        units, errors = import_tools.parse_unit_file(self._file(
+            "Property code,Unit number,Asking rent,View,Parking spaces\nTWR, 101 ,95000,Sea,2\n"
+        ), update=True)
+        self.assertEqual(errors, [])
+        units[0].save()
+        self.unit.refresh_from_db()
+        self.assertEqual((self.unit.asking_rent, self.unit.view, self.unit.parking_spaces), (95000, "sea", 2))
+        self.assertEqual(self.unit.status, "occupied")  # not in the file, so unchanged
+        self.assertEqual(Unit.objects.count(), 1)
+
+    def test_owner_update(self):
+        owners, errors = owner_tools.parse_owner_file(
+            self._file("Name,Email,TRN\n alpha ,a@example.com,100-2003-0040-0003\n"), update=True
+        )
+        self.assertEqual(errors, [])
+        owners[0].save()
+        self.owner.refresh_from_db()
+        self.assertEqual((self.owner.email, self.owner.trn, self.owner.phone), ("a@example.com", "100200300400003", "+971 50 111 2222"))
+        _, errors = owner_tools.parse_owner_file(self._file("Name,Email\nCompany Owned,x@example.com\n"), update=True)
+        self.assertEqual(len(errors), 1)
+
+    def test_import_page_has_the_tick_and_reports_counts(self):
+        from django.contrib.messages import get_messages
+        from django.urls import reverse
+
+        url = reverse("admin:properties_property_import")
+        page = self.client.get(url).content.decode()
+        self.assertIn("Update existing records", page)
+        response = self.client.post(url, {
+            "file": self._file("Code,Address\nTWR,Second road\n"), "update_existing": "on",
+        })
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("Imported 0 new and updated 1 properties.", [str(m) for m in get_messages(response.wsgi_request)])
+        self.prop.refresh_from_db()
+        self.assertEqual(self.prop.address, "Second road")
+
+    def test_error_report_data_is_on_the_page(self):
+        from django.urls import reverse
+
+        response = self.client.post(reverse("admin:properties_property_import"), {
+            "file": self._file("Code,Name,Type\nBAD!,One,Villa\n"),
+        })
+        html = response.content.decode()
+        self.assertIn("Download error report", html)
+        self.assertIn('id="erp-import-errors"', html)
+
+
+class BulkActions(TestCase):
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+
+        self.admin = get_user_model().objects.create_superuser("boss13", "b13@example.com", "pw-12345-xyz")
+        self.client.force_login(self.admin)
+
+    def run_action(self, model, action, pks, **extra):
+        from django.urls import reverse
+
+        data = {"action": action, "index": 0, "_selected_action": pks, **extra}
+        return self.client.post(reverse(f"admin:properties_{model}_changelist"), data)
+
+    def test_owners_activate_and_deactivate_with_rules(self):
+        busy = make_owner("Busy")
+        Property.objects.create(
+            name="P", code="BSY", property_type=T.VILLA, owner=busy, emirate="dubai", status="vacant",
+            management_fee_type="percent", management_fee_percent=5,
+        )
+        free = make_owner("Free")
+        response = self.run_action("owner", "make_inactive", [busy.pk, free.pk, Owner.company().pk])
+        self.assertEqual(response.status_code, 302)
+        busy.refresh_from_db(); free.refresh_from_db()
+        self.assertTrue(busy.is_active)  # still has an active property
+        self.assertFalse(free.is_active)
+        self.assertTrue(Owner.company().is_active)
+        self.run_action("owner", "make_active", [free.pk])
+        free.refresh_from_db()
+        self.assertTrue(free.is_active)
+
+    def test_properties_cannot_be_activated_under_an_inactive_owner(self):
+        owner = make_owner("Gone")
+        prop = Property.objects.create(
+            name="P", code="GON", property_type=T.VILLA, owner=owner, emirate="dubai", status="vacant",
+            management_fee_type="percent", management_fee_percent=5,
+        )
+        self.run_action("property", "make_inactive", [prop.pk])
+        prop.refresh_from_db()
+        self.assertFalse(prop.is_active)
+        Owner.objects.filter(pk=owner.pk).update(is_active=False)
+        self.run_action("property", "make_active", [prop.pk])
+        prop.refresh_from_db()
+        self.assertFalse(prop.is_active)  # refused
+        Owner.objects.filter(pk=owner.pk).update(is_active=True)
+        self.run_action("property", "make_active", [prop.pk])
+        prop.refresh_from_db()
+        self.assertTrue(prop.is_active)
+
+    def _props(self):
+        old = make_owner("Old Owner")
+        props = [
+            Property.objects.create(
+                name=f"P{n}", code=f"CH{n}", property_type=T.VILLA, owner=old, emirate="dubai", status="vacant",
+                management_fee_type="percent", management_fee_percent=5,
+            )
+            for n in (1, 2)
+        ]
+        return old, props
+
+    def test_change_owner_shows_a_page_first(self):
+        old, props = self._props()
+        response = self.run_action("property", "change_owner", [p.pk for p in props])
+        self.assertEqual(response.status_code, 200)
+        html = response.content.decode()
+        self.assertIn("Move properties", html)
+        self.assertIn("CH1", html)
+        Owner.objects.filter(pk=old.pk).update(is_active=False)
+        self.assertNotIn("Old Owner</option>", self.run_action("property", "change_owner", [props[0].pk]).content.decode())
+
+    def test_change_owner_moves_everything_or_nothing(self):
+        old, props = self._props()
+        new = make_owner("New Owner")
+        ids = [p.pk for p in props]
+        # no fee for a managed owner is fine here because the current fee is kept
+        response = self.run_action("property", "change_owner", ids, apply="1", owner=new.pk)
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(set(Property.objects.filter(pk__in=ids).values_list("owner_id", flat=True)), {new.pk})
+        # moving to the company clears the fee
+        self.run_action("property", "change_owner", ids, apply="1", owner=Owner.company().pk)
+        prop = Property.objects.get(pk=ids[0])
+        self.assertTrue(prop.is_company_owned)
+        self.assertEqual(prop.management_fee_type, "")
+        # company-owned properties have no fee, so moving them to a managed owner needs one: nothing moves
+        response = self.run_action("property", "change_owner", ids, apply="1", owner=new.pk)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Nothing was changed", response.content.decode())
+        self.assertEqual(set(Property.objects.filter(pk__in=ids).values_list("owner_id", flat=True)), {Owner.company().pk})
+        # with a fee it works
+        response = self.run_action(
+            "property", "change_owner", ids, apply="1", owner=new.pk, fee_type="fixed", fee_fixed="6000"
+        )
+        self.assertEqual(response.status_code, 302)
+        prop = Property.objects.get(pk=ids[0])
+        self.assertEqual((prop.owner_id, prop.management_fee_type, prop.management_fee_fixed), (new.pk, "fixed", 6000))
+
+    def test_inactive_owner_cannot_be_chosen(self):
+        old, props = self._props()
+        gone = make_owner("Gone Owner", is_active=False)
+        response = self.run_action("property", "change_owner", [props[0].pk], apply="1", owner=gone.pk)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(Property.objects.get(pk=props[0].pk).owner_id, old.pk)

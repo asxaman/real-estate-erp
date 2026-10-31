@@ -16,6 +16,12 @@
     <form method="post" enctype="multipart/form-data" style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
       {% csrf_token %}
       <input type="file" name="file" accept=".xlsx,.csv" required>
+      <label style="display: flex; gap: 8px; align-items: flex-start; flex-basis: 100%; line-height: 1.5;">
+        <input type="checkbox" name="update_existing" style="margin-top: 5px;"{% if update_checked %} checked{% endif %}>
+        <span><strong>Update existing records</strong> - {{ update_hint }}. Only the cells you fill in are
+          changed; blank cells keep what is already saved. Without this tick, a row for a record that
+          already exists is refused.</span>
+      </label>
       <button type="submit"
               style="background:#7c3aed;color:#fff;border:0;border-radius:6px;padding:10px 18px;font-weight:600;cursor:pointer;">
         Check and import
@@ -27,10 +33,39 @@
   {% if errors %}
   <div style="border: 1px solid #dc2626; border-radius: 8px; padding: 24px;">
     <h2 style="font-size: 16px; font-weight: 600; margin: 0 0 8px; color: #dc2626;">Nothing was imported - please fix these first</h2>
-    <ul style="margin: 0 0 0 18px; line-height: 1.7;">
+    <ul style="margin: 0 0 14px 18px; line-height: 1.7;">
       {% for e in errors %}<li>{{ e }}</li>{% endfor %}
     </ul>
+    {{ errors|json_script:"erp-import-errors" }}
+    <button type="button" id="erp-error-report"
+            style="background:#f3f4f6;color:#374151;border:1px solid #d1d5db;border-radius:6px;padding:8px 16px;font-weight:600;cursor:pointer;">
+      Download error report (CSV)
+    </button>
   </div>
+  <script>
+    (function () {
+      var button = document.getElementById("erp-error-report");
+      var source = document.getElementById("erp-import-errors");
+      if (!button || !source) { return; }
+      button.addEventListener("click", function () {
+        var errors = JSON.parse(source.textContent);
+        function cell(text) { return '"' + String(text).replace(/"/g, '""') + '"'; }
+        var lines = [cell("Row") + "," + cell("Problem")];
+        errors.forEach(function (text) {
+          var match = /^Row (\d+): ([\s\S]*)$/.exec(text);
+          lines.push(match ? cell(match[1]) + "," + cell(match[2]) : cell("") + "," + cell(text));
+        });
+        var blob = new Blob(["\uFEFF" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
+        var link = document.createElement("a");
+        link.href = URL.createObjectURL(blob);
+        link.download = "import-errors.csv";
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        setTimeout(function () { URL.revokeObjectURL(link.href); }, 1000);
+      });
+    })();
+  </script>
   {% endif %}
 
 </div>

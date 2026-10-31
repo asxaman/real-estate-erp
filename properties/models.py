@@ -690,6 +690,9 @@ class Property(models.Model):
         # Inactive owners cannot be chosen for a property (an existing property may keep its owner).
         if self.owner_id and not self.owner.is_active and _changed_in_db(self, "owner_id"):
             errors["owner"] = "This owner is inactive. Choose an active owner."
+        # A property cannot be switched back on while its owner is inactive.
+        elif self.owner_id and not self.owner.is_active and self.is_active and _changed_in_db(self, "is_active"):
+            errors["is_active"] = "The owner of this property is inactive. Make the owner active first."
 
         # Management fee: none for company-owned, required for properties managed for others.
         if self.owner_id:

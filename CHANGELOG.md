@@ -1,5 +1,14 @@
 # Changelog
 
+## Update 14d - Smarter imports and bulk actions
+No new migration. Run `python manage.py test` and `runserver`.
+- Imports (owners, properties, units, tenants) have an "Update existing records" tick. Owners are found by name, properties by Code, units by Property code + Unit number, tenants by Email. Only the cells you fill in change; blank cells keep what is saved. New rows in the same file are still added. The result says "Imported N new and updated M".
+- When an import has problems, a "Download error report (CSV)" button saves the list of row numbers and problems.
+- Import files accept the newer columns: owners (TRN), tenants (Emirates ID, passport, date of birth, trade licence, authorised signatory, TRN), properties (area / community, parking, title deed, plot, Makani, utility premise no.), units (parking, view, utility account no.).
+- Bulk actions: "Make selected ... active / inactive" for owners, properties and tenants. A record that breaks a rule (for example an owner who still has active properties) is skipped and explained; the others are changed.
+- "Change owner of selected properties": pick the new owner (active owners only) and, when the owner is not the company, optionally a management fee. All the properties move or none do.
+- A property cannot be switched back on while its owner is inactive.
+
 ## Update 14c - Dashboard and Expiring documents
 Run `python manage.py migrate` (no new tables; it also gives the existing Property Manager, Accountant and Leasing Agent roles access to the new property / unit documents and photos).
 - The home page is now a Dashboard: counts (active properties, units, vacant units, occupancy, owners, tenants, expired and expiring documents), the documents that need attention, units by status, vacant units, blacklisted tenants and (for administrators) recent activity. Each card only shows what the signed-in person is allowed to see, and most cards open the matching list.

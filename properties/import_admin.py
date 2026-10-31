@@ -15,8 +15,9 @@ class ImportMixin:
     import_noun = "records"
     import_headers = []
     import_notes = []
+    import_update_hint = "an existing record is found by its name"
 
-    def import_parse(self, upload):  # -> (objects, errors)
+    def import_parse(self, upload, update=False):  # -> (objects, errors)
         raise NotImplementedError
 
     def import_template(self):  # -> HttpResponse
@@ -61,21 +62,29 @@ class ImportMixin:
             "max_rows": MAX_IMPORT_ROWS,
             "template_url": reverse(self._import_name("_template")),
             "back_url": changelist,
+            "update_hint": self.import_update_hint,
+            "update_checked": request.method == "POST" and request.POST.get("update_existing") == "on",
         }
         if request.method == "POST":
             upload = request.FILES.get("file")
             if not upload:
                 context["errors"] = ["Choose a file first."]
             else:
-                objects, errors = self.import_parse(upload)
+                update = request.POST.get("update_existing") == "on"
+                objects, errors = self.import_parse(upload, update=update)
                 if errors:
                     context["errors"] = errors
                 elif not objects:
                     context["errors"] = [f"The file has no {self.import_noun} in it."]
                 else:
+                    changed = sum(1 for obj in objects if obj.pk)  # saved before = an update
+                    added = len(objects) - changed
                     with transaction.atomic():
                         for obj in objects:
                             obj.save()
-                    messages.success(request, f"Imported {len(objects)} {self.import_noun}.")
+                    if update:
+                        messages.success(request, f"Imported {added} new and updated {changed} {self.import_noun}.")
+                    else:
+                        messages.success(request, f"Imported {len(objects)} {self.import_noun}.")
                     return redirect(changelist)
         return render(request, "properties/import.html", context)

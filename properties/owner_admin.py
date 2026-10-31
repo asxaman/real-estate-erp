@@ -22,7 +22,7 @@ from core.formats import fmt_date
 from core.models import AuditEntry
 from core.widgets import use_file_widget
 
-from . import owner_tools
+from . import bulk, owner_tools
 from .import_admin import ImportMixin
 from .models import (
     SINGLE_DOCUMENT_TYPES,
@@ -317,7 +317,8 @@ class OwnerAdmin(ImportMixin, TooltipHelpMixin, ModelAdmin):
         "contacts__name", "contacts__email", "contacts__mobile", "documents__number",
     )
     inlines = [ContactInline, PropertyListInline, DocumentInline, BankInline, ActivityInline]
-    actions = ["export_excel", "export_csv"]
+    make_active, make_inactive = bulk.make_actions("owners")
+    actions = ["export_excel", "export_csv", "make_active", "make_inactive"]
     actions_list = ["import_button"]
 
     # ---- form layout ---------------------------------------------------------------
@@ -526,14 +527,16 @@ class OwnerAdmin(ImportMixin, TooltipHelpMixin, ModelAdmin):
 
     # ---- import (button on the list page; shared page in import_admin.py) ---------------
     import_noun = "owners"
+    import_update_hint = "an existing owner is found by its name"
     import_headers = owner_tools.IMPORT_HEADERS
     import_notes = [
         "Only Name is required. Type is Individual or Company (blank = Individual).",
         "Phone numbers: keep the leading + or 0 (the template's Phone column is already set to Text).",
+        "Optional: TRN (15 digits). To change existing owners, tick \"Update existing records\": only Name is needed, plus the columns you want to change.",
     ]
 
-    def import_parse(self, upload):
-        return owner_tools.parse_owner_file(upload)
+    def import_parse(self, upload, update=False):
+        return owner_tools.parse_owner_file(upload, update=update)
 
     def import_template(self):
         return owner_tools.template_response()

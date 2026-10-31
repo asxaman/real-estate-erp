@@ -259,6 +259,11 @@ Every dropdown list in the app is a styled, animated menu: it fades in and out, 
 - **Expiring documents** lists every owner, tenant, property and unit document with an expiry date. Use the buttons at the top to narrow it down, "Download as CSV" to take it into Excel.
 - People only see documents of the record types their role may view.
 
+## Imports that update, and bulk actions (update 14d)
+- On any Import page tick **Update existing records** to change records that already exist. Only filled cells change.
+- If the file has problems, nothing is imported; use **Download error report** to fix them in Excel.
+- In a list, tick records and choose **Make selected ... active / inactive** (Owners, Properties, Tenants) or **Change owner of selected properties**.
+
 ## Automated tests
 
 The project has automated checks of the business rules above. Run them after every update (with `(venv)` active):
