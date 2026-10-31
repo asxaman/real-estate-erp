@@ -48,6 +48,20 @@ def register_eraser(label: str, func: Callable[[], str], order: int = 100) -> No
     _erasers[label] = Step(label, func, order)
 
 
+def tools_allowed() -> bool:
+    """The sample-data and erase tools work only while Development mode is on (System settings)."""
+    from . import sysconf
+
+    sysconf.ensure_current()
+    return sysconf.development_mode()
+
+
+TOOLS_OFF_MESSAGE = (
+    "Development mode is switched off in System settings, so the sample-data and erase tools are "
+    "disabled. (Switch it on there only on a test copy, never on real data.)"
+)
+
+
 def run_seeders() -> list[str]:
     """Run every registered seeder inside one transaction (all or nothing)."""
     messages = []
@@ -69,6 +83,12 @@ def run_erasers(include_users: bool = False) -> list[str]:
     with suppressed(), transaction.atomic():  # not logged record by record
         for step in sorted(_erasers.values(), key=lambda s: s.order, reverse=True):
             messages.append(f"{step.label}: {step.func()}")
+        # Development phase only: the history of changes goes too (it holds personal numbers).
+        from .models import AuditEntry, LoginAttempt
+
+        entries, _ = AuditEntry.objects.all().delete()
+        LoginAttempt.objects.all().delete()
+        messages.append(f"Audit log: removed {entries} entr{'y' if entries == 1 else 'ies'}")
         if include_users:
             User = get_user_model()
             deleted_users, _ = User.objects.filter(is_superuser=False).delete()

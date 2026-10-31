@@ -10,7 +10,7 @@ from unfold.admin import ModelAdmin, TabularInline
 from unfold.decorators import display
 
 from core import sysconf
-from core.admin_utils import TooltipHelpMixin, badge, circle_avatar, format_amount
+from core.admin_utils import ExportPermissionMixin, TooltipHelpMixin, badge, circle_avatar, format_amount
 from core.widgets import use_file_widget
 
 from . import bulk, export_tools, import_tools
@@ -219,7 +219,7 @@ class PropertyAdminForm(forms.ModelForm):
 
 
 @admin.register(Property)
-class PropertyAdmin(ImportMixin, TooltipHelpMixin, ModelAdmin):
+class PropertyAdmin(ImportMixin, ExportPermissionMixin, TooltipHelpMixin, ModelAdmin):
     form = PropertyAdminForm
     make_active, make_inactive = bulk.make_actions("properties")
     actions = ["export_excel", "export_csv", "make_active", "make_inactive", "change_owner"]
@@ -246,11 +246,11 @@ class PropertyAdmin(ImportMixin, TooltipHelpMixin, ModelAdmin):
     def import_template(self):
         return import_tools.property_template_response()
 
-    @admin.action(description="Export selected properties to Excel")
+    @admin.action(description="Export selected properties to Excel", permissions=["export"])
     def export_excel(self, request, queryset):
         return export_tools.properties_excel(queryset)
 
-    @admin.action(description="Export selected properties to CSV")
+    @admin.action(description="Export selected properties to CSV", permissions=["export"])
     def export_csv(self, request, queryset):
         return export_tools.properties_csv(queryset)
 
@@ -336,11 +336,14 @@ class PropertyAdmin(ImportMixin, TooltipHelpMixin, ModelAdmin):
             badge("Active", "success") if obj.is_active else badge("Inactive", "neutral"),
         ]
         if obj.has_units:
-            units = obj.units.all()
-            total = units.count()
-            vacant = units.filter(status=Unit.Status.VACANT).count()
-            occupied = units.filter(status=Unit.Status.OCCUPIED).count()
-            rent = units.aggregate(t=Sum("asking_rent"))["t"] or 0
+            stats_ = obj.units.aggregate(
+                total=Count("pk"),
+                vacant=Count("pk", filter=Q(status=Unit.Status.VACANT)),
+                occupied=Count("pk", filter=Q(status=Unit.Status.OCCUPIED)),
+                rent=Sum("asking_rent"),
+            )
+            total, vacant, occupied = stats_["total"], stats_["vacant"], stats_["occupied"]
+            rent = stats_["rent"] or 0
             stats = [
                 (total, "Units"),
                 (vacant, "Vacant"),
@@ -469,7 +472,7 @@ class BuildingFilter(admin.RelatedFieldListFilter):
 
 
 @admin.register(Unit)
-class UnitAdmin(ImportMixin, TooltipHelpMixin, ModelAdmin):
+class UnitAdmin(ImportMixin, ExportPermissionMixin, TooltipHelpMixin, ModelAdmin):
     actions = ["export_excel", "export_csv"]
     actions_list = ["import_button"]
     import_noun = "units"
@@ -489,11 +492,11 @@ class UnitAdmin(ImportMixin, TooltipHelpMixin, ModelAdmin):
     def import_template(self):
         return import_tools.unit_template_response()
 
-    @admin.action(description="Export selected units to Excel")
+    @admin.action(description="Export selected units to Excel", permissions=["export"])
     def export_excel(self, request, queryset):
         return export_tools.units_excel(queryset)
 
-    @admin.action(description="Export selected units to CSV")
+    @admin.action(description="Export selected units to CSV", permissions=["export"])
     def export_csv(self, request, queryset):
         return export_tools.units_csv(queryset)
 

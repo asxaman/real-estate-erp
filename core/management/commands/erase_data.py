@@ -1,6 +1,6 @@
 from django.core.management.base import BaseCommand, CommandError
 
-from core.data_registry import run_erasers
+from core.data_registry import TOOLS_OFF_MESSAGE, run_erasers, tools_allowed
 
 
 class Command(BaseCommand):
@@ -19,6 +19,8 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
+        if not tools_allowed():
+            raise CommandError(TOOLS_OFF_MESSAGE)
         if not options["yes"]:
             answer = input("This permanently deletes data. Type ERASE to continue: ")
             if answer.strip() != "ERASE":

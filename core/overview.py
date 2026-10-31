@@ -2,6 +2,7 @@
 from datetime import timedelta
 
 from django.contrib import admin
+from django.core.exceptions import PermissionDenied
 from django.core.paginator import Paginator
 from django.db.models import Count, Q, Sum
 from django.shortcuts import render
@@ -90,7 +91,12 @@ def expiring_documents_view(request):
         needle = search.lower()
         rows = [r for r in rows if needle in f'{r["who"]} {r["document"]} {r["number"]}'.lower()]
 
+    can_export = any(
+        request.user.has_perm(p) for p in ("properties.export_owner", "properties.export_property", "tenants.export_tenant")
+    )
     if request.GET.get("export") == "csv":
+        if not can_export:
+            raise PermissionDenied
         return exports.csv_response(
             ["Belongs to", "Record", "Document", "Number", "Expires on", "Status"],
             ([r["kind"], r["who"], r["document"], r["number"], r["expiry"].isoformat(),
@@ -129,7 +135,7 @@ def expiring_documents_view(request):
         "kinds": [("", "Everyone", link(kind="", page=""))]
         + [(label.lower(), f"{label}s", link(kind=label.lower(), page="")) for label in available],
         "windows": [(days, link(days=days, page="")) for days in WINDOWS],
-        "export_url": link(export="csv"),
+        "export_url": link(export="csv") if can_export else "",
         "prev_url": link(page=page.previous_page_number()) if page.has_previous() else "",
         "next_url": link(page=page.next_page_number()) if page.has_next() else "",
     }
@@ -232,6 +238,8 @@ def dashboard_view(request):
         "panels": panels,
         "today": timezone.localdate(),
         "greeting_name": user.get_short_name() or user.get_username(),
+        "dev_mode": user.is_superuser and sysconf.development_mode(),
+        "settings_url": reverse("admin:core_systemsettings_changelist") if user.is_superuser else "",
         "expiring_url": reverse("expiring_documents"),
         "units_url": reverse("admin:properties_unit_changelist"),
         "audit_url": reverse("admin:core_auditentry_changelist") if user.is_superuser else "",

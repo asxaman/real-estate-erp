@@ -1,5 +1,23 @@
 # Changelog
 
+## Update 15 - Security and safety audit fixes
+Run `python manage.py makemigrations`, then `migrate`, then `test`.
+- Development mode switch in System settings (Development tab). Off = no sample data, no erase-all, demo accounts switched off. Erase all data also clears the audit log.
+- Debug mode is now OFF unless the site is started with `manage.py` (your PC). A live server needs a real `DJANGO_SECRET_KEY` and `DJANGO_ALLOWED_HOSTS`, and gets HTTPS redirect, secure cookies, HSTS, a 60-minute idle log-out and a log file (`logs/erp.log`).
+- PostgreSQL is required: the silent SQLite fallback is gone.
+- Uploaded files are served only to signed-in people with permission (core/media.py).
+- Login lock-out after 5 wrong passwords (15 minutes); `unlock_logins` command.
+- Large buildings (200+ units) can be saved: the form-field limit is raised.
+- Export to Excel / CSV needs its own permission; Import "update existing" needs change permission.
+- Password rule now also needs a small letter.
+- Audit log masks personal numbers and hides dates of birth; older entries are cleaned by `migrate`. It now reads each row once per save.
+- File content is checked against the file type; replaced or removed files are deleted from disk; import files are limited to 5 MB; CSV separator is read from the header line.
+- Backups include the uploaded files; requirements are pinned.
+- The database refuses duplicate owner names and tenant emails (capitals ignored).
+- WhatsApp buttons only appear for numbers that are clearly UAE or international.
+- Unit and Property share one status list; owner header label corrected; fewer database queries on owner/property pages and exports; tooltip code tidied; unused code removed.
+- New tests for all of the above (core/test_hardening.py).
+
 ## Update 14d - Smarter imports and bulk actions
 No new migration. Run `python manage.py test` and `runserver`.
 - Imports (owners, properties, units, tenants) have an "Update existing records" tick. Owners are found by name, properties by Code, units by Property code + Unit number, tenants by Email. Only the cells you fill in change; blank cells keep what is saved. New rows in the same file are still added. The result says "Imported N new and updated M".
@@ -244,3 +262,6 @@ Run `python manage.py makemigrations` then `migrate` (the unit status, a few lim
 4. Accounting (chart of accounts, journal entries, reports)
 5. Maintenance requests
 6. Owner portal and tenant portal
+
+### Update 15b
+- Tenant email rule now ignores blank emails; three old tests adjusted to the new rules; test output quieter.

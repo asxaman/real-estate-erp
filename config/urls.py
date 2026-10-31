@@ -1,9 +1,9 @@
 from django.conf import settings
-from django.conf.urls.static import static
 from django.contrib import admin
-from django.urls import path
+from django.urls import path, re_path
 from django.views.generic import RedirectView
 
+from core.media import media_view
 from core.overview import dashboard_view, expiring_documents_view
 from core.views import data_tools_view
 
@@ -18,7 +18,8 @@ urlpatterns = [
     path("", RedirectView.as_view(url="/admin/", permanent=False)),
 ]
 
-# Profile pictures are served by Django itself while developing (DEBUG on).
-# On a real server the web server (nginx etc.) serves the 'media' folder instead.
-if settings.DEBUG:
-    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+# Uploaded files (IDs, passports, photos) are handed out by Django only to people who are signed in
+# and allowed to see them. Do NOT also serve the media folder straight from the web server.
+urlpatterns += [
+    re_path(r"^" + settings.MEDIA_URL.lstrip("/") + r"(?P<path>.+)$", media_view, name="media"),
+]

@@ -143,7 +143,7 @@ class ProfilePicture(TestCase):
             validator(upload)
 
     def test_small_png_is_accepted(self):
-        self.check(SimpleUploadedFile("me.PNG", b"x" * 100, content_type="image/png"))
+        self.check(SimpleUploadedFile("me.PNG", b"\x89PNG\r\n\x1a\n" + b"x" * 100, content_type="image/png"))
 
     def test_wrong_type_is_refused(self):
         with self.assertRaises(ValidationError):
@@ -237,6 +237,7 @@ def valid_settings_post(**overrides):
         "company_name": "Test Realty", "company_trn": "", "company_phone": "", "company_email": "",
         "company_address": "", "date_format": "iso", "time_format": "24h", "timezone": "Asia/Dubai",
         "expiry_warning_days": "30", "max_photo_mb": "2", "max_document_mb": "10", "toast_seconds": "5",
+        "development_mode": "on",
     }
     data.update(overrides)
     return data
@@ -395,7 +396,8 @@ class SystemSettingsValues(TestCase):
         self.assertEqual(response.status_code, 200)
         html = response.content.decode()
         for name in ("company_name", "date_format", "time_format", "timezone", "expiry_warning_days",
-                     "max_photo_mb", "max_document_mb", "toast_seconds", "require_complete_documents"):
+                     "max_photo_mb", "max_document_mb", "toast_seconds", "require_complete_documents",
+                     "development_mode"):
             self.assertIn(f'name="{name}"', html)
         response = self.client.post(
             reverse("admin:core_systemsettings_change", args=[1]),
@@ -484,7 +486,7 @@ class PasswordRule(TestCase):
         self.assertNotIn("usable_password", form.fields)
         self.assertEqual(
             [m for m in form.fields["password1"].help_text.replace("<ul>", "").replace("</ul>", "").split("<li>") if m.strip()],
-            ["Minimum 8 characters, with at least 1 capital letter, 1 number and 1 special character.</li>"],
+            ["Minimum 8 characters, with at least 1 capital letter, 1 small letter, 1 number and 1 special character.</li>"],
         )
         data = {"username": "newbie", "password1": "Good#Pass1", "password2": "Good#Pass1"}
         form = SimpleUserCreationForm(data)

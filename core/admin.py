@@ -263,6 +263,16 @@ class SystemSettingsAdmin(SuperuserOnlyMixin, TooltipHelpMixin, ModelAdmin):
             "Notifications",
             {"classes": ["tab"], "fields": ("toast_seconds",)},
         ),
+        (
+            "Development",
+            {
+                "classes": ["tab"],
+                "description": "Leave this ticked while you are building and testing. Before real data goes "
+                "in, untick it and save: the sample-data and erase-everything tools stop working, and the "
+                "demo accounts (demo.manager and so on) are switched off.",
+                "fields": ("development_mode",),
+            },
+        ),
         ("Roles", {"classes": ["tab"], "fields": ("roles_panel",)}),
         ("Audit log", {"classes": ["tab"], "fields": ("audit_panel",)}),
         ("Data tools", {"classes": ["tab"], "fields": ("tools_panel",)}),
@@ -375,7 +385,18 @@ class SystemSettingsAdmin(SuperuserOnlyMixin, TooltipHelpMixin, ModelAdmin):
         )
 
     def save_model(self, request, obj, form, change):
+        was_on = bool(sysconf.development_mode())
         super().save_model(request, obj, form, change)
+        if was_on and not obj.development_mode:
+            switched_off = 0
+            for demo in User.objects.filter(username__startswith="demo.", is_superuser=False, is_active=True):
+                demo.is_active = False  # the demo accounts share a well-known password
+                demo.save(update_fields=["is_active"])
+                switched_off += 1
+            if switched_off:
+                from django.contrib import messages
+
+                messages.warning(request, f"{switched_off} demo account(s) were switched off.")
         sysconf.refresh(
             {name: getattr(obj, name) for name in sysconf.DEFAULTS}
         )  # takes effect at once on this server; other servers pick it up on their next request

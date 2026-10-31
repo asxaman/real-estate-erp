@@ -85,6 +85,26 @@ ROLE_ACCESS = {  # role -> actions allowed on the property / unit documents and 
 }
 
 
+EXPORT_ROLES = ("Property Manager", "Accountant")  # the Leasing Agent cannot download whole lists
+
+
+def grant_export_permissions(sender, apps=None, using="default", **kwargs):
+    """After `migrate`: the back-office roles may export owners, properties and units."""
+    if apps is None:
+        return
+    try:
+        Group = apps.get_model("auth", "Group")
+        Permission = apps.get_model("auth", "Permission")
+    except LookupError:
+        return
+    found = Permission.objects.using(using).filter(
+        content_type__app_label="properties",
+        codename__in=["export_owner", "export_property", "export_unit"],
+    )
+    for group in Group.objects.using(using).filter(name__in=EXPORT_ROLES):
+        group.permissions.add(*found)
+
+
 def grant_new_permissions(sender, apps=None, using="default", **kwargs):
     """After `migrate`: roles that already exist get access to the property / unit documents and photos."""
     if apps is None:
@@ -116,3 +136,4 @@ class PropertiesConfig(AppConfig):
 
         post_migrate.connect(ensure_company_owner, sender=self)
         post_migrate.connect(grant_new_permissions, sender=self)
+        post_migrate.connect(grant_export_permissions, sender=self)

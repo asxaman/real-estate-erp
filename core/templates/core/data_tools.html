@@ -3,6 +3,14 @@
 {% block content %}
 <div style="max-width: 860px; display: grid; gap: 24px;">
 
+  {% if not tools_allowed %}
+  <div style="border: 1px solid #d97706; border-radius: 8px; padding: 20px 24px;">
+    <strong>These tools are switched off.</strong>
+    Development mode is off in System settings (the Development tab), so sample data and erasing
+    are blocked to protect real data.
+  </div>
+  {% endif %}
+
   <div style="border: 1px solid rgba(128,128,128,.3); border-radius: 8px; padding: 24px;">
     <h2 style="font-size: 18px; font-weight: 600; margin: 0 0 8px;">Seed sample data</h2>
     <p style="margin: 0 0 16px; opacity: .8;">
@@ -13,7 +21,7 @@
     <form method="post">
       {% csrf_token %}
       <input type="hidden" name="action" value="seed">
-      <button type="submit"
+      <button type="submit"{% if not tools_allowed %} disabled{% endif %}
               style="background:#2563eb;color:#fff;border:0;border-radius:6px;padding:10px 18px;font-weight:600;cursor:pointer;">
         Seed sample data
       </button>
@@ -23,7 +31,7 @@
   <div style="border: 1px solid #dc2626; border-radius: 8px; padding: 24px;">
     <h2 style="font-size: 18px; font-weight: 600; margin: 0 0 8px; color: #dc2626;">Erase all data</h2>
     <p style="margin: 0 0 8px; opacity: .8;">
-      Permanently deletes all business data in the system. <strong>This cannot be undone.</strong>
+      Permanently deletes all business data in the system, including the audit log (the history of changes). <strong>This cannot be undone.</strong>
       Superuser accounts (currently {{ superuser_count }}) are never deleted.
     </p>
     <form method="post" style="display: grid; gap: 14px;">
@@ -39,7 +47,7 @@
                style="max-width: 240px; padding: 8px 10px; border: 1px solid rgba(128,128,128,.5); border-radius: 6px; background: transparent; color: inherit;">
       </label>
       <div>
-        <button type="submit"
+        <button type="submit"{% if not tools_allowed %} disabled{% endif %}
                 style="background:#dc2626;color:#fff;border:0;border-radius:6px;padding:10px 18px;font-weight:600;cursor:pointer;">
           Erase all data
         </button>

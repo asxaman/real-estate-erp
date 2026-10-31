@@ -4,7 +4,7 @@ from django.core.exceptions import PermissionDenied
 from django.shortcuts import redirect, render
 
 from .audit import log_tool
-from .data_registry import run_erasers, run_seeders
+from .data_registry import TOOLS_OFF_MESSAGE, run_erasers, run_seeders, tools_allowed
 
 ERASE_CONFIRMATION_WORD = "ERASE"
 
@@ -14,8 +14,12 @@ def data_tools_view(request):
     if not request.user.is_superuser:
         raise PermissionDenied
 
+    allowed = tools_allowed()
     if request.method == "POST":
         action = request.POST.get("action")
+        if not allowed:
+            messages.error(request, TOOLS_OFF_MESSAGE)
+            return redirect("data_tools")
 
         if action == "seed":
             try:
@@ -57,5 +61,6 @@ def data_tools_view(request):
         "user_count": User.objects.count(),
         "superuser_count": User.objects.filter(is_superuser=True).count(),
         "confirmation_word": ERASE_CONFIRMATION_WORD,
+        "tools_allowed": allowed,
     }
     return render(request, "core/data_tools.html", context)

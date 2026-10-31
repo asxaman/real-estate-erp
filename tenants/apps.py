@@ -19,6 +19,20 @@ def fix_nationalities(sender, apps=None, using="default", **kwargs):
             manager.filter(nationality=old).update(nationality=new)
 
 
+def grant_export_permission(sender, apps=None, using="default", **kwargs):
+    """After `migrate`: the back-office roles may export tenants (the Leasing Agent may not)."""
+    if apps is None:
+        return
+    try:
+        Group = apps.get_model("auth", "Group")
+        Permission = apps.get_model("auth", "Permission")
+    except LookupError:
+        return
+    found = Permission.objects.using(using).filter(content_type__app_label="tenants", codename="export_tenant")
+    for group in Group.objects.using(using).filter(name__in=("Property Manager", "Accountant")):
+        group.permissions.add(*found)
+
+
 class TenantsConfig(AppConfig):
     default_auto_field = "django.db.models.BigAutoField"
     name = "tenants"
@@ -28,3 +42,4 @@ class TenantsConfig(AppConfig):
         from . import seed  # noqa: F401  (registers sample data and eraser)
 
         post_migrate.connect(fix_nationalities, sender=self)
+        post_migrate.connect(grant_export_permission, sender=self)

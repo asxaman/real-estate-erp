@@ -1,5 +1,5 @@
-Django>=5.2,<7
-django-unfold>=0.60
-psycopg[binary]>=3.2
-Pillow>=10.0
-openpyxl>=3.1
+Django==6.1.2
+django-unfold==0.110.0
+psycopg[binary]==3.3.6
+Pillow==13.0.0
+openpyxl==3.1.5

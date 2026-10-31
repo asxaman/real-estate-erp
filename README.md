@@ -101,8 +101,8 @@ If something goes wrong:
 * `password authentication failed` - the password in `.env` does not match the one from 5b.
 * `database "real_estate_erp" does not exist` - repeat 5b.
 * `No module named psycopg` - repeat the `pip install -r requirements.txt` command with `(venv)` active.
-* If `DB_NAME` is missing from `.env` the project quietly falls back to a local SQLite file
-  (only meant for quick tests, never for real data); `python manage.py db_info` tells you which one is in use.
+* If `DB_NAME` is missing from `.env` the project now refuses to start and tells you so (it no longer
+  falls back to a local SQLite file). You can delete an old `db.sqlite3` file from the project folder.
 
 ### Step 6 - Create your superuser (the main administrator)
 
@@ -209,7 +209,7 @@ Sidebar > **Tenancy** > **Tenants** (leases are the next step of this module):
 
 ## Passwords
 
-Every password must have at least 8 characters, 1 capital letter, 1 number and 1 special character (for example `Good#Pass1`). The rule is checked when a user is added and when a password is changed.
+Every password must have at least 8 characters, 1 capital letter, 1 small letter, 1 number and 1 special character (for example `Good#Pass1`). The rule is checked when a user is added and when a password is changed.
 
 ## System settings (superusers)
 
@@ -368,5 +368,15 @@ The `.gitignore` file keeps your database, passwords and the `venv` folder out o
     manage.py    command-line entry point
 
 ## Before going live
-Set the environment variables `DJANGO_SECRET_KEY` (long random text) and `DJANGO_DEBUG=0`,
-and set `DJANGO_ALLOWED_HOSTS` to your domain. Use PostgreSQL (see Step 5) with automatic, regular backups.
+Read `DEPLOYMENT.md` (the checklist). In short: untick *Development mode* in System settings, set a
+real `DJANGO_SECRET_KEY` and `DJANGO_ALLOWED_HOSTS`, serve the site over HTTPS, and keep regular backups.
+
+## Security (update 15)
+* **Development mode** (System settings, Development tab): while ticked, the sample-data and erase-everything tools work. Untick it before real data goes in: those tools stop working and the demo accounts are switched off. Erase all data also clears the audit log.
+* **Downloads of uploaded files** (IDs, passports, photos) need a signed-in person who may see that kind of file. Never serve the `media` folder straight from the web server.
+* **Password guessing**: 5 wrong passwords for a user name lock it for 15 minutes. `python manage.py unlock_logins` clears all locks.
+* **Exporting** lists to Excel / CSV has its own permission (*Can export owners / properties / units / tenants*). Property Manager and Accountant have it, Leasing Agent does not; change this on the Roles page.
+* **Import with "Update existing records"** needs permission to change records, not only to add them.
+* **Audit log** hides full Emirates ID, passport, TRN and trade licence numbers (last 4 characters only) and never shows dates of birth.
+* **Files** are checked by their content (a program renamed to .pdf is refused), and an old file is deleted from the disk when it is replaced.
+* **Backups**: `python manage.py backup_db` saves the database and a zip of the uploaded files.

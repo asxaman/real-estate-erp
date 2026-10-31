@@ -4,6 +4,13 @@
 <div class="erp-dash">
   <div class="erp-dash-hello">Welcome back, <b>{{ greeting_name }}</b>. Here is where things stand today, {{ today|date:"j F Y" }}.</div>
 
+  {% if dev_mode %}
+  <div class="erp-panel" style="border-color:#d97706;">
+    <b>Development mode is ON.</b> The sample-data and erase-everything tools are available.
+    Switch it off in <a href="{{ settings_url }}">System settings</a> (Development tab) before real data goes in.
+  </div>
+  {% endif %}
+
   {% if cards %}
   <div class="erp-cards">
     {% for card in cards %}

@@ -10,7 +10,7 @@ from django.utils.safestring import mark_safe
 from unfold.admin import ModelAdmin
 from unfold.decorators import display
 
-from core.admin_utils import TooltipHelpMixin, badge, circle_avatar, whatsapp_link
+from core.admin_utils import ExportPermissionMixin, TooltipHelpMixin, badge, circle_avatar, whatsapp_link
 from core import sysconf
 from core.formats import fmt_date
 from core.models import AuditEntry
@@ -107,7 +107,7 @@ class FilesFilter(admin.SimpleListFilter):
 
 
 @admin.register(Tenant)
-class TenantAdmin(ImportMixin, TooltipHelpMixin, ModelAdmin):
+class TenantAdmin(ImportMixin, ExportPermissionMixin, TooltipHelpMixin, ModelAdmin):
     form = TenantAdminForm
     compressed_fields = True
     list_display = (
@@ -290,11 +290,11 @@ class TenantAdmin(ImportMixin, TooltipHelpMixin, ModelAdmin):
         return super().change_view(request, object_id, form_url, extra_context)
 
     # ---- export / import ----------------------------------------------------------------
-    @admin.action(description="Export selected tenants to Excel")
+    @admin.action(description="Export selected tenants to Excel", permissions=["export"])
     def export_excel(self, request, queryset):
         return tenant_tools.excel_response(queryset)
 
-    @admin.action(description="Export selected tenants to CSV")
+    @admin.action(description="Export selected tenants to CSV", permissions=["export"])
     def export_csv(self, request, queryset):
         return tenant_tools.csv_response(queryset)
 

@@ -20,6 +20,7 @@ DEFAULTS = {
     "max_document_mb": 10,
     "require_complete_documents": False,
     "toast_seconds": 5,
+    "development_mode": True,
 }
 
 TIMEZONES = [
@@ -40,6 +41,11 @@ _current = dict(DEFAULTS)
 
 def get(name):
     return _current.get(name, DEFAULTS.get(name))
+
+
+def development_mode():
+    """True while the system is still being built and tested (sample data / erase tools allowed)."""
+    return bool(get("development_mode"))
 
 
 def expiry_days():

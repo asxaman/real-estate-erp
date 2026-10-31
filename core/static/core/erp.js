@@ -138,23 +138,7 @@
       }
       help.setAttribute("data-erp-done", "1");
       help.classList.add("erp-help-hidden");
-
-      var icon = document.createElement("span");
-      icon.className = "erp-info";
-      icon.tabIndex = 0;
-      icon.setAttribute("role", "button");
-      icon.setAttribute("aria-label", "More information");
-      icon.textContent = "i";
-      icon.addEventListener("mouseenter", function () { showTip(icon, text); });
-      icon.addEventListener("mouseleave", hideTip);
-      icon.addEventListener("focus", function () { showTip(icon, text); });
-      icon.addEventListener("blur", hideTip);
-      icon.addEventListener("click", function (e) {
-        e.preventDefault();
-        e.stopPropagation();
-        showTip(icon, text);
-      });
-      label.appendChild(icon);
+      makeIcon(label, text);  // the one shared way of drawing the "i" icon
     });
   }
 

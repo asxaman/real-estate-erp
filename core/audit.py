@@ -39,7 +39,18 @@ OWNER_CHILD_LABELS = {
 }
 TENANT_CHILD_LABELS = {"tenants.TenantContact", "tenants.TenantDocument"}
 # Fields whose full value must never appear in the log (only the last 4 characters).
-MASKED_FIELDS = {"iban"}
+MASKED_FIELDS = {
+    "iban", "emirates_id_number", "passport_number", "trn", "trade_licence_number", "number",
+}
+# Fields whose value is not shown at all (the log still says that it changed).
+HIDDEN_FIELDS = {"date_of_birth"}
+# Document records are named by their type only; the number stays out of the record's name.
+DOCUMENT_LABELS = {
+    "properties.OwnerDocument",
+    "properties.PropertyDocument",
+    "properties.UnitDocument",
+    "tenants.TenantDocument",
+}
 
 # Fields that are technical noise or secret; they never appear in the log.
 IGNORED_FIELDS = {"password", "last_login", "created_at", "date_joined", "floor_sort"}
@@ -124,11 +135,18 @@ def snapshot(instance):
     return data
 
 
+def _mask_one(value):
+    text = str(value)
+    return text if text.startswith("****") else "****" + text[-4:]
+
+
 def _mask(changes):
     masked = {}
     for field, pair in changes.items():
         if field in MASKED_FIELDS:
-            pair = [("****" + str(v)[-4:]) if v else v for v in pair]
+            pair = [_mask_one(v) if v else v for v in pair]
+        elif field in HIDDEN_FIELDS:
+            pair = ["(hidden)" if v else v for v in pair]
         masked[field] = pair
     return masked
 
@@ -189,6 +207,12 @@ def related_tenant_id(instance):
     return None
 
 
+def _record_name(instance):
+    if instance._meta.label in DOCUMENT_LABELS:
+        return str(instance.get_doc_type_display())  # not the document number
+    return str(instance)
+
+
 def _write(action, instance, changes):
     from .models import AuditEntry
 
@@ -204,33 +228,64 @@ def _write(action, instance, changes):
         action=action,
         model_label=instance._meta.verbose_name.capitalize(),
         object_id=str(instance.pk),
-        object_repr=str(instance)[:300],
+        object_repr=_record_name(instance)[:300],
         changes=changes,
     )
 
 
 # ---- signal handlers -------------------------------------------------------------------
+def _tracked_fields(model):
+    return [f for f in model._meta.concrete_fields if f.name not in IGNORED_FIELDS]
+
+
 def remember_old(sender, instance, raw=False, **kwargs):
+    """Before an update: read the saved row once (plain values, no related records)."""
     if raw or _suppressed.get():
         return
-    instance._audit_old = None
+    instance._audit_old_row = None
     if instance.pk is not None and not instance._state.adding:
-        old = sender._default_manager.filter(pk=instance.pk).first()
-        if old is not None:
-            instance._audit_old = snapshot(old)
+        fields = _tracked_fields(sender)
+        instance._audit_old_row = (
+            sender._default_manager.filter(pk=instance.pk).values(*[f.attname for f in fields]).first()
+        )
+
+
+def _related_text(field, instance, value):
+    """What a related record looks like in the log (its name), looked up only when it changed."""
+    if value is None:
+        return None
+    if instance is not None:
+        try:
+            return str(getattr(instance, field.name))
+        except Exception:
+            return str(value)
+    try:
+        other = field.related_model._default_manager.filter(pk=value).first()
+    except Exception:
+        other = None
+    return str(other) if other is not None else str(value)
 
 
 def log_save(sender, instance, created=False, raw=False, **kwargs):
     if raw or _suppressed.get():
         return
-    new = snapshot(instance)
     if created:
+        new = snapshot(instance)
         _write("created", instance, {k: [None, v] for k, v in new.items() if v not in (None, "")})
         return
-    old = getattr(instance, "_audit_old", None)
-    if old is None:
+    old_row = getattr(instance, "_audit_old_row", None)
+    if old_row is None:
         return
-    changes = {k: [old.get(k), v] for k, v in new.items() if old.get(k) != v}
+    changes = {}
+    for field in _tracked_fields(sender):
+        before, after = old_row.get(field.attname), field.value_from_object(instance)
+        if field.is_relation:
+            if before != after:
+                changes[field.name] = [_related_text(field, None, before), _related_text(field, instance, after)]
+        else:
+            before, after = _plain(before), _plain(after)
+            if before != after:
+                changes[field.name] = [before, after]
     if changes:
         _write("changed", instance, changes)
 
@@ -253,3 +308,25 @@ def log_tool(user, title, lines):
         object_repr=title,
         changes={"result": [None, " | ".join(lines)[:1000]]},
     )
+
+
+def scrub_old_entries(sender, apps=None, using="default", **kwargs):
+    """After `migrate`: hide personal numbers that older log entries still contain."""
+    if apps is None:
+        return
+    import re
+
+    try:
+        Entry = apps.get_model("core", "AuditEntry")
+        keys = sorted(MASKED_FIELDS | HIDDEN_FIELDS)
+        entries = Entry.objects.using(using)
+        for entry in entries.filter(changes__has_any_keys=keys).iterator():
+            masked = _mask(entry.changes)
+            if masked != entry.changes:
+                entries.filter(pk=entry.pk).update(changes=masked)
+        for entry in entries.filter(model_label="Document").iterator():
+            name = re.sub(r"\s+\S*\d\S*$", "", entry.object_repr or "")
+            if name != entry.object_repr:
+                entries.filter(pk=entry.pk).update(object_repr=name)
+    except Exception:  # best effort: never stop `migrate`
+        return

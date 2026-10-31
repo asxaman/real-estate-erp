@@ -16,7 +16,7 @@ from django.utils.safestring import mark_safe
 from unfold.admin import ModelAdmin, TabularInline
 from unfold.decorators import display
 
-from core.admin_utils import TooltipHelpMixin, badge, circle_avatar, format_amount, whatsapp_link
+from core.admin_utils import ExportPermissionMixin, TooltipHelpMixin, badge, circle_avatar, format_amount, whatsapp_link
 from core import sysconf
 from core.formats import fmt_date
 from core.models import AuditEntry
@@ -225,12 +225,16 @@ class PropertyListInline(ReadOnlyInline):
     fields = ("name", "code", "property_type", "emirate", "occupancy", "is_active")
     readonly_fields = ("occupancy",)
 
+    def get_queryset(self, request):
+        return super().get_queryset(request).annotate(
+            _units=Count("units"),
+            _vacant=Count("units", filter=Q(units__status=Unit.Status.VACANT)),
+        )
+
     @admin.display(description="Units / status")
     def occupancy(self, obj):
         if obj.has_units:
-            total = obj.units.count()
-            vacant = obj.units.filter(status=Unit.Status.VACANT).count()
-            return f"{total} units, {vacant} vacant"
+            return f"{obj._units} units, {obj._vacant} vacant"
         return obj.get_status_display() or "-"
 
 
@@ -268,7 +272,6 @@ class DocumentsFilter(admin.SimpleListFilter):
         return (("expired", "Has expired documents"), ("soon", f"Expiring within {sysconf.expiry_days()} days"))
 
     def queryset(self, request, queryset):
-        today = timezone.localdate()
         if self.value() == "expired":
             return queryset.filter(_docs_expired__gt=0)
         if self.value() == "soon":
@@ -303,7 +306,7 @@ class OwnerAdminForm(forms.ModelForm):
 
 
 @admin.register(Owner)
-class OwnerAdmin(ImportMixin, TooltipHelpMixin, ModelAdmin):
+class OwnerAdmin(ImportMixin, ExportPermissionMixin, TooltipHelpMixin, ModelAdmin):
     form = OwnerAdminForm
     compressed_fields = True
     list_display = (
@@ -455,16 +458,21 @@ class OwnerAdmin(ImportMixin, TooltipHelpMixin, ModelAdmin):
             return ""
         properties = obj.properties.filter(is_active=True)  # inactive properties are left out
         standalone = properties.filter(property_type__in=STANDALONE_TYPES)
-        units = Unit.objects.filter(property__owner=obj, property__is_active=True)
-        unit_total = units.count()
-        rentable = unit_total + standalone.count()
-        occupied = units.filter(status=Unit.Status.OCCUPIED).count() + standalone.filter(
-            status=Property.Status.OCCUPIED
-        ).count()
-        occupancy = f"{round(100 * occupied / rentable)}%" if rentable else "-"
-        rent = (units.aggregate(t=Sum("asking_rent"))["t"] or 0) + (
-            standalone.aggregate(t=Sum("annual_rent"))["t"] or 0
+        unit_stats = Unit.objects.filter(property__owner=obj, property__is_active=True).aggregate(
+            total=Count("pk"),
+            occupied=Count("pk", filter=Q(status=Unit.Status.OCCUPIED)),
+            rent=Sum("asking_rent"),
         )
+        standalone_stats = standalone.aggregate(
+            total=Count("pk"),
+            occupied=Count("pk", filter=Q(status=Property.Status.OCCUPIED)),
+            rent=Sum("annual_rent"),
+        )
+        unit_total = unit_stats["total"]
+        rentable = unit_total + standalone_stats["total"]
+        occupied = unit_stats["occupied"] + standalone_stats["occupied"]
+        occupancy = f"{round(100 * occupied / rentable)}%" if rentable else "-"
+        rent = (unit_stats["rent"] or 0) + (standalone_stats["rent"] or 0)
 
         pills = [badge(obj.get_owner_type_display(), "info" if not obj.is_company else "success")]
         pills.append(badge("Active", "success") if obj.is_active else badge("Inactive", "neutral"))
@@ -489,7 +497,7 @@ class OwnerAdmin(ImportMixin, TooltipHelpMixin, ModelAdmin):
             (properties.count(), "Active properties"),
             (unit_total, "Units"),
             (occupancy, "Occupancy"),
-            (format_amount(rent), "Asking rent, all units (AED / year)"),
+            (format_amount(rent), "Asking / annual rent, all (AED / year)"),
         ]
         return format_html(
             '<div class="erp-owner-header">{}<div class="erp-oh-main"><div class="erp-oh-name">{}</div>'
@@ -517,11 +525,11 @@ class OwnerAdmin(ImportMixin, TooltipHelpMixin, ModelAdmin):
         return super().change_view(request, object_id, form_url, extra_context)
 
     # ---- export / import ---------------------------------------------------------------
-    @admin.action(description="Export selected owners to Excel")
+    @admin.action(description="Export selected owners to Excel", permissions=["export"])
     def export_excel(self, request, queryset):
         return owner_tools.excel_response(queryset)
 
-    @admin.action(description="Export selected owners to CSV")
+    @admin.action(description="Export selected owners to CSV", permissions=["export"])
     def export_csv(self, request, queryset):
         return owner_tools.csv_response(queryset)
 

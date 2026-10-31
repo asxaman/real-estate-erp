@@ -216,8 +216,10 @@ def _grant_role_permissions():
     )
     everything = [f"{action}_{m}" for m in models_ for action in ("add", "change", "delete", "view")]
     everything += [f"{a}_ownerbankaccount" for a in ("add", "change", "delete", "view")]  # bank details
+    exports = ["export_owner", "export_property", "export_unit"]  # downloading lists to Excel / CSV
+    everything += exports
     view_only = [f"view_{m}" for m in models_]
-    view_only_money = view_only + ["view_ownerbankaccount"]  # only the Accountant sees bank accounts
+    view_only_money = view_only + ["view_ownerbankaccount"] + exports  # only the Accountant sees bank accounts
 
     role_perms = {
         "Property Manager": everything,

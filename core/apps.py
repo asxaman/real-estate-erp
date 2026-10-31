@@ -1,4 +1,5 @@
 from django.apps import AppConfig
+from django.db.models.signals import post_migrate
 
 
 class CoreConfig(AppConfig):
@@ -27,6 +28,22 @@ class CoreConfig(AppConfig):
             pre_save.connect(audit.remember_old, sender=model, dispatch_uid=f"{tag}-pre")
             post_save.connect(audit.log_save, sender=model, dispatch_uid=f"{tag}-save")
             post_delete.connect(audit.log_delete, sender=model, dispatch_uid=f"{tag}-del")
+
+        # Older log entries get their personal numbers hidden after `migrate`.
+        post_migrate.connect(audit.scrub_old_entries, sender=self, dispatch_uid="audit-scrub")
+
+        # Replaced or removed uploads are deleted from the disk.
+        from . import files
+
+        files.connect()
+
+        # Lock out password guessing on the login page.
+        from django.contrib.auth.signals import user_logged_in, user_login_failed
+
+        from . import lockout
+
+        user_login_failed.connect(lockout.record_failure, dispatch_uid="lockout-failed")
+        user_logged_in.connect(lockout.clear_failures, dispatch_uid="lockout-ok")
 
         # Unfold shows `user.avatar_url` in the sidebar's account block. Django's built-in User
         # has no such attribute, so add one that returns the profile picture (when there is one).

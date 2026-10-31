@@ -8,6 +8,8 @@ from django.db import models
 from django.db.models.signals import post_delete
 from django.dispatch import receiver
 
+from .validators import validate_file_content
+
 def validate_photo_size(file):
     from . import sysconf
 
@@ -16,7 +18,11 @@ def validate_photo_size(file):
         raise ValidationError(f"The picture is too large. The maximum size is {limit} MB.")
 
 
-PHOTO_VALIDATORS = [FileExtensionValidator(["jpg", "jpeg", "png", "webp"]), validate_photo_size]
+PHOTO_VALIDATORS = [
+    FileExtensionValidator(["jpg", "jpeg", "png", "webp"]),
+    validate_photo_size,
+    validate_file_content,
+]
 
 
 def profile_photo_path(instance, filename):
@@ -202,6 +208,14 @@ class SystemSettings(models.Model):
         "(or trade licence, for a company) are not on file. Takes effect when Leases are added.",
     )
 
+    # Development
+    development_mode = models.BooleanField(
+        "Development mode", default=True,
+        help_text="While you are still building and testing, leave this ticked: it allows the sample-data and "
+        "erase-everything tools. Untick it before real data goes in - those tools then stop working "
+        "and the demo accounts are switched off.",
+    )
+
     # Notifications
     toast_seconds = models.PositiveSmallIntegerField(
         "Pop-up notification time (seconds)", default=5,
@@ -228,3 +242,18 @@ class SystemSettings(models.Model):
     def load(cls):
         obj, _ = cls.objects.get_or_create(pk=1)
         return obj
+
+
+class LoginAttempt(models.Model):
+    """A wrong password entered on the login page (used to lock out password guessing)."""
+
+    username = models.CharField(max_length=150, db_index=True)
+    ip = models.GenericIPAddressField(null=True, blank=True, db_index=True)
+    created = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        verbose_name = "failed login"
+        verbose_name_plural = "failed logins"
+
+    def __str__(self):
+        return f"{self.username} from {self.ip or '?'}"

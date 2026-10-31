@@ -7,12 +7,14 @@ from django.core.exceptions import ValidationError
 from django.core.validators import FileExtensionValidator, RegexValidator
 from django.db import models
 from django.db.models import Q
+from django.db.models.functions import Lower
 from django.db.models.signals import post_delete
 from django.dispatch import receiver
 from django.utils import timezone
 
 from core import countries, sysconf
 from core.models import PHOTO_VALIDATORS
+from core.validators import validate_file_content
 from properties.models import (
     clean_trn,
     save_with_unique_code,
@@ -137,23 +139,27 @@ class Tenant(models.Model):
 
     class Meta:
         ordering = ["name"]
+        permissions = [("export_tenant", "Can export tenants to Excel / CSV")]
+        constraints = [
+            # The same rule as in clean(), enforced by the database too (capitals do not matter).
+            models.UniqueConstraint(
+                Lower("email"), name="unique_tenant_email_ci", condition=~Q(email=""),
+                violation_error_message="Another tenant already uses this email.",
+            ),
+        ]
 
     def __str__(self):
         return self.name
 
     def save(self, *args, **kwargs):
         self.name = " ".join((self.name or "").split())
-        old_photo = ""
-        if self.pk:
-            old_photo = Tenant.objects.filter(pk=self.pk).values_list("photo", flat=True).first() or ""
+        # (a replaced or removed picture is deleted from the disk by core/files.py)
         if self.code:
             super().save(*args, **kwargs)
         else:
             save_with_unique_code(
                 self, lambda: next_tenant_code(), lambda: super(Tenant, self).save(*args, **kwargs)
             )
-        if old_photo and old_photo != (self.photo.name or ""):
-            self.photo.storage.delete(old_photo)  # the picture was replaced or removed
 
     @classmethod
     def find_duplicate(cls, name, email, phone, exclude_pk=None):
@@ -303,6 +309,7 @@ class TenantDocument(models.Model):
         validators=[
             FileExtensionValidator(["pdf", "jpg", "jpeg", "png", "webp"]),
             validate_document_size,
+            validate_file_content,
         ],
         help_text="PDF, JPG, PNG or WebP.",
     )

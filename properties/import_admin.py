@@ -71,7 +71,13 @@ class ImportMixin:
                 context["errors"] = ["Choose a file first."]
             else:
                 update = request.POST.get("update_existing") == "on"
-                objects, errors = self.import_parse(upload, update=update)
+                if update and not self.has_change_permission(request):
+                    objects, errors = [], [
+                        "You may add new records but not change existing ones, so \"Update existing "
+                        "records\" cannot be used. Untick it, or ask an administrator."
+                    ]
+                else:
+                    objects, errors = self.import_parse(upload, update=update)
                 if errors:
                     context["errors"] = errors
                 elif not objects:

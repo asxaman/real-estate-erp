@@ -29,8 +29,11 @@ def _fee(prop):
 def property_rows(queryset):
     for prop in queryset.select_related("owner"):
         if prop.has_units:
-            units = prop.units.count()
-            vacant = prop.units.filter(status=Unit.Status.VACANT).count()
+            if hasattr(prop, "_unit_count"):  # already counted by the list page
+                units, vacant = prop._unit_count, prop._vacant_count
+            else:
+                units = prop.units.count()
+                vacant = prop.units.filter(status=Unit.Status.VACANT).count()
         else:
             units = vacant = ""
         yield [

@@ -18,7 +18,7 @@
     <input type="hidden" name="days" value="{{ window }}">
     <input class="erp-search" type="search" name="q" value="{{ search }}" placeholder="Search name, document or number">
     <button class="erp-btn" type="submit">Search</button>
-    <a class="erp-btn erp-btn-light" href="{{ export_url }}">Download as CSV</a>
+    {% if export_url %}<a class="erp-btn erp-btn-light" href="{{ export_url }}">Download as CSV</a>{% endif %}
     <span class="erp-dash-hello">{{ total }} document{{ total|pluralize }}</span>
   </form>
 

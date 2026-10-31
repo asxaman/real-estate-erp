@@ -32,6 +32,14 @@ class TooltipHelpMixin:
         return TooltipForm
 
 
+class ExportPermissionMixin:
+    """Exporting to Excel / CSV needs its own permission (for example "Can export tenants")."""
+
+    def has_export_permission(self, request):
+        opts = self.model._meta
+        return request.user.has_perm(f"{opts.app_label}.export_{opts.model_name}")
+
+
 def format_amount(value):
     """95000 -> '95,000'; 1200.5 -> '1,200.50'; nothing -> '-'. For list pages."""
     if value is None or value == "":
@@ -100,6 +108,8 @@ def whatsapp_number(phone):
     """
     The digits WhatsApp wants (country code first, no + or spaces).
     '050 123 4567' -> '971501234567'; '+44 7700 900123' -> '447700900123'; '' -> ''.
+    A number that starts with 0 is only taken as a UAE number when it has the shape of one;
+    otherwise there is no button (a wrong country code would message a stranger).
     """
     text = (phone or "").strip()
     digits = "".join(ch for ch in text if ch.isdigit())
@@ -112,7 +122,10 @@ def whatsapp_number(phone):
     if digits.startswith("971"):
         return digits
     if digits.startswith("0"):
-        return "971" + digits[1:]  # a local UAE number
+        rest = digits[1:]
+        if (len(rest) == 9 and rest[0] == "5") or (len(rest) == 8 and rest[0] in "234679"):
+            return "971" + rest  # a UAE mobile or landline written the local way
+        return ""  # country unknown
     if len(digits) == 9 and digits[0] == "5":
         return "971" + digits  # a UAE mobile written without the 0
     return digits

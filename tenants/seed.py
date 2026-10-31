@@ -50,8 +50,8 @@ def _grant_role_permissions():
     view_only = [f"view_{m}" for m in models_]
     editing = [f"{a}_{m}" for m in models_ for a in ("add", "change", "view")]
     role_perms = {
-        "Property Manager": everything,
-        "Accountant": view_only,
+        "Property Manager": everything + ["export_tenant"],
+        "Accountant": view_only + ["export_tenant"],
         "Leasing Agent": editing,
     }
     for role, codenames in role_perms.items():

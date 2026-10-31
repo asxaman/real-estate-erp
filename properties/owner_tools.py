@@ -16,6 +16,7 @@ EXPORT_HEADERS = [
 ]
 IMPORT_HEADERS = ["Name", "Type", "Email", "Phone", "Address", "Notes", "TRN"]
 MAX_IMPORT_ROWS = 1000
+MAX_IMPORT_BYTES = 5 * 1024 * 1024  # an import file may be at most 5 MB
 
 _ALIASES = {
     "name": "name", "owner name": "name",
@@ -136,6 +137,8 @@ def _cell_text(value):
 def _read_rows(upload):
     """Return a list of lists (first row = headers) from an .xlsx or .csv upload."""
     name = (upload.name or "").lower()
+    if getattr(upload, "size", 0) > MAX_IMPORT_BYTES:
+        raise ValueError(f"The file is larger than {MAX_IMPORT_BYTES // (1024 * 1024)} MB. Split it into smaller files.")
     if name.endswith(".xlsx"):
         from openpyxl import load_workbook
 
@@ -143,8 +146,9 @@ def _read_rows(upload):
         return [[_cell_text(c) for c in row] for row in sheet.iter_rows(values_only=True)]
     if name.endswith(".csv"):
         text = upload.read().decode("utf-8-sig", errors="replace")
+        header = text.split("\n", 1)[0]  # the separator is judged from the header line only
         try:
-            dialect = csv.Sniffer().sniff(text[:2000], delimiters=",;\t")
+            dialect = csv.Sniffer().sniff(header, delimiters=",;\t")
         except csv.Error:
             dialect = csv.excel
         return [[c.strip() for c in row] for row in csv.reader(io.StringIO(text), dialect)]

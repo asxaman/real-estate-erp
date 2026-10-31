@@ -22,7 +22,7 @@ T = Property.PropertyType
 
 
 def make_owner(name="Test Owner", **kwargs):
-    return Owner.objects.create(name=name, **kwargs)
+    return Owner.objects.get_or_create(name=name, defaults=kwargs)[0]
 
 
 def standalone(code="TST1", owner=None, **kwargs):
