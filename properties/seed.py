@@ -211,7 +211,9 @@ def _grant_role_permissions():
             content_type__app_label="properties", codename__in=codenames
         )
 
-    models_ = ("owner", "property", "unit", "ownercontact", "ownerdocument")
+    models_ = (
+        "owner", "property", "unit", "ownercontact", "ownerdocument", "propertydocument", "unitdocument", "unitphoto",
+    )
     everything = [f"{action}_{m}" for m in models_ for action in ("add", "change", "delete", "view")]
     everything += [f"{a}_ownerbankaccount" for a in ("add", "change", "delete", "view")]  # bank details
     view_only = [f"view_{m}" for m in models_]

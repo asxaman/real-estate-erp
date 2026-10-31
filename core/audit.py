@@ -23,6 +23,9 @@ AUDITED_MODELS = (
     "properties.OwnerContact",
     "properties.OwnerDocument",
     "properties.OwnerBankAccount",
+    "properties.PropertyDocument",
+    "properties.UnitDocument",
+    "properties.UnitPhoto",
     "tenants.Tenant",
     "tenants.TenantContact",
     "tenants.TenantDocument",
@@ -142,8 +145,37 @@ def related_owner_id(instance):
             return instance.property.owner_id
         if label in OWNER_CHILD_LABELS:
             return instance.owner_id
+        if label in ("properties.PropertyDocument",):
+            return instance.property.owner_id
+        if label in ("properties.UnitDocument", "properties.UnitPhoto"):
+            return instance.unit.property.owner_id
     except Exception:
         return None
+    return None
+
+
+def related_property_id(instance):
+    """Which property does this record belong to? (None when it is not property-related.)"""
+    label = instance._meta.label
+    try:
+        if label == "properties.Property":
+            return instance.pk
+        if label in ("properties.Unit", "properties.PropertyDocument"):
+            return instance.property_id
+        if label in ("properties.UnitDocument", "properties.UnitPhoto"):
+            return instance.unit.property_id
+    except Exception:
+        return None
+    return None
+
+
+def related_unit_id(instance):
+    """Which unit does this record belong to? (None when it is not unit-related.)"""
+    label = instance._meta.label
+    if label == "properties.Unit":
+        return instance.pk
+    if label in ("properties.UnitDocument", "properties.UnitPhoto"):
+        return instance.unit_id
     return None
 
 
@@ -165,6 +197,8 @@ def _write(action, instance, changes):
     AuditEntry.objects.create(
         related_owner_id=related_owner_id(instance),
         related_tenant_id=related_tenant_id(instance),
+        related_property_id=related_property_id(instance),
+        related_unit_id=related_unit_id(instance),
         user_id=user.pk if user is not None else None,
         username=user.get_username() if user is not None else "(system)",
         action=action,

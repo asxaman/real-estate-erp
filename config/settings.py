@@ -190,12 +190,29 @@ UNFOLD = {
     "SHOW_VIEW_ON_SITE": False,
     # Our own small style/behaviour layer (info icons, compact forms).
     # Bump the ?v= number whenever these files change so browsers reload them.
-    "STYLES": [lambda request: static("core/erp.css") + "?v=15"],
-    "SCRIPTS": [lambda request: static("core/erp.js") + "?v=16"],
+    "STYLES": [lambda request: static("core/erp.css") + "?v=16"],
+    "SCRIPTS": [lambda request: static("core/erp.js") + "?v=18"],
     "SIDEBAR": {
         "show_search": True,
         "show_all_applications": True,
         "navigation": [
+            {
+                "title": "Overview",
+                "separator": True,
+                "collapsible": True,
+                "items": [
+                    {
+                        "title": "Dashboard",
+                        "icon": "dashboard",
+                        "link": reverse_lazy("dashboard"),
+                    },
+                    {
+                        "title": "Expiring documents",
+                        "icon": "event_busy",
+                        "link": reverse_lazy("expiring_documents"),
+                    },
+                ],
+            },
             {
                 "title": "Property management",
                 "separator": True,

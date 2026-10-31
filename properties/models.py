@@ -49,6 +49,14 @@ def owner_document_path(instance, filename):
     return f"owner_documents/{uuid.uuid4().hex}{Path(filename).suffix.lower()}"
 
 
+def record_document_path(instance, filename):
+    return f"record_documents/{uuid.uuid4().hex}{Path(filename).suffix.lower()}"
+
+
+def unit_photo_path(instance, filename):
+    return f"unit_photos/{uuid.uuid4().hex}{Path(filename).suffix.lower()}"
+
+
 def validate_document_size(file):
     from core import sysconf
 
@@ -507,8 +515,29 @@ class Property(models.Model):
     map_link = models.URLField(
         "Map link", max_length=500, blank=True, help_text="Google Maps link (optional)."
     )
+    community = models.CharField(
+        "Area / community", max_length=100, blank=True, help_text="For example Marina, Al Reem Island or JVC."
+    )
     year_built = models.PositiveIntegerField(null=True, blank=True, validators=[validate_year_built])
     total_floors = models.PositiveIntegerField(null=True, blank=True, validators=TOTAL_FLOORS_VALIDATORS)
+    parking_spaces = models.PositiveSmallIntegerField(
+        "Parking spaces",
+        null=True,
+        blank=True,
+        validators=[MaxValueValidator(5000, message="Enter a number up to 5000.")],
+        help_text="Total parking spaces that come with the property (optional).",
+    )
+
+    # Official references (all optional)
+    title_deed_number = models.CharField("Title deed no.", max_length=60, blank=True)
+    plot_number = models.CharField("Plot no.", max_length=40, blank=True)
+    makani_number = models.CharField(
+        "Makani no.", max_length=20, blank=True, help_text="The 10-digit Makani number (Dubai), if any."
+    )
+    dewa_premise_number = models.CharField(
+        "Utility premise no.", max_length=30, blank=True,
+        help_text="DEWA / ADDC / SEWA premise number, whichever applies.",
+    )
 
     # Apartments only (a standalone apartment has no units, so it describes itself)
     apartment_type = models.CharField(
@@ -567,6 +596,9 @@ class Property(models.Model):
     )
     notes = models.TextField(blank=True)
     is_active = models.BooleanField(default=True)
+    inactive_reason = models.CharField(
+        "Reason", max_length=200, blank=True, help_text="Why this property is inactive (optional)."
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -592,6 +624,14 @@ class Property(models.Model):
         # Codes are stored in capitals (checked here so "rmt" and "RMT" count as the same code).
         self.code = (self.code or "").strip().upper()
         errors = {}
+
+        for name in ("community", "title_deed_number", "plot_number", "dewa_premise_number"):
+            setattr(self, name, " ".join((getattr(self, name) or "").split()))
+        self.makani_number = re.sub(r"[\s-]", "", self.makani_number or "")
+        if self.makani_number and not re.fullmatch(r"\d{10}", self.makani_number):
+            errors["makani_number"] = "A Makani number has 10 digits."
+        if self.is_active:
+            self.inactive_reason = ""
 
         if self.pk:
             if not self.has_units:
@@ -707,6 +747,28 @@ class Unit(models.Model):
         validators=AREA_VALIDATORS,
     )
     furnished = models.BooleanField(default=False)
+    parking_spaces = models.PositiveSmallIntegerField(
+        "Parking spaces", null=True, blank=True,
+        validators=[MaxValueValidator(50, message="Enter a number up to 50.")],
+    )
+
+    class View(models.TextChoices):
+        SEA = "sea", "Sea"
+        CITY = "city", "City"
+        GARDEN = "garden", "Garden"
+        POOL = "pool", "Pool"
+        MARINA = "marina", "Marina"
+        CANAL = "canal", "Canal"
+        PARK = "park", "Park"
+        STREET = "street", "Street"
+        COMMUNITY = "community", "Community"
+        OTHER = "other", "Other"
+
+    view = models.CharField("View", max_length=20, choices=View.choices, blank=True)
+    dewa_account_number = models.CharField(
+        "Utility account no.", max_length=30, blank=True,
+        help_text="DEWA / ADDC / SEWA account number for this unit (optional).",
+    )
     # Chosen by hand for now: once leases exist, Occupied / Vacant will follow the lease.
     status = models.CharField(
         max_length=20,
@@ -747,6 +809,7 @@ class Unit(models.Model):
         # "g01 " and "G01" are the same unit number: store it trimmed and in capitals.
         self.unit_number = normalise_unit_number(self.unit_number)
         self.floor = (self.floor or "").strip().upper()
+        self.dewa_account_number = " ".join((self.dewa_account_number or "").split())
         if not self.property_id:
             return
         prop = self.property
@@ -775,3 +838,128 @@ class Unit(models.Model):
                 )
         if errors:
             raise ValidationError(errors)
+
+
+def expiry_counts(documents):
+    """(expired, expiring soon) among a set of documents."""
+    today = timezone.localdate()
+    soon_limit = today + timedelta(days=sysconf.expiry_days())
+    return (
+        documents.filter(expiry_date__lt=today).count(),
+        documents.filter(expiry_date__gte=today, expiry_date__lte=soon_limit).count(),
+    )
+
+
+class ExpiringFile(models.Model):
+    """Common parts of a property / unit document: number, expiry date, file, notes."""
+
+    number = models.CharField("Number", max_length=60, blank=True)
+    expiry_date = models.DateField("Expires on", null=True, blank=True)
+    file = models.FileField(
+        "File",
+        upload_to=record_document_path,
+        blank=True,
+        validators=[FileExtensionValidator(["pdf", "jpg", "jpeg", "png", "webp"]), validate_document_size],
+        help_text="PDF, JPG, PNG or WebP.",
+    )
+    notes = models.CharField(max_length=200, blank=True)
+
+    # Documents of these kinds must carry an expiry date, and only one of each may exist.
+    EXPIRY_REQUIRED = ()
+    SINGLE = ()
+
+    class Meta:
+        abstract = True
+        ordering = ["doc_type", "expiry_date"]
+
+    def __str__(self):
+        return f"{self.get_doc_type_display()} {self.number}".strip()
+
+    def clean(self):
+        self.number = (self.number or "").strip()
+        if self.doc_type in self.EXPIRY_REQUIRED and self.expiry_date is None:
+            raise ValidationError({"expiry_date": "Enter the expiry date."})
+
+    @property
+    def expiry_status(self):
+        """'none' (no expiry date), 'valid', 'soon' or 'expired'."""
+        if self.expiry_date is None:
+            return "none"
+        today = timezone.localdate()
+        if self.expiry_date < today:
+            return "expired"
+        if self.expiry_date <= today + timedelta(days=sysconf.expiry_days()):
+            return "soon"
+        return "valid"
+
+
+class PropertyDocument(ExpiringFile):
+    """A property's paperwork: title deed, insurance, civil defence certificate ..."""
+
+    class DocType(models.TextChoices):
+        TITLE_DEED = "title_deed", "Title deed"
+        INSURANCE = "insurance", "Insurance"
+        CIVIL_DEFENCE = "civil_defence", "Civil Defence certificate"
+        OCCUPANCY = "occupancy", "Occupancy / completion certificate"
+        FLOOR_PLAN = "floor_plan", "Floor plan"
+        NOC = "noc", "No-objection certificate"
+        OTHER = "other", "Other"
+
+    EXPIRY_REQUIRED = ("insurance", "civil_defence")
+    SINGLE = ("title_deed",)
+
+    property = models.ForeignKey(Property, on_delete=models.CASCADE, related_name="documents")
+    doc_type = models.CharField("Document", max_length=20, choices=DocType.choices)
+
+    class Meta(ExpiringFile.Meta):
+        verbose_name = "document"
+        verbose_name_plural = "Documents"
+
+
+class UnitDocument(ExpiringFile):
+    """A unit's paperwork: title deed, floor plan, handover report ..."""
+
+    class DocType(models.TextChoices):
+        TITLE_DEED = "title_deed", "Title deed"
+        FLOOR_PLAN = "floor_plan", "Floor plan"
+        HANDOVER = "handover", "Handover / snagging report"
+        INVENTORY = "inventory", "Inventory list"
+        OTHER = "other", "Other"
+
+    SINGLE = ("title_deed",)
+
+    unit = models.ForeignKey(Unit, on_delete=models.CASCADE, related_name="documents")
+    doc_type = models.CharField("Document", max_length=20, choices=DocType.choices)
+
+    class Meta(ExpiringFile.Meta):
+        verbose_name = "document"
+        verbose_name_plural = "Documents"
+
+
+class UnitPhoto(models.Model):
+    unit = models.ForeignKey(Unit, on_delete=models.CASCADE, related_name="photos")
+    image = models.ImageField(
+        "Photo", upload_to=unit_photo_path, validators=PHOTO_VALIDATORS, help_text="JPG, PNG or WebP."
+    )
+    caption = models.CharField(max_length=100, blank=True)
+
+    class Meta:
+        ordering = ["pk"]
+        verbose_name = "photo"
+        verbose_name_plural = "Photos"
+
+    def __str__(self):
+        return self.caption or f"Photo {self.pk}"
+
+
+@receiver(post_delete, sender=PropertyDocument)
+@receiver(post_delete, sender=UnitDocument)
+def remove_property_document_file(sender, instance, **kwargs):
+    if instance.file:
+        instance.file.delete(save=False)
+
+
+@receiver(post_delete, sender=UnitPhoto)
+def remove_unit_photo_file(sender, instance, **kwargs):
+    if instance.image:
+        instance.image.delete(save=False)

@@ -247,6 +247,18 @@ Every dropdown list in the app is a styled, animated menu: it fades in and out, 
 - **Nationality**: pick a country. Imports accept names like Egypt or Egyptian.
 - **WhatsApp button**: click the green icon beside a phone number.
 
+## Properties and Units - tabs and extra details (update 14b)
+- **Property page**: header (units, vacant, occupancy, rent), then tabs Overview, Details, Units, Documents, Activity.
+- **Unit page**: header with the first photo, then tabs Overview, Photos, Documents, Activity.
+- All new fields are optional. Makani numbers have 10 digits.
+- **Documents** warn when they expire. **Activity** lists who changed what.
+- Untick **Active** on a property to give an optional reason.
+
+## Dashboard and Expiring documents (update 14c)
+- **Dashboard** is the first page after signing in (sidebar: Overview > Dashboard).
+- **Expiring documents** lists every owner, tenant, property and unit document with an expiry date. Use the buttons at the top to narrow it down, "Download as CSV" to take it into Excel.
+- People only see documents of the record types their role may view.
+
 ## Automated tests
 
 The project has automated checks of the business rules above. Run them after every update (with `(venv)` active):

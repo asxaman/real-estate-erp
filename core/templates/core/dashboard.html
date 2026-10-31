@@ -1,0 +1,94 @@
+{% extends "admin/base_site.html" %}
+
+{% block content %}
+<div class="erp-dash">
+  <div class="erp-dash-hello">Welcome back, <b>{{ greeting_name }}</b>. Here is where things stand today, {{ today|date:"j F Y" }}.</div>
+
+  {% if cards %}
+  <div class="erp-cards">
+    {% for card in cards %}
+      {% if card.url %}<a class="erp-card erp-tone-{{ card.tone }}" href="{{ card.url }}">{% else %}<div class="erp-card erp-tone-{{ card.tone }}">{% endif %}
+        <b>{{ card.value }}</b><span>{{ card.label }}</span>
+      {% if card.url %}</a>{% else %}</div>{% endif %}
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="erp-panel"><div class="erp-empty">There is nothing to show yet for your role. Use the menu on the left.</div></div>
+  {% endif %}
+
+  <div class="erp-panels">
+    {% if panels.documents_total is not None %}
+    <div class="erp-panel">
+      <h3>Documents that need attention <a href="{{ expiring_url }}">See all ({{ panels.documents_total }})</a></h3>
+      {% if panels.documents %}
+      <ul class="erp-list">
+        {% for d in panels.documents %}
+        <li>
+          <span><a href="{{ d.url }}">{{ d.who }}</a><small>{{ d.kind }} · {{ d.document }}{% if d.number %} {{ d.number }}{% endif %}</small></span>
+          <span class="erp-pill erp-pill-{{ d.state }}">{% if d.state == "expired" %}Expired {{ d.when }}{% else %}Expires {{ d.when }}{% endif %}</span>
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <div class="erp-empty">All documents are in date.</div>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    {% if panels.status_bars %}
+    <div class="erp-panel">
+      <h3>Units by status <a href="{{ units_url }}">Open units</a></h3>
+      <div class="erp-bars">
+        {% for bar in panels.status_bars %}
+        <div class="erp-bar-row erp-tone-{{ bar.tone }}">
+          <span>{{ bar.label }}</span>
+          <div class="erp-bar-track"><div class="erp-bar-fill" style="width: {{ bar.percent }}%;"></div></div>
+          <b>{{ bar.count }}</b>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+    {% if panels.vacant_total is not None %}
+    <div class="erp-panel">
+      <h3>Vacant units <a href="{{ units_url }}?status__exact=vacant">See all ({{ panels.vacant_total }})</a></h3>
+      {% if panels.vacant %}
+      <ul class="erp-list">
+        {% for unit in panels.vacant %}
+        <li>
+          <span><a href="{% url 'admin:properties_unit_change' unit.pk %}">{{ unit }}</a><small>{{ unit.property.name }} · {{ unit.get_unit_type_display }}</small></span>
+          <span>{% if unit.asking_rent %}AED {{ unit.asking_rent|floatformat:"0g" }}{% else %}-{% endif %}</span>
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <div class="erp-empty">No vacant units. Everything is let.</div>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    {% if panels.blacklisted %}
+    <div class="erp-panel">
+      <h3>Tenants to be careful with</h3>
+      <div class="erp-empty"><b>{{ panels.blacklisted }}</b> tenant{{ panels.blacklisted|pluralize }} marked Blacklisted.
+        <a href="{% url 'admin:tenants_tenant_changelist' %}?is_blacklisted__exact=1">Review</a></div>
+    </div>
+    {% endif %}
+
+    {% if panels.activity %}
+    <div class="erp-panel">
+      <h3>Recent activity {% if audit_url %}<a href="{{ audit_url }}">Full audit log</a>{% endif %}</h3>
+      <ul class="erp-list">
+        {% for entry in panels.activity %}
+        <li>
+          <span><b>{{ entry.username }}</b> {{ entry.get_action_display|lower }} {{ entry.model_label|lower }}<small>{{ entry.object_repr }}</small></span>
+          <small>{{ entry.timestamp|timesince }} ago</small>
+        </li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,56 @@
+{% extends "admin/base_site.html" %}
+
+{% block content %}
+<div class="erp-dash">
+  <div class="erp-filterbar">
+    <span class="erp-label">Show</span>
+    {% for key, text, url in states %}<a class="erp-chip{% if key == state %} is-on{% endif %}" href="{{ url }}">{{ text }}</a>{% endfor %}
+  </div>
+  <div class="erp-filterbar">
+    <span class="erp-label">Belongs to</span>
+    {% for key, text, url in kinds %}<a class="erp-chip{% if key == kind %} is-on{% endif %}" href="{{ url }}">{{ text }}</a>{% endfor %}
+    <span class="erp-label" style="margin-left:14px;">Due within</span>
+    {% for days, url in windows %}<a class="erp-chip{% if days == window %} is-on{% endif %}" href="{{ url }}">{{ days }} days</a>{% endfor %}
+  </div>
+  <form method="get" class="erp-filterbar">
+    <input type="hidden" name="state" value="{{ state }}">
+    <input type="hidden" name="kind" value="{{ kind }}">
+    <input type="hidden" name="days" value="{{ window }}">
+    <input class="erp-search" type="search" name="q" value="{{ search }}" placeholder="Search name, document or number">
+    <button class="erp-btn" type="submit">Search</button>
+    <a class="erp-btn erp-btn-light" href="{{ export_url }}">Download as CSV</a>
+    <span class="erp-dash-hello">{{ total }} document{{ total|pluralize }}</span>
+  </form>
+
+  <div class="erp-panel erp-scroll">
+    {% if page.object_list %}
+    <table class="erp-table">
+      <thead><tr><th>Belongs to</th><th>Record</th><th>Document</th><th>Number</th><th>Expires on</th><th>Status</th><th>File</th></tr></thead>
+      <tbody>
+      {% for row in page %}
+        <tr>
+          <td>{{ row.kind }}</td>
+          <td><a href="{{ row.url }}">{{ row.who }}</a></td>
+          <td>{{ row.document }}</td>
+          <td>{{ row.number|default:"-" }}</td>
+          <td>{{ row.date_text }}</td>
+          <td><span class="erp-pill erp-pill-{{ row.state }}">{% if row.state == "expired" %}Expired {{ row.when }}{% elif row.state == "soon" %}Expires {{ row.when }}{% else %}Valid, expires {{ row.when }}{% endif %}</span></td>
+          <td>{% if row.file %}<a href="{{ row.file }}" target="_blank" rel="noopener">View</a>{% else %}-{% endif %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="erp-empty">Nothing here. {% if state == "attention" %}No document is expired or due within {{ window }} days.{% endif %}</div>
+    {% endif %}
+  </div>
+
+  {% if page.has_previous or page.has_next %}
+  <div class="erp-pager">
+    {% if prev_url %}<a class="erp-btn erp-btn-light" href="{{ prev_url }}">Previous</a>{% endif %}
+    <span>Page {{ page.number }} of {{ page.paginator.num_pages }}</span>
+    {% if next_url %}<a class="erp-btn erp-btn-light" href="{{ next_url }}">Next</a>{% endif %}
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

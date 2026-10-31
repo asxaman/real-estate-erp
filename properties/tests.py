@@ -13,7 +13,9 @@ from django.utils import timezone
 from core.models import AuditEntry
 
 from . import import_tools, owner_tools
-from .models import Owner, OwnerBankAccount, OwnerContact, OwnerDocument, Property, Unit
+from .models import (
+    Owner, OwnerBankAccount, OwnerContact, OwnerDocument, Property, PropertyDocument, Unit, UnitDocument, UnitPhoto,
+)
 from .models_constants import floor_sort_key, iban_is_valid
 
 T = Property.PropertyType
@@ -732,3 +734,182 @@ class OwnerTrnAndReason(TestCase):
         owner.is_active = True
         owner.full_clean(exclude=["user", "photo"])
         self.assertEqual(owner.inactive_reason, "")
+
+
+class PropertyExtraFields(TestCase):
+    def test_references_are_tidied_and_checked(self):
+        prop = standalone("EXT1", title_deed_number="  12  / 2018 ", makani_number="12345 67890", community=" Al  Reem ")
+        prop.full_clean()
+        self.assertEqual(prop.title_deed_number, "12 / 2018")
+        self.assertEqual(prop.makani_number, "1234567890")
+        self.assertEqual(prop.community, "Al Reem")
+        with self.assertRaises(ValidationError) as ctx:
+            standalone("EXT2", makani_number="123").full_clean()
+        self.assertIn("makani_number", ctx.exception.message_dict)
+
+    def test_everything_new_is_optional(self):
+        standalone("EXT3").full_clean()
+        unit_ = Unit(property=building("EXT4"), unit_number="1", floor="1", unit_type="studio")
+        unit_.full_clean()
+
+    def test_inactive_reason_is_kept_only_while_inactive(self):
+        prop = standalone("EXT5", is_active=False, inactive_reason="Sold")
+        prop.full_clean()
+        self.assertEqual(prop.inactive_reason, "Sold")
+        prop.is_active = True
+        prop.full_clean()
+        self.assertEqual(prop.inactive_reason, "")
+
+    def test_parking_and_view_limits(self):
+        with self.assertRaises(ValidationError) as ctx:
+            standalone("EXT6", parking_spaces=6000).full_clean()
+        self.assertIn("parking_spaces", ctx.exception.message_dict)
+        bad = Unit(property=building("EXT7"), unit_number="1", floor="1", unit_type="studio", view="moon")
+        with self.assertRaises(ValidationError) as ctx:
+            bad.full_clean()
+        self.assertIn("view", ctx.exception.message_dict)
+        good = Unit(property=bad.property, unit_number="1", floor="1", unit_type="studio", view="sea", parking_spaces=2)
+        good.full_clean()
+
+
+class PropertyAndUnitDocuments(TestCase):
+    def test_expiry_rules(self):
+        prop = building("DOC1")
+        with self.assertRaises(ValidationError):
+            PropertyDocument(property=prop, doc_type="insurance").full_clean(exclude=["file"])
+        PropertyDocument(property=prop, doc_type="title_deed").full_clean(exclude=["file"])
+        PropertyDocument(
+            property=prop, doc_type="insurance", expiry_date=timezone.localdate() + timedelta(days=90)
+        ).full_clean(exclude=["file"])
+        unit_ = unit(prop)
+        UnitDocument(unit=unit_, doc_type="floor_plan").full_clean(exclude=["file"])
+
+    def test_expiry_status(self):
+        prop = building("DOC2")
+        today = timezone.localdate()
+        for days, expected in [(-1, "expired"), (5, "soon"), (400, "valid")]:
+            doc = PropertyDocument(property=prop, doc_type="insurance", expiry_date=today + timedelta(days=days))
+            self.assertEqual(doc.expiry_status, expected)
+        self.assertEqual(PropertyDocument(property=prop, doc_type="other").expiry_status, "none")
+
+    def test_only_one_title_deed(self):
+        from django.forms import inlineformset_factory
+
+        from .owner_admin import DocumentFormSet
+
+        prop = building("DOC3")
+        formset_class = inlineformset_factory(
+            Property, PropertyDocument, formset=DocumentFormSet, fields=("doc_type", "number"), extra=2
+        )
+        data = {
+            "documents-TOTAL_FORMS": "2", "documents-INITIAL_FORMS": "0",
+            "documents-MIN_NUM_FORMS": "0", "documents-MAX_NUM_FORMS": "1000",
+            "documents-0-doc_type": "title_deed", "documents-1-doc_type": "title_deed",
+        }
+        formset = formset_class(data, instance=prop)
+        self.assertFalse(formset.is_valid())
+        self.assertIn("title deed", " ".join(formset.non_form_errors()).lower())
+        data["documents-1-doc_type"] = "other"
+        self.assertTrue(formset_class(data, instance=prop).is_valid())
+
+
+class PropertyAndUnitPages(TestCase):
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+
+        self.admin = get_user_model().objects.create_superuser("boss11", "b11@example.com", "pw-12345-xyz")
+        self.client.force_login(self.admin)
+        self.prop = building("PG1", community="Marina", makani_number="1234567890", parking_spaces=40)
+        self.unit = unit(self.prop, "101", status="occupied", asking_rent=90000, view="sea", parking_spaces=1)
+        self.villa = standalone("PG2", is_active=False, inactive_reason="Being sold")
+        self.villa.save()
+
+    def test_pages_open(self):
+        from django.urls import reverse
+
+        for name, args in [
+            ("properties_property_changelist", []), ("properties_property_add", []),
+            ("properties_property_change", [self.prop.pk]), ("properties_property_change", [self.villa.pk]),
+            ("properties_unit_changelist", []), ("properties_unit_add", []),
+            ("properties_unit_change", [self.unit.pk]),
+        ]:
+            response = self.client.get(reverse(f"admin:{name}", args=args))
+            self.assertEqual(response.status_code, 200, name)
+
+    def test_headers_and_tabs(self):
+        from django.urls import reverse
+
+        page = self.client.get(reverse("admin:properties_property_change", args=[self.prop.pk])).content.decode()
+        for text in ("erp-owner-header", "Asking rent, all units", "Marina", "Activity", "Documents", "Units"):
+            self.assertIn(text, page, text)
+        villa = self.client.get(reverse("admin:properties_property_change", args=[self.villa.pk])).content.decode()
+        self.assertIn("Inactive: Being sold", villa)
+        unit_page = self.client.get(reverse("admin:properties_unit_change", args=[self.unit.pk])).content.decode()
+        for text in ("erp-owner-header", "PG1-101", "Photos", "Documents", "Activity"):
+            self.assertIn(text, unit_page, text)
+
+    def test_expiring_document_shows_a_warning(self):
+        from django.urls import reverse
+
+        PropertyDocument.objects.create(
+            property=self.prop, doc_type="insurance", expiry_date=timezone.localdate() + timedelta(days=3)
+        )
+        page = self.client.get(reverse("admin:properties_property_change", args=[self.prop.pk])).content.decode()
+        self.assertIn("expires on", page)
+        self.assertIn("expiring soon", page)
+
+    def test_history_is_linked_to_the_property_and_unit(self):
+        from core.audit import acting_as
+
+        with acting_as(self.admin):
+            PropertyDocument.objects.create(property=self.prop, doc_type="other")
+            doc = UnitDocument.objects.create(unit=self.unit, doc_type="other")
+            UnitPhoto.objects.create(unit=self.unit, image="unit_photos/x.jpg")
+            self.unit.asking_rent = 95000
+            self.unit.save()
+        mine = AuditEntry.objects.filter(related_property=self.prop)
+        self.assertTrue(mine.filter(model_label="Document").exists())
+        self.assertTrue(mine.filter(model_label="Unit", action="changed").exists())
+        self.assertTrue(mine.filter(model_label="Photo").exists())
+        self.assertEqual(AuditEntry.objects.filter(related_unit=self.unit).count(), mine.filter(related_unit=self.unit).count())
+        self.assertTrue(AuditEntry.objects.filter(related_unit=self.unit, object_id=str(doc.pk)).exists())
+        # property history also shows up on the owner's Activity tab
+        self.assertTrue(AuditEntry.objects.filter(related_owner=self.prop.owner, model_label="Photo").exists())
+
+    def test_old_history_is_attached_after_migrate(self):
+        from django.apps import apps
+
+        from .apps import _link_old_history
+
+        entry = AuditEntry.objects.create(
+            action="changed", model_label="Unit", object_id=str(self.unit.pk), object_repr="x", username="old"
+        )
+        other = AuditEntry.objects.create(
+            action="changed", model_label="Property", object_id=str(self.prop.pk), object_repr="y", username="old"
+        )
+        _link_old_history(apps, "default")
+        entry.refresh_from_db()
+        other.refresh_from_db()
+        self.assertEqual((entry.related_unit_id, entry.related_property_id), (self.unit.pk, self.prop.pk))
+        self.assertEqual(other.related_property_id, self.prop.pk)
+
+    def test_new_fields_are_exported(self):
+        from django.urls import reverse
+
+        url = reverse("admin:properties_property_changelist")
+        text = self.client.post(
+            url, {"action": "export_csv", "index": 0, "_selected_action": [self.prop.pk]}
+        ).content.decode("utf-8-sig")
+        self.assertIn("Makani no.", text)
+        self.assertIn("1234567890", text)
+        url = reverse("admin:properties_unit_changelist")
+        text = self.client.post(
+            url, {"action": "export_csv", "index": 0, "_selected_action": [self.unit.pk]}
+        ).content.decode("utf-8-sig")
+        self.assertIn("Sea", text)
+
+    def test_deleting_a_unit_removes_its_documents_and_photos(self):
+        UnitDocument.objects.create(unit=self.unit, doc_type="other")
+        UnitPhoto.objects.create(unit=self.unit, image="unit_photos/x.jpg")
+        self.unit.delete()
+        self.assertEqual((UnitDocument.objects.count(), UnitPhoto.objects.count()), (0, 0))

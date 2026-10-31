@@ -257,6 +257,7 @@
     var typeSelect = form.querySelector('[name="property_type"]');
     var ownerSelect = form.querySelector('[name="owner"]');
     var feeSelect = form.querySelector('[name="management_fee_type"]');
+    var activeBox = form.querySelector('[name="is_active"]');
 
     // Pill next to the "Property type" label
     var badge = null;
@@ -308,6 +309,9 @@
       var isStandalone = !!type && !isBuilding;
 
       var hide = [];
+      if (activeBox && activeBox.checked) {
+        hide.push("inactive_reason");  // a reason only matters while the property is inactive
+      }
       if (NO_BUILDING_INFO_TYPES.indexOf(type) !== -1) {
         hide.push("year_built", "total_floors");
       }
@@ -337,7 +341,7 @@
 
     // Native change events, plus a light check every 300 ms because the searchable
     // Owner dropdown does not always fire a native change event.
-    [typeSelect, ownerSelect, feeSelect].forEach(function (el) {
+    [typeSelect, ownerSelect, feeSelect, activeBox].forEach(function (el) {
       if (el) {
         el.addEventListener("change", refresh);
       }
@@ -349,6 +353,7 @@
         ownerSelect ? ownerSelect.value : "",
         ownerIsCompany() ? "company" : "other",
         feeSelect ? feeSelect.value : "",
+        activeBox ? activeBox.checked : "",
       ].join("|");
       if (state !== lastState) {
         lastState = state;

@@ -50,6 +50,61 @@ def ensure_company_owner(sender, apps=None, using="default", **kwargs):
         Unit.objects.using(using).filter(status="").update(status="vacant")
 
 
+    _link_old_history(apps, using)
+
+
+def _link_old_history(apps, using):
+    """Property and unit history written before the Activity tabs existed: attach it to its page."""
+    try:
+        Entry = apps.get_model("core", "AuditEntry")
+        Unit = apps.get_model("properties", "Unit")
+    except LookupError:
+        return
+    if not {"related_property", "related_unit"} <= {f.name for f in Entry._meta.get_fields()}:
+        return
+    entries = Entry.objects.using(using).filter(related_property__isnull=True, related_unit__isnull=True)
+    properties = set(apps.get_model("properties", "Property").objects.using(using).values_list("pk", flat=True))
+    units = dict(Unit.objects.using(using).values_list("pk", "property_id"))
+    for entry in entries.filter(model_label__in=["Property", "Unit"]).iterator():
+        if not str(entry.object_id).isdigit():
+            continue
+        pk = int(entry.object_id)
+        if entry.model_label == "Property" and pk in properties:
+            Entry.objects.using(using).filter(pk=entry.pk).update(related_property_id=pk)
+        elif entry.model_label == "Unit" and pk in units:
+            Entry.objects.using(using).filter(pk=entry.pk).update(
+                related_unit_id=pk, related_property_id=units[pk]
+            )
+
+
+NEW_MODELS = ("propertydocument", "unitdocument", "unitphoto")
+ROLE_ACCESS = {  # role -> actions allowed on the property / unit documents and photos
+    "Property Manager": ("add", "change", "delete", "view"),
+    "Accountant": ("view",),
+    "Leasing Agent": ("view",),
+}
+
+
+def grant_new_permissions(sender, apps=None, using="default", **kwargs):
+    """After `migrate`: roles that already exist get access to the property / unit documents and photos."""
+    if apps is None:
+        return
+    try:
+        Group = apps.get_model("auth", "Group")
+        Permission = apps.get_model("auth", "Permission")
+    except LookupError:
+        return
+    for role, actions in ROLE_ACCESS.items():
+        group = Group.objects.using(using).filter(name=role).first()
+        if group is None:
+            continue
+        codenames = [f"{action}_{model}" for model in NEW_MODELS for action in actions]
+        found = Permission.objects.using(using).filter(
+            content_type__app_label="properties", codename__in=codenames
+        )
+        group.permissions.add(*found)
+
+
 class PropertiesConfig(AppConfig):
     default_auto_field = "django.db.models.BigAutoField"
     name = "properties"
@@ -60,3 +115,4 @@ class PropertiesConfig(AppConfig):
         from . import seed  # noqa: F401
 
         post_migrate.connect(ensure_company_owner, sender=self)
+        post_migrate.connect(grant_new_permissions, sender=self)

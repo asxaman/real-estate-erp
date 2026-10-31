@@ -80,6 +80,23 @@ class AuditEntry(models.Model):
         db_constraint=False,
         related_name="audit_entries",
     )
+    # The property / unit this entry belongs to (Activity tabs on their pages); no database constraint.
+    related_property = models.ForeignKey(
+        "properties.Property",
+        null=True,
+        blank=True,
+        on_delete=models.DO_NOTHING,
+        db_constraint=False,
+        related_name="audit_entries",
+    )
+    related_unit = models.ForeignKey(
+        "properties.Unit",
+        null=True,
+        blank=True,
+        on_delete=models.DO_NOTHING,
+        db_constraint=False,
+        related_name="audit_entries",
+    )
     # {"field name": [old value, new value], ...}
     changes = models.JSONField(default=dict, blank=True)
 

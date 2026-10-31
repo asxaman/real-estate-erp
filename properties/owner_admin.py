@@ -140,7 +140,7 @@ class DocumentFormSet(BaseInlineFormSet):
             if not data or data.get("DELETE"):
                 continue
             kind = data.get("doc_type")
-            if kind in SINGLE_DOCUMENT_TYPES:
+            if kind in getattr(self.model, "SINGLE", SINGLE_DOCUMENT_TYPES):
                 if kind in seen:
                     label = dict(form.fields["doc_type"].choices).get(kind, kind)
                     raise ValidationError(

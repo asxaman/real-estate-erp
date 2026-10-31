@@ -1,5 +1,21 @@
 # Changelog
 
+## Update 14c - Dashboard and Expiring documents
+Run `python manage.py migrate` (no new tables; it also gives the existing Property Manager, Accountant and Leasing Agent roles access to the new property / unit documents and photos).
+- The home page is now a Dashboard: counts (active properties, units, vacant units, occupancy, owners, tenants, expired and expiring documents), the documents that need attention, units by status, vacant units, blacklisted tenants and (for administrators) recent activity. Each card only shows what the signed-in person is allowed to see, and most cards open the matching list.
+- New "Expiring documents" page (sidebar, under Overview) gathering the documents of owners, tenants, properties and units in one list, soonest first. Filter by status, by who they belong to, and by how far ahead to look (30 / 60 / 90 / 180 days); search; download as CSV.
+
+## Update 14b - Richer Properties and Units
+Run `python manage.py makemigrations` then `migrate`.
+- Property and Unit pages now have a summary header and tabs. Property: Overview, Details, Units (buildings), Documents, Activity. Unit: Overview, Photos, Documents, Activity.
+- New optional property fields: area / community, parking spaces, title deed no., plot no., Makani no. (10 digits), utility premise no. (DEWA / ADDC / SEWA).
+- New optional unit fields: parking spaces, view, utility account no.
+- Documents for properties (title deed, insurance, Civil Defence certificate, occupancy certificate, floor plan, NOC, other) and units (title deed, floor plan, handover report, inventory, other). Insurance and Civil Defence need an expiry date; only one title deed each. A warning shows when a document is expired or about to expire.
+- Unit photos (up to 30 per unit). The first photo shows in the unit's header.
+- Activity tab on properties and units (from the audit log). Property and unit changes also appear on the owner's Activity tab. Older history is attached automatically by `migrate`.
+- Properties can be made inactive with an optional reason (Delete still works).
+- Properties and Units exports include the new fields. (Import of the new columns comes with the "update existing" import in update 14d.)
+
 ## Update 14a - Richer Owners and Tenants
 Run `python manage.py makemigrations` then `migrate`.
 - Tenants: new Identity tab (Emirates ID no., passport no., date of birth for people; trade licence no., authorised signatory for companies; TRN for both). All optional.
