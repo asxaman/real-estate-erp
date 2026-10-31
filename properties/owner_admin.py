@@ -16,7 +16,7 @@ from django.utils.safestring import mark_safe
 from unfold.admin import ModelAdmin, TabularInline
 from unfold.decorators import display
 
-from core.admin_utils import TooltipHelpMixin, badge, circle_avatar, format_amount
+from core.admin_utils import TooltipHelpMixin, badge, circle_avatar, format_amount, whatsapp_link
 from core import sysconf
 from core.formats import fmt_date
 from core.models import AuditEntry
@@ -290,6 +290,8 @@ class OwnerAdminForm(forms.ModelForm):
             "name": "e.g. Khalifa Al Mansoori",
             "email": "name@example.com",
             "phone": "+971 50 123 4567",
+            "trn": "15 digits",
+            "inactive_reason": "Why this owner is no longer active",
         }
         for name, text in hints.items():
             if name in self.fields:
@@ -327,7 +329,9 @@ class OwnerAdmin(ImportMixin, TooltipHelpMixin, ModelAdmin):
             "fields": (
                 ("name", "owner_type"),
                 ("code", "is_active"),
+                "inactive_reason",
                 ("email", "phone"),
+                "trn",
                 "address",
                 "photo",
                 "notes",
@@ -341,7 +345,7 @@ class OwnerAdmin(ImportMixin, TooltipHelpMixin, ModelAdmin):
     def get_readonly_fields(self, request, obj=None):
         fixed = ("code", "summary_header")
         if obj is not None and obj.is_company:  # the built-in owner cannot be changed this way
-            return fixed + ("name", "is_active", "owner_type")
+            return fixed + ("name", "is_active", "owner_type", "inactive_reason")
         return fixed
 
     def get_inline_instances(self, request, obj=None):
@@ -407,7 +411,12 @@ class OwnerAdmin(ImportMixin, TooltipHelpMixin, ModelAdmin):
     def contact(self, obj):
         parts = []
         if obj.phone:
-            parts.append(format_html('<a href="tel:{}">{}</a>', obj.phone.replace(" ", ""), obj.phone))
+            parts.append(
+                format_html(
+                    '<span class="erp-phone-line"><a href="tel:{}">{}</a>{}</span>',
+                    obj.phone.replace(" ", ""), obj.phone, whatsapp_link(obj.phone),
+                )
+            )
         if obj.email:
             parts.append(format_html('<a href="mailto:{}">{}</a>', obj.email, obj.email))
         return format_html_join(mark_safe("<br>"), "{}", ((p,) for p in parts)) if parts else "-"
@@ -464,7 +473,17 @@ class OwnerAdmin(ImportMixin, TooltipHelpMixin, ModelAdmin):
         if soon:
             pills.append(badge(f"{soon} document(s) expiring soon", "warning"))
 
-        contact = " · ".join(x for x in (obj.code, obj.phone, obj.email) if x)
+        bits = [obj.code]
+        if obj.phone:
+            bits.append(format_html('<span class="erp-phone-line">{}{}</span>', obj.phone, whatsapp_link(obj.phone)))
+        if obj.email:
+            bits.append(obj.email)
+        contact = format_html_join(mark_safe(" · "), "{}", ((b,) for b in bits if b))
+        extra = (
+            format_html('<div class="erp-oh-sub" style="color:#6b7280;font-weight:600;">Inactive: {}</div>', obj.inactive_reason)
+            if (not obj.is_active and obj.inactive_reason)
+            else ""
+        )
         stats = [
             (properties.count(), "Active properties"),
             (unit_total, "Units"),
@@ -473,12 +492,13 @@ class OwnerAdmin(ImportMixin, TooltipHelpMixin, ModelAdmin):
         ]
         return format_html(
             '<div class="erp-owner-header">{}<div class="erp-oh-main"><div class="erp-oh-name">{}</div>'
-            '<div class="erp-oh-pills">{}</div><div class="erp-oh-sub">{}</div></div>'
+            '<div class="erp-oh-pills">{}</div><div class="erp-oh-sub">{}</div>{}</div>'
             '<div class="erp-oh-stats">{}</div></div>',
             _owner_avatar(obj, 64),
             obj.name,
             format_html_join("", "{}", ((p,) for p in pills)),
             contact,
+            extra,
             format_html_join(
                 "", '<div class="erp-oh-stat"><b>{}</b><span>{}</span></div>', stats
             ),

@@ -11,10 +11,22 @@ from django.db.models.signals import post_delete
 from django.dispatch import receiver
 from django.utils import timezone
 
-from core import sysconf
+from core import countries, sysconf
 from core.models import PHOTO_VALIDATORS
-from properties.models import save_with_unique_code, validate_document_rules, validate_document_size
-from properties.models_constants import PHONE_ERROR, PHONE_REGEX, phone_key
+from properties.models import (
+    clean_trn,
+    save_with_unique_code,
+    validate_document_rules,
+    validate_document_size,
+    validate_trn,
+)
+from properties.models_constants import (
+    PHONE_ERROR,
+    PHONE_REGEX,
+    emirates_id_is_valid,
+    normalise_emirates_id,
+    phone_key,
+)
 
 
 def tenant_photo_path(instance, filename):
@@ -32,6 +44,11 @@ def next_tenant_code():
         if match:
             numbers.append(int(match.group(1)))
     return f"TEN-{max(numbers, default=0) + 1:04d}"
+
+
+def validate_birth_date(value):
+    if value > timezone.localdate() or value.year < 1900:
+        raise ValidationError("Enter a valid date of birth.")
 
 
 def same_person(first, second):
@@ -71,7 +88,8 @@ class Tenant(models.Model):
         "(JPG, PNG or WebP).",
     )
     nationality = models.CharField(
-        max_length=60, help_text="For a company: the country where it is registered."
+        max_length=60, choices=countries.CHOICES,
+        help_text="For a company: the country where it is registered.",
     )
     email = models.EmailField()
     phone = models.CharField(
@@ -81,9 +99,41 @@ class Tenant(models.Model):
         help_text="Example: +971 50 123 4567.",
     )
     address = models.TextField(blank=True)
+    # Identity (all optional). Individuals use the first three, companies the next two.
+    emirates_id_number = models.CharField(
+        "Emirates ID number", max_length=20, blank=True, help_text="Example: 784-1990-1234567-1."
+    )
+    passport_number = models.CharField("Passport number", max_length=30, blank=True)
+    date_of_birth = models.DateField(
+        "Date of birth", null=True, blank=True, validators=[validate_birth_date]
+    )
+    trade_licence_number = models.CharField("Trade licence number", max_length=60, blank=True)
+    authorised_signatory = models.CharField(
+        "Authorised signatory", max_length=150, blank=True,
+        help_text="The person who signs for the company.",
+    )
+    trn = models.CharField(
+        "Tax registration number (TRN)", max_length=20, blank=True, validators=[validate_trn],
+        help_text="Optional. 15 digits. Needed for VAT invoices to companies.",
+    )
+    is_blacklisted = models.BooleanField(
+        "Blacklisted", default=False,
+        help_text="Tick to warn everyone that this tenant should not be given a new lease.",
+    )
+    blacklist_reason = models.CharField("Reason", max_length=200, blank=True)
     notes = models.TextField(blank=True)
     is_active = models.BooleanField(default=True)
+    inactive_reason = models.CharField(
+        "Reason for being inactive", max_length=200, blank=True,
+        help_text="Optional. Why this tenant is no longer active.",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
+
+    # The documents a tenant must have on file (checked by missing_documents()).
+    REQUIRED_DOCUMENTS = {
+        TenantType.INDIVIDUAL: ("emirates_id", "passport"),
+        TenantType.COMPANY: ("trade_licence",),
+    }
 
     class Meta:
         ordering = ["name"]
@@ -124,18 +174,54 @@ class Tenant(models.Model):
     def clean(self):
         self.name = " ".join((self.name or "").split())
         self.email = (self.email or "").strip().lower()
+        self.trn = clean_trn(self.trn)
+        errors = {}
+
+        # Individuals have an Emirates ID, passport and birth date; companies a licence and signatory.
+        if self.tenant_type == self.TenantType.COMPANY:
+            self.emirates_id_number = ""
+            self.passport_number = ""
+            self.date_of_birth = None
+        else:
+            self.trade_licence_number = ""
+            self.authorised_signatory = ""
+        self.emirates_id_number = (self.emirates_id_number or "").strip()
+        if self.emirates_id_number:
+            if emirates_id_is_valid(self.emirates_id_number):
+                self.emirates_id_number = normalise_emirates_id(self.emirates_id_number)
+            else:
+                errors["emirates_id_number"] = "An Emirates ID has 15 digits, for example 784-1990-1234567-1."
+
+        self.blacklist_reason = (self.blacklist_reason or "").strip()
+        if self.is_blacklisted:
+            if not self.blacklist_reason:
+                errors["blacklist_reason"] = "Say why this tenant is blacklisted."
+        else:
+            self.blacklist_reason = ""
+        if self.is_active:
+            self.inactive_reason = ""  # a reason only makes sense while the tenant is inactive
+
         other = Tenant.find_duplicate(self.name, self.email, self.phone, exclude_pk=self.pk)
         if other is not None:
             who = f"{other.code} {other.name}".strip()
             if self.email and self.email == (other.email or "").lower():
-                raise ValidationError(
-                    {"email": f"Another tenant already uses this email: {who}. "
-                              "If it is the same tenant, open that record instead."}
+                errors["email"] = (
+                    f"Another tenant already uses this email: {who}. "
+                    "If it is the same tenant, open that record instead."
                 )
-            raise ValidationError(
-                {"phone": f"A tenant with this name and phone number already exists: {who}. "
-                          "If it is the same tenant, open that record instead."}
-            )
+            else:
+                errors["phone"] = (
+                    f"A tenant with this name and phone number already exists: {who}. "
+                    "If it is the same tenant, open that record instead."
+                )
+        if errors:
+            raise ValidationError(errors)
+
+    def missing_documents(self):
+        """Names of the required documents this tenant has not got on file (empty = complete)."""
+        have = {doc.doc_type for doc in self.documents.all()}
+        labels = dict(TenantDocument.DocType.choices)
+        return [labels[kind] for kind in self.REQUIRED_DOCUMENTS.get(self.tenant_type, ()) if kind not in have]
 
     def document_counts(self):
         """(expired, expiring soon) among this tenant's documents."""

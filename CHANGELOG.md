@@ -1,5 +1,16 @@
 # Changelog
 
+## Update 14a - Richer Owners and Tenants
+Run `python manage.py makemigrations` then `migrate`.
+- Tenants: new Identity tab (Emirates ID no., passport no., date of birth for people; trade licence no., authorised signatory for companies; TRN for both). All optional.
+- Owners: TRN (Tax Registration Number, 15 digits) added. Optional.
+- Nationality is now a country dropdown. Old free-text nationalities ("Egyptian", "UAE") are converted by `migrate`; any it cannot recognise must be chosen again when that tenant is edited. Imports accept country names and common nationalities.
+- Tenants can be marked Blacklisted with a reason; they show a red badge in the list and a warning on their page. (The warning when creating a lease arrives with Leases.)
+- Owners and tenants can be made inactive with an optional reason. Deleting still works as before.
+- Tenants list: "Complete / Incomplete" documents badge and filter (Emirates ID + passport for people, trade licence for companies). New System setting "Require complete documents" for blocking leases; it takes effect once Leases exist.
+- A green WhatsApp-style chat button beside phone numbers opens a chat with that number.
+- Tenant export/import now include the new fields.
+
 ## Update 13 - Cleanup of Owners, Properties, Units and Tenants
 Run `python manage.py makemigrations` then `migrate` (the unit status, a few limits and some help texts changed).
 - Tenants: the same email cannot be used twice, and the same name with the same phone number (written any way, +971 / 05...) is refused too. Importing a file twice no longer creates tenants twice.

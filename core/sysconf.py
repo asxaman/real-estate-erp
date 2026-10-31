@@ -18,6 +18,7 @@ DEFAULTS = {
     "expiry_warning_days": 30,
     "max_photo_mb": 2,
     "max_document_mb": 10,
+    "require_complete_documents": False,
     "toast_seconds": 5,
 }
 

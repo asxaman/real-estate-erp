@@ -370,6 +370,55 @@
     }
   }
 
+  /* ---- Owner and tenant pages: show only the fields that apply ---- */
+  function statusExtras(form) {
+    var active = form.querySelector('[name="is_active"]');
+    var blacklisted = form.querySelector('[name="is_blacklisted"]');
+    var type = form.querySelector('[name="tenant_type"]');
+
+    function applyRules() {
+      Array.prototype.forEach.call(form.querySelectorAll("[data-erp-hid]"), function (n) {
+        n.style.display = "";
+        n.removeAttribute("data-erp-hid");
+      });
+      var hide = [];
+      if (active && active.checked) {
+        hide.push("inactive_reason");  // a reason only matters for an inactive record
+      }
+      if (blacklisted && !blacklisted.checked) {
+        hide.push("blacklist_reason");
+      }
+      if (type) {
+        if (type.value === "company") {
+          hide.push("emirates_id_number", "passport_number", "date_of_birth");
+        } else {
+          hide.push("trade_licence_number", "authorised_signatory");
+        }
+      }
+      hideFields(form, hide);
+    }
+
+    [active, blacklisted, type].forEach(function (el) {
+      if (el) {
+        el.addEventListener("change", applyRules);
+      }
+    });
+    // The themed dropdown does not always fire a native change event, so also check regularly.
+    var last = "";
+    window.setInterval(function () {
+      var state = [
+        active ? active.checked : "",
+        blacklisted ? blacklisted.checked : "",
+        type ? type.value : "",
+      ].join("|");
+      if (state !== last) {
+        last = state;
+        applyRules();
+      }
+    }, 300);
+    applyRules();
+  }
+
   /* ---- Unsaved-changes guard: our own pop-up instead of the browser's "Leave site?" box ---- */
   function leaveGuard(form) {
     var initial = null;
@@ -1356,6 +1405,9 @@
     leaveGuard(form);
     if (form.id === "property_form") {
       propertyFormExtras(form);
+    }
+    if (form.id === "owner_form" || form.id === "tenant_form") {
+      statusExtras(form);
     }
     window.addEventListener("scroll", hideTip, true);
     document.addEventListener("keydown", function (e) {

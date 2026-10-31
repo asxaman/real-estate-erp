@@ -87,7 +87,7 @@ class TenantRequiredFields(TestCase):
             tenant.full_clean(exclude=["photo", "code"])
         self.assertTrue({"email", "phone", "nationality"} <= set(caught.exception.message_dict))
         Tenant(
-            name="Alpha", email="a@example.com", phone="+971 50 123 4567", nationality="Indian"
+            name="Alpha", email="a@example.com", phone="+971 50 123 4567", nationality="India"
         ).full_clean(exclude=["photo", "code"])
 
 
@@ -120,7 +120,8 @@ class TenantPages(TestCase):
 
 
 def _tenant(name="Alpha", email="alpha@example.com", phone="+971 50 123 4567", **kwargs):
-    return Tenant(name=name, email=email, phone=phone, nationality="Indian", **kwargs)
+    kwargs.setdefault("nationality", "India")
+    return Tenant(name=name, email=email, phone=phone, **kwargs)
 
 
 class DuplicateTenants(TestCase):
@@ -241,3 +242,156 @@ class TenantDocumentRules(TestCase):
         self.assertTrue(formset.is_valid(), formset.errors)
         formset.save()
         self.assertTrue(TenantContact.objects.get(tenant=self.tenant).is_primary)
+
+
+class TenantIdentityFields(TestCase):
+    def _problems(self, tenant):
+        from django.core.exceptions import ValidationError
+
+        try:
+            tenant.full_clean(exclude=["photo", "code"])
+        except ValidationError as exc:
+            return exc.message_dict
+        return {}
+
+    def test_emirates_id_trn_and_birth_date(self):
+        tenant = _tenant(emirates_id_number="784199012345671", trn="100 2003 0040 0003", date_of_birth="1990-05-01")
+        self.assertEqual(self._problems(tenant), {})
+        self.assertEqual(tenant.emirates_id_number, "784-1990-1234567-1")
+        self.assertEqual(tenant.trn, "100200300400003")
+        self.assertIn("emirates_id_number", self._problems(_tenant(emirates_id_number="123")))
+        self.assertIn("trn", self._problems(_tenant(trn="12345")))
+        future = (timezone.localdate() + timedelta(days=10)).isoformat()
+        self.assertIn("date_of_birth", self._problems(_tenant(date_of_birth=future)))
+
+    def test_individual_and_company_keep_only_their_own_fields(self):
+        person = _tenant(trade_licence_number="CN-1", authorised_signatory="Boss", passport_number="A123")
+        person.full_clean(exclude=["photo", "code"])
+        self.assertEqual((person.trade_licence_number, person.authorised_signatory), ("", ""))
+        self.assertEqual(person.passport_number, "A123")
+        firm = _tenant(
+            name="Firm", email="f@example.com", tenant_type="company",
+            passport_number="A123", emirates_id_number="784199012345671", trade_licence_number="CN-1",
+        )
+        firm.full_clean(exclude=["photo", "code"])
+        self.assertEqual((firm.passport_number, firm.emirates_id_number, firm.date_of_birth), ("", "", None))
+        self.assertEqual(firm.trade_licence_number, "CN-1")
+
+    def test_blacklist_needs_a_reason(self):
+        self.assertIn("blacklist_reason", self._problems(_tenant(is_blacklisted=True)))
+        tenant = _tenant(is_blacklisted=True, blacklist_reason="Bounced three cheques")
+        self.assertEqual(self._problems(tenant), {})
+        ok = _tenant(blacklist_reason="left over text")
+        ok.full_clean(exclude=["photo", "code"])
+        self.assertEqual(ok.blacklist_reason, "")  # not blacklisted, so no reason is kept
+
+    def test_inactive_reason_is_kept_only_while_inactive(self):
+        tenant = _tenant(is_active=False, inactive_reason="Moved abroad")
+        tenant.full_clean(exclude=["photo", "code"])
+        self.assertEqual(tenant.inactive_reason, "Moved abroad")
+        tenant.is_active = True
+        tenant.full_clean(exclude=["photo", "code"])
+        self.assertEqual(tenant.inactive_reason, "")
+
+    def test_nationality_must_be_a_country(self):
+        self.assertIn("nationality", self._problems(_tenant(nationality="Egyptian")))
+        self.assertEqual(self._problems(_tenant(nationality="Egypt")), {})
+
+
+class CountriesAndImport(TestCase):
+    def test_match(self):
+        from core import countries
+
+        for text, expected in [("Egyptian", "Egypt"), ("egypt", "Egypt"), ("UAE", "United Arab Emirates"),
+                               ("U.K.", "United Kingdom"), ("Sri Lankan", "Sri Lanka"), ("Atlantis", "")]:
+            self.assertEqual(countries.match(text), expected, text)
+        self.assertEqual(countries.COUNTRIES[0], "United Arab Emirates")
+        self.assertEqual(len(countries.COUNTRIES), len(set(countries.COUNTRIES)))
+
+    def test_import_turns_nationalities_into_countries(self):
+        tenants, errors = tenant_tools.parse_tenant_file(SimpleUploadedFile("t.csv", (
+            "Name,Nationality,Email,Phone\n"
+            "Omar,Jordanian,omar@example.com,+971 50 777 8888\n"
+            "Lina,UAE,lina@example.com,+971 50 777 9999\n"
+            "Zed,Atlantis,zed@example.com,+971 50 777 0000\n"
+        ).encode("utf-8")))
+        self.assertEqual([t.nationality for t in tenants], ["Jordan", "United Arab Emirates"])
+        self.assertEqual(len(errors), 1)
+        self.assertIn("not recognised", errors[0])
+
+    def test_old_free_text_nationalities_are_repaired_after_migrate(self):
+        from django.apps import apps
+
+        from .apps import fix_nationalities
+
+        Tenant.objects.create(name="Old One", nationality="Egyptian")
+        Tenant.objects.create(name="Odd One", nationality="Martian")
+        fix_nationalities(sender=None, apps=apps)
+        self.assertEqual(Tenant.objects.get(name="Old One").nationality, "Egypt")
+        self.assertEqual(Tenant.objects.get(name="Odd One").nationality, "Martian")  # unknown: left for a person
+
+
+class DocumentsOnFile(TestCase):
+    def setUp(self):
+        self.person = _tenant()
+        self.person.save()
+        self.firm = _tenant(name="Firm LLC", email="f@example.com", phone="+971 4 000 1111", tenant_type="company")
+        self.firm.save()
+
+    def _add(self, tenant, kind):
+        TenantDocument.objects.create(
+            tenant=tenant, doc_type=kind, expiry_date=timezone.localdate() + timedelta(days=500)
+        )
+
+    def test_missing_documents(self):
+        self.assertEqual(self.person.missing_documents(), ["Emirates ID", "Passport"])
+        self.assertEqual(self.firm.missing_documents(), ["Trade licence"])
+        self._add(self.person, "emirates_id")
+        self.assertEqual(Tenant.objects.get(pk=self.person.pk).missing_documents(), ["Passport"])
+        self._add(self.person, "passport")
+        self._add(self.firm, "trade_licence")
+        self.assertEqual(Tenant.objects.get(pk=self.person.pk).missing_documents(), [])
+        self.assertEqual(Tenant.objects.get(pk=self.firm.pk).missing_documents(), [])
+
+    def test_filter_and_pages(self):
+        admin_user = get_user_model().objects.create_superuser("boss9", "b9@example.com", "pw-12345-xyz")
+        self.client.force_login(admin_user)
+        self._add(self.person, "emirates_id")
+        self._add(self.person, "passport")
+        url = reverse("admin:tenants_tenant_changelist")
+        done = self.client.get(url + "?files=complete")
+        todo = self.client.get(url + "?files=incomplete")
+        self.assertEqual((done.status_code, todo.status_code), (200, 200))
+        self.assertEqual([t.pk for t in done.context["cl"].result_list], [self.person.pk])
+        self.assertEqual([t.pk for t in todo.context["cl"].result_list], [self.firm.pk])
+        for query in ("?is_blacklisted__exact=1", "?nationality=India", ""):
+            self.assertEqual(self.client.get(url + query).status_code, 200, query)
+        for pk in (self.person.pk, self.firm.pk):
+            self.assertEqual(self.client.get(reverse("admin:tenants_tenant_change", args=[pk])).status_code, 200)
+        self.assertEqual(self.client.get(reverse("admin:tenants_tenant_add")).status_code, 200)
+
+    def test_blacklisted_tenant_is_flagged_in_the_list_and_header(self):
+        admin_user = get_user_model().objects.create_superuser("boss10", "b10@example.com", "pw-12345-xyz")
+        self.client.force_login(admin_user)
+        Tenant.objects.filter(pk=self.person.pk).update(is_blacklisted=True, blacklist_reason="Bounced cheques")
+        listing = self.client.get(reverse("admin:tenants_tenant_changelist")).content.decode()
+        self.assertIn("Blacklisted", listing)
+        page = self.client.get(reverse("admin:tenants_tenant_change", args=[self.person.pk])).content.decode()
+        self.assertIn("Blacklisted: Bounced cheques", page)
+        self.assertIn("Missing: Emirates ID, Passport", page)
+
+
+class WhatsAppButton(TestCase):
+    def test_numbers(self):
+        from core.admin_utils import whatsapp_link, whatsapp_number
+
+        for phone, expected in [
+            ("050 123 4567", "971501234567"), ("+971 50 123 4567", "971501234567"),
+            ("00971 50 123 4567", "971501234567"), ("+44 7700 900123", "447700900123"),
+            ("501234567", "971501234567"), ("971501234567", "971501234567"), ("", ""),
+        ]:
+            self.assertEqual(whatsapp_number(phone), expected, phone)
+        self.assertEqual(whatsapp_link(""), "")
+        html = str(whatsapp_link("050 123 4567"))
+        self.assertIn('href="https://wa.me/971501234567"', html)
+        self.assertIn("<svg", html)

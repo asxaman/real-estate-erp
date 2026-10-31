@@ -5,6 +5,7 @@ from datetime import date
 from django.core.exceptions import ValidationError
 from django.http import HttpResponse
 
+from core import countries
 from core.exports import safe_cell
 from properties.import_tools import RowError, _describe, _getter, _load, _pick
 from properties.models_constants import lost_zero_problem
@@ -12,7 +13,9 @@ from properties.models_constants import lost_zero_problem
 from .models import Tenant, same_person
 
 EXPORT_HEADERS = [
-    "Code", "Name", "Type", "Active", "Nationality", "Email", "Phone", "Address", "Documents", "Notes",
+    "Code", "Name", "Type", "Active", "Blacklisted", "Nationality", "Email", "Phone", "Address",
+    "Emirates ID", "Passport", "Date of birth", "Trade licence", "Authorised signatory", "TRN",
+    "Documents", "Notes",
 ]
 IMPORT_HEADERS = ["Name", "Type", "Nationality", "Email", "Phone", "Address", "Notes"]
 _REQUIRED = [("Name", "*name"), ("Nationality", "*nationality"), ("Email", "*email"), ("Phone", "*phone")]
@@ -44,7 +47,9 @@ def export_rows(queryset):
     for t in queryset:
         yield [
             t.code or "", t.name, t.get_tenant_type_display(), "Yes" if t.is_active else "No",
-            t.nationality, t.email, t.phone, t.address, _docs_label(t), t.notes,
+            "Yes" if t.is_blacklisted else "No", t.nationality, t.email, t.phone, t.address,
+            t.emirates_id_number, t.passport_number, t.date_of_birth.isoformat() if t.date_of_birth else "",
+            t.trade_licence_number, t.authorised_signatory, t.trn, _docs_label(t), t.notes,
         ]
 
 
@@ -65,7 +70,7 @@ def excel_response(queryset):
     for row in export_rows(queryset):
         sheet.append([safe_cell(value) for value in row])
     sheet.freeze_panes = "A2"
-    for column, width in zip("ABCDEFGHIJ", [11, 30, 12, 8, 16, 28, 18, 34, 16, 36]):
+    for column, width in zip("ABCDEFGHIJKLMNOPQ", [11, 30, 12, 8, 11, 20, 28, 18, 34, 20, 14, 14, 18, 24, 18, 16, 36]):
         sheet.column_dimensions[column].width = width
     response = HttpResponse(content_type=_XLSX)
     response["Content-Disposition"] = f'attachment; filename="{_filename("xlsx")}"'
@@ -92,7 +97,7 @@ def template_response():
     sheet = workbook.active
     sheet.title = "Tenants"
     sheet.append(IMPORT_HEADERS)
-    sheet.append(["Example Tenant", "Individual", "Egyptian", "tenant@example.com", "+971 50 123 4567", "Abu Dhabi", ""])
+    sheet.append(["Example Tenant", "Individual", "Egypt", "tenant@example.com", "+971 50 123 4567", "Abu Dhabi", ""])
     for row in range(2, 1002):  # Phone column as Text, so Excel keeps a leading 0 or +
         sheet.cell(row=row, column=5).number_format = "@"
     for cell in sheet[1]:
@@ -103,6 +108,18 @@ def template_response():
     response["Content-Disposition"] = 'attachment; filename="tenants-import-template.xlsx"'
     workbook.save(response)
     return response
+
+
+def _country(text):
+    """'Egyptian' / 'egypt' / 'UAE' -> the country name used in the dropdown."""
+    if not text:
+        return ""
+    country = countries.match(text)
+    if not country:
+        raise RowError(
+            f'Nationality "{text}" is not recognised. Use a country name such as Egypt or United Kingdom.'
+        )
+    return country
 
 
 def parse_tenant_file(upload):
@@ -121,7 +138,7 @@ def parse_tenant_file(upload):
             tenant = Tenant(
                 name=get(row, "name"),
                 tenant_type=_pick(get(row, "type"), types, "Type") or Tenant.TenantType.INDIVIDUAL,
-                nationality=get(row, "nationality"),
+                nationality=_country(get(row, "nationality")),
                 email=get(row, "email"),
                 phone=get(row, "phone"),
                 address=get(row, "address"),

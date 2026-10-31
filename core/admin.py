@@ -256,7 +256,7 @@ class SystemSettingsAdmin(SuperuserOnlyMixin, TooltipHelpMixin, ModelAdmin):
             "Documents and files",
             {
                 "classes": ["tab"],
-                "fields": ("expiry_warning_days", "max_photo_mb", "max_document_mb"),
+                "fields": ("expiry_warning_days", "max_photo_mb", "max_document_mb", "require_complete_documents"),
             },
         ),
         (

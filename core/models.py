@@ -179,6 +179,11 @@ class SystemSettings(models.Model):
         "Largest document file (MB)", default=10,
         validators=[MinValueValidator(1), MaxValueValidator(50)],
     )
+    require_complete_documents = models.BooleanField(
+        "Tenant documents must be complete before a lease", default=False,
+        help_text="When ticked, a lease cannot be made for a tenant whose Emirates ID and passport "
+        "(or trade licence, for a company) are not on file. Takes effect when Leases are added.",
+    )
 
     # Notifications
     toast_seconds = models.PositiveSmallIntegerField(

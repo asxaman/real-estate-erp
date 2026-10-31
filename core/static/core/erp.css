@@ -382,3 +382,23 @@ html.dark .erp-opt.is-selected.is-active { background: rgba(124, 58, 237, 0.25);
   .erp-select-panel, .erp-select-chevron, .erp-select-trigger { transition: none; }
 }
 .erp-file-preview.erp-file-round { width: 140px; height: 140px; border-radius: 50%; }
+
+
+/* ---- WhatsApp button next to a phone number ---- */
+.erp-wa {
+  display: inline-flex;
+  vertical-align: middle;
+  margin-left: 6px;
+  border-radius: 50%;
+  line-height: 0;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, .18);
+  transition: transform .15s ease, box-shadow .15s ease;
+}
+.erp-wa:hover {
+  transform: scale(1.14);
+  box-shadow: 0 3px 8px rgba(34, 197, 94, .45);
+}
+.erp-phone-line {
+  display: inline-flex;
+  align-items: center;
+}

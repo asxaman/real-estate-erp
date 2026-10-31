@@ -395,7 +395,7 @@ class SystemSettingsValues(TestCase):
         self.assertEqual(response.status_code, 200)
         html = response.content.decode()
         for name in ("company_name", "date_format", "time_format", "timezone", "expiry_warning_days",
-                     "max_photo_mb", "max_document_mb", "toast_seconds"):
+                     "max_photo_mb", "max_document_mb", "toast_seconds", "require_complete_documents"):
             self.assertIn(f'name="{name}"', html)
         response = self.client.post(
             reverse("admin:core_systemsettings_change", args=[1]),

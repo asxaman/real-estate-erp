@@ -62,6 +62,16 @@ def validate_iban(value):
         raise ValidationError("This IBAN is not valid. Check the number (UAE IBANs start with AE and have 23 characters).")
 
 
+def clean_trn(value):
+    """'100-2003 0040 0003' -> '100200300400003' (spaces and dashes removed)."""
+    return re.sub(r"[\s-]", "", value or "")
+
+
+def validate_trn(value):
+    if not re.fullmatch(r"\d{15}", clean_trn(value)):
+        raise ValidationError("A tax registration number (TRN) has 15 digits.")
+
+
 def validate_year_built(value):
     latest = timezone.localdate().year + 5  # buildings still under construction are allowed
     if value < 1900 or value > latest:
@@ -202,8 +212,16 @@ class Owner(models.Model):
         related_name="owner_profile",
         help_text="Login account for the owner portal (optional).",
     )
+    trn = models.CharField(
+        "Tax registration number (TRN)", max_length=20, blank=True, validators=[validate_trn],
+        help_text="Optional. 15 digits. Used later on invoices and statements.",
+    )
     notes = models.TextField(blank=True)
     is_active = models.BooleanField(default=True)
+    inactive_reason = models.CharField(
+        "Reason for being inactive", max_length=200, blank=True,
+        help_text="Optional. Why this owner is no longer active.",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -250,6 +268,9 @@ class Owner(models.Model):
     def clean(self):
         self.name = " ".join((self.name or "").split())  # trim and collapse repeated spaces
         self.email = (self.email or "").strip().lower()
+        self.trn = clean_trn(self.trn)
+        if self.is_active:
+            self.inactive_reason = ""  # a reason only makes sense while the owner is inactive
         if self.is_company:
             return  # the built-in owner is managed by the system
         errors = {}

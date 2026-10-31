@@ -14,11 +14,11 @@ def seed_tenants() -> str:
     D = TenantDocument.DocType
     T = Tenant.TenantType
     samples = [
-        ("Ahmed Hassan", T.INDIVIDUAL, "Egyptian", "ahmed.hassan@example.com", "+971 50 000 1001",
+        ("Ahmed Hassan", T.INDIVIDUAL, "Egypt", "ahmed.hassan@example.com", "+971 50 000 1001",
          [(D.EMIRATES_ID, "784-1988-0000011-1", 500), (D.VISA, "201/2024/123456", 15)]),
-        ("Sara Thomas", T.INDIVIDUAL, "British", "sara.thomas@example.com", "+971 55 000 1002",
+        ("Sara Thomas", T.INDIVIDUAL, "United Kingdom", "sara.thomas@example.com", "+971 55 000 1002",
          [(D.EMIRATES_ID, "784-1991-0000022-2", 900), (D.PASSPORT, "GB1234567", 700)]),
-        ("Blue Wave Trading LLC", T.COMPANY, "UAE", "accounts@bluewave.example.com", "+971 4 000 1003",
+        ("Blue Wave Trading LLC", T.COMPANY, "United Arab Emirates", "accounts@bluewave.example.com", "+971 4 000 1003",
          [(D.TRADE_LICENCE, "TL-778899", -12), (D.VAT_CERTIFICATE, "VAT-100200300", 300)]),
     ]
     created = 0

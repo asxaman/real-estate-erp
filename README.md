@@ -239,6 +239,14 @@ Every dropdown list in the app is a styled, animated menu: it fades in and out, 
 * **Superuser protection**: you cannot delete, deactivate or remove the superuser/staff status of your own account,
   and the last active superuser can never be removed. Ask another superuser to change your account.
 
+## Owners and tenants - extra details (update 14a)
+- **Identity tab** (tenants): Emirates ID, passport, date of birth, trade licence, authorised signatory, TRN. The page shows the fields that fit the tenant type.
+- **Blacklist**: tick Blacklisted and give a reason. Shown as a red badge in the list.
+- **Inactive reason**: untick Active and an optional reason box appears.
+- **Documents on file**: Complete means Emirates ID + passport (person) or trade licence (company) are uploaded.
+- **Nationality**: pick a country. Imports accept names like Egypt or Egyptian.
+- **WhatsApp button**: click the green icon beside a phone number.
+
 ## Automated tests
 
 The project has automated checks of the business rules above. Run them after every update (with `(venv)` active):

@@ -714,3 +714,21 @@ class PhoneLostZero(TestCase):
         self.assertEqual(len(errors), 1)
         self.assertIn("leading zero", errors[0])
         self.assertEqual([o.name for o in owners], ["Bo"])
+
+
+class OwnerTrnAndReason(TestCase):
+    def test_trn_is_checked_and_tidied(self):
+        owner = Owner(name="Taxed", trn="100-2003-0040-0003")
+        owner.full_clean(exclude=["user", "photo"])
+        self.assertEqual(owner.trn, "100200300400003")
+        with self.assertRaises(ValidationError) as ctx:
+            Owner(name="Taxed 2", trn="123").full_clean(exclude=["user", "photo"])
+        self.assertIn("trn", ctx.exception.message_dict)
+
+    def test_inactive_reason_is_kept_only_while_inactive(self):
+        owner = Owner(name="Quiet", is_active=False, inactive_reason="Sold everything")
+        owner.full_clean(exclude=["user", "photo"])
+        self.assertEqual(owner.inactive_reason, "Sold everything")
+        owner.is_active = True
+        owner.full_clean(exclude=["user", "photo"])
+        self.assertEqual(owner.inactive_reason, "")
