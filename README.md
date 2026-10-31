@@ -190,12 +190,22 @@ Sidebar > **Property management**:
 
 Sidebar > **Tenancy** > **Tenants** (leases are the next step of this module):
 
-* Every tenant has a **type** (Individual or Company), an automatic **code** (`TEN-0001`, ...), an optional photo or logo and notes. **Email, contact number and nationality are required** (for a company, nationality means the country where it is registered). Two tenants may share a name.
+* Every tenant has a **type** (Individual or Company), an automatic **code** (`TEN-0001`, ...), an optional photo or logo and notes. **Email, contact number and nationality are required** (for a company, nationality means the country where it is registered). Two tenants may share a name, but not an email, and not the same name with the same phone number (so nobody is entered twice).
 * A tenant's page has a summary header and tabs: **Overview, Contacts, Documents, Activity**.
 * **Documents** (Emirates ID, passport, residence visa, trade licence ...) have an expiry date. Anything expired or expiring within 30 days shows a warning on the page and a badge in the list.
 * The list can be filtered by type, active and document status, and searched by name, code, phone, email, nationality, contact person or document number (Emirates ID, licence).
 * **Export**: tick tenants, choose *Export selected tenants to Excel / CSV*. **Import**: the *Import* button at the top of the list.
 * Photos and documents are saved in the `media` folder: include it in your backups.
+
+## Rules that keep the data clean (update 13)
+
+* **Documents**: Emirates ID, passport, visa and trade licence must have an expiry date (otherwise the warnings cannot work). An Emirates ID has 15 digits starting with 784 and is stored as `784-YYYY-NNNNNNN-C`. Each owner or tenant has only one of each of these; to renew, edit the existing one.
+* **Primary contact / Default bank account**: the first one you add is marked automatically; only one can be marked.
+* **Owners**: an owner cannot be made inactive while it still has active properties. Inactive properties are left out of an owner's property, unit, occupancy and rent numbers.
+* **Limits**: year built 1900 or later (up to 5 years ahead), total floors 1 to 200, unit area more than 0.
+* **Units**: a new unit is Vacant. Status is chosen by hand until Leases are added.
+* **Exports**: available for Owners, Properties, Units and Tenants. Text that starts with `=`, `+`, `-` or `@` is made safe so Excel does not run it as a formula.
+* **Imports**: a phone number that lost its leading zero in Excel is refused with an explanation; the template's Phone column is already formatted as Text.
 
 ## Passwords
 

@@ -255,7 +255,7 @@ def parse_unit_file(upload):
                 bathrooms=_number(get(row, "bathrooms"), "Bathrooms", integer=True),
                 area_sqft=_number(get(row, "area"), "Area (sq ft)"),
                 furnished=_yes_no(get(row, "furnished"), "Furnished"),
-                status=_pick(get(row, "status"), status_choices, "Status"),
+                status=_pick(get(row, "status"), status_choices, "Status") or Unit.Status.VACANT,
                 asking_rent=_number(get(row, "rent"), "Asking rent"),
                 notes=get(row, "notes"),
             )

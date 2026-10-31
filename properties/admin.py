@@ -6,7 +6,7 @@ from unfold.decorators import display
 
 from core.admin_utils import TooltipHelpMixin, format_amount
 
-from . import import_tools
+from . import export_tools, import_tools
 from .import_admin import ImportMixin
 from .models import Owner, Property, Unit
 from .models_constants import normalise_unit_number
@@ -105,6 +105,7 @@ class PropertyAdminForm(forms.ModelForm):
 @admin.register(Property)
 class PropertyAdmin(ImportMixin, TooltipHelpMixin, ModelAdmin):
     form = PropertyAdminForm
+    actions = ["export_excel", "export_csv"]
     actions_list = ["import_button"]
     import_noun = "properties"
     import_headers = import_tools.PROPERTY_HEADERS
@@ -120,6 +121,15 @@ class PropertyAdmin(ImportMixin, TooltipHelpMixin, ModelAdmin):
 
     def import_template(self):
         return import_tools.property_template_response()
+
+    @admin.action(description="Export selected properties to Excel")
+    def export_excel(self, request, queryset):
+        return export_tools.properties_excel(queryset)
+
+    @admin.action(description="Export selected properties to CSV")
+    def export_csv(self, request, queryset):
+        return export_tools.properties_csv(queryset)
+
     compressed_fields = True  # tighter spacing between fields
     # The unsaved-changes warning is our own pop-up (core/static/core/erp.js).
     autocomplete_fields = ["owner"]  # searchable owner dropdown
@@ -252,6 +262,7 @@ class BuildingFilter(admin.RelatedFieldListFilter):
 
 @admin.register(Unit)
 class UnitAdmin(ImportMixin, TooltipHelpMixin, ModelAdmin):
+    actions = ["export_excel", "export_csv"]
     actions_list = ["import_button"]
     import_noun = "units"
     import_headers = import_tools.UNIT_HEADERS
@@ -266,6 +277,14 @@ class UnitAdmin(ImportMixin, TooltipHelpMixin, ModelAdmin):
 
     def import_template(self):
         return import_tools.unit_template_response()
+
+    @admin.action(description="Export selected units to Excel")
+    def export_excel(self, request, queryset):
+        return export_tools.units_excel(queryset)
+
+    @admin.action(description="Export selected units to CSV")
+    def export_csv(self, request, queryset):
+        return export_tools.units_csv(queryset)
 
     form = UnitAdminForm
     compressed_fields = True

@@ -117,3 +117,127 @@ class TenantPages(TestCase):
         url = reverse("admin:tenants_tenant_changelist")
         for query in ("?q=Alpha", "?q=V1", "?docs=expired", "?tenant_type__exact=individual"):
             self.assertEqual(self.client.get(url + query).status_code, 200, query)
+
+
+def _tenant(name="Alpha", email="alpha@example.com", phone="+971 50 123 4567", **kwargs):
+    return Tenant(name=name, email=email, phone=phone, nationality="Indian", **kwargs)
+
+
+class DuplicateTenants(TestCase):
+    def setUp(self):
+        self.alpha = _tenant()
+        self.alpha.full_clean(exclude=["photo", "code"])
+        self.alpha.save()
+
+    def _problems(self, tenant):
+        from django.core.exceptions import ValidationError
+
+        try:
+            tenant.full_clean(exclude=["photo", "code"])
+        except ValidationError as exc:
+            return exc.message_dict
+        return {}
+
+    def test_same_email_is_refused_in_any_case(self):
+        problems = self._problems(_tenant(name="Someone Else", email="ALPHA@example.com", phone="+971 55 999 0000"))
+        self.assertIn("email", problems)
+        self.assertIn(self.alpha.code, problems["email"][0])
+
+    def test_same_name_and_phone_is_refused_however_the_phone_is_written(self):
+        for phone in ("050 123 4567", "0501234567", "+971501234567", "00971 50 123 4567"):
+            problems = self._problems(_tenant(name=" alpha ", email="other@example.com", phone=phone))
+            self.assertIn("phone", problems, phone)
+
+    def test_different_people_are_allowed(self):
+        # same name, different email and phone
+        self.assertEqual(self._problems(_tenant(email="x@example.com", phone="+971 55 111 2222")), {})
+        # same phone (a family number), different name and email
+        self.assertEqual(self._problems(_tenant(name="Beta", email="beta@example.com")), {})
+
+    def test_a_tenant_is_not_a_duplicate_of_itself(self):
+        again = Tenant.objects.get(pk=self.alpha.pk)
+        self.assertEqual(self._problems(again), {})
+
+    def test_importing_the_same_file_twice_is_refused(self):
+        text = (
+            "Name,Nationality,Email,Phone\n"
+            "Omar,Jordanian,omar@example.com,+971 50 777 8888\n"
+        ).encode("utf-8")
+        tenants, errors = tenant_tools.parse_tenant_file(SimpleUploadedFile("t.csv", text))
+        self.assertEqual(errors, [])
+        for tenant in tenants:
+            tenant.save()
+        _, errors = tenant_tools.parse_tenant_file(SimpleUploadedFile("t.csv", text))
+        self.assertEqual(len(errors), 1)
+        self.assertIn("already", errors[0])
+
+    def test_duplicates_inside_one_file_are_refused(self):
+        _, errors = tenant_tools.parse_tenant_file(SimpleUploadedFile("t.csv", (
+            "Name,Nationality,Email,Phone\n"
+            "Omar,Jordanian,omar@example.com,+971 50 777 8888\n"
+            "Omar Two,Jordanian,OMAR@example.com,+971 50 000 0000\n"
+        ).encode("utf-8")))
+        self.assertEqual(len(errors), 1)
+        self.assertIn("Row 3", errors[0])
+
+    def test_import_refuses_phone_that_lost_its_zero(self):
+        tenants, errors = tenant_tools.parse_tenant_file(SimpleUploadedFile("t.csv", (
+            "Name,Nationality,Email,Phone\n"
+            "Omar,Jordanian,omar@example.com,501234567\n"
+        ).encode("utf-8")))
+        self.assertEqual(tenants, [])
+        self.assertIn("leading zero", errors[0])
+
+
+class TenantDocumentRules(TestCase):
+    def setUp(self):
+        self.tenant = _tenant()
+        self.tenant.save()
+
+    def test_emirates_id_and_expiry(self):
+        from django.core.exceptions import ValidationError
+
+        later = timezone.localdate() + timedelta(days=400)
+        doc = TenantDocument(tenant=self.tenant, doc_type="emirates_id", number="784199012345671", expiry_date=later)
+        doc.full_clean()
+        self.assertEqual(doc.number, "784-1990-1234567-1")
+        with self.assertRaises(ValidationError) as caught:
+            TenantDocument(tenant=self.tenant, doc_type="emirates_id", number="123", expiry_date=later).full_clean()
+        self.assertIn("number", caught.exception.message_dict)
+        with self.assertRaises(ValidationError) as caught:
+            TenantDocument(tenant=self.tenant, doc_type="visa", number="V1").full_clean()
+        self.assertIn("expiry_date", caught.exception.message_dict)
+        TenantDocument(tenant=self.tenant, doc_type="other").full_clean()
+
+    def test_only_one_visa_in_the_documents_table(self):
+        from django.forms import inlineformset_factory
+
+        from properties.owner_admin import DocumentFormSet
+
+        FormSet = inlineformset_factory(
+            Tenant, TenantDocument, formset=DocumentFormSet,
+            fields=("doc_type", "number", "expiry_date"), extra=0,
+        )
+        data = {
+            "documents-TOTAL_FORMS": "2", "documents-INITIAL_FORMS": "0",
+            "documents-MIN_NUM_FORMS": "0", "documents-MAX_NUM_FORMS": "1000",
+            "documents-0-doc_type": "visa", "documents-0-expiry_date": "2031-01-01",
+            "documents-1-doc_type": "visa", "documents-1-expiry_date": "2032-01-01",
+        }
+        self.assertFalse(FormSet(data, instance=self.tenant).is_valid())
+
+    def test_first_tenant_contact_becomes_primary(self):
+        from django.forms import inlineformset_factory
+
+        from properties.owner_admin import ContactFormSet
+
+        FormSet = inlineformset_factory(Tenant, TenantContact, formset=ContactFormSet, fields="__all__", extra=0)
+        data = {
+            "contacts-TOTAL_FORMS": "1", "contacts-INITIAL_FORMS": "0",
+            "contacts-MIN_NUM_FORMS": "0", "contacts-MAX_NUM_FORMS": "1000",
+            "contacts-0-name": "PRO Person", "contacts-0-role": "pro", "contacts-0-language": "en",
+        }
+        formset = FormSet(data, instance=self.tenant)
+        self.assertTrue(formset.is_valid(), formset.errors)
+        formset.save()
+        self.assertTrue(TenantContact.objects.get(tenant=self.tenant).is_primary)

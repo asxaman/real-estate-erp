@@ -45,6 +45,11 @@ def ensure_company_owner(sender, apps=None, using="default", **kwargs):
                 Unit.objects.using(using).filter(pk=unit.pk).update(floor_sort=key)
 
 
+    # Units used to be allowed without a status; a new unit is Vacant, so give old ones the same.
+    if "status" in {f.name for f in Unit._meta.get_fields()}:
+        Unit.objects.using(using).filter(status="").update(status="vacant")
+
+
 class PropertiesConfig(AppConfig):
     default_auto_field = "django.db.models.BigAutoField"
     name = "properties"

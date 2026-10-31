@@ -1,6 +1,7 @@
 import re
 import uuid
 from datetime import timedelta
+from decimal import Decimal
 from pathlib import Path
 
 from django.conf import settings
@@ -11,7 +12,7 @@ from django.core.validators import (
     MinValueValidator,
     RegexValidator,
 )
-from django.db import models
+from django.db import IntegrityError, models, transaction
 from django.db.models.signals import post_delete
 from django.dispatch import receiver
 from django.utils import timezone
@@ -31,8 +32,10 @@ from .models_constants import (
     PHONE_REGEX,
     SWIFT_ERROR,
     SWIFT_REGEX,
+    emirates_id_is_valid,
     floor_sort_key,
     iban_is_valid,
+    normalise_emirates_id,
     normalise_iban,
     normalise_unit_number,
 )
@@ -57,6 +60,56 @@ def validate_document_size(file):
 def validate_iban(value):
     if not iban_is_valid(value):
         raise ValidationError("This IBAN is not valid. Check the number (UAE IBANs start with AE and have 23 characters).")
+
+
+def validate_year_built(value):
+    latest = timezone.localdate().year + 5  # buildings still under construction are allowed
+    if value < 1900 or value > latest:
+        raise ValidationError(f"Enter a year between 1900 and {latest}.")
+
+
+TOTAL_FLOORS_VALIDATORS = [
+    MinValueValidator(1, message="Total floors must be between 1 and 200."),
+    MaxValueValidator(200, message="Total floors must be between 1 and 200."),
+]
+AREA_VALIDATORS = [MinValueValidator(Decimal("0.01"), message="The area must be more than 0.")]
+
+# Documents that must carry an expiry date (so the warnings can work) ...
+EXPIRY_REQUIRED_TYPES = ("emirates_id", "passport", "visa", "trade_licence")
+# ... and documents of which a person or company has only one at a time.
+SINGLE_DOCUMENT_TYPES = ("emirates_id", "passport", "visa", "trade_licence", "vat_certificate")
+
+
+def validate_document_rules(document):
+    """Rules shared by owner and tenant documents (called from their clean())."""
+    errors = {}
+    document.number = (document.number or "").strip()
+    if document.doc_type == "emirates_id" and document.number:
+        if emirates_id_is_valid(document.number):
+            document.number = normalise_emirates_id(document.number)
+        else:
+            errors["number"] = "An Emirates ID has 15 digits, for example 784-1990-1234567-1."
+    if document.doc_type in EXPIRY_REQUIRED_TYPES and document.expiry_date is None:
+        errors["expiry_date"] = "Enter the expiry date."
+    if errors:
+        raise ValidationError(errors)
+
+
+def save_with_unique_code(instance, next_code, do_save):
+    """
+    Save a record whose code (OWN-0001, TEN-0001 ...) is assigned automatically.
+    If two people save at the same moment and get the same code, try again with the next one.
+    """
+    for attempt in range(5):
+        instance.code = next_code()
+        try:
+            with transaction.atomic():
+                do_save()
+            return
+        except IntegrityError:
+            if attempt == 4:
+                raise
+            instance.code = None
 
 
 def next_owner_code():
@@ -161,12 +214,17 @@ class Owner(models.Model):
 
     def save(self, *args, **kwargs):
         self.name = " ".join((self.name or "").split())
-        if not self.code:
-            self.code = COMPANY_OWNER_CODE if self.is_company else next_owner_code()
+        if not self.code and self.is_company:
+            self.code = COMPANY_OWNER_CODE
         old_photo = ""
         if self.pk:
             old_photo = Owner.objects.filter(pk=self.pk).values_list("photo", flat=True).first() or ""
-        super().save(*args, **kwargs)
+        if self.code:
+            super().save(*args, **kwargs)
+        else:
+            save_with_unique_code(
+                self, lambda: next_owner_code(), lambda: super(Owner, self).save(*args, **kwargs)
+            )
         if old_photo and old_photo != (self.photo.name or ""):
             self.photo.storage.delete(old_photo)  # the picture was replaced or removed
 
@@ -201,6 +259,16 @@ class Owner(models.Model):
             )
         elif self.name and Owner.objects.filter(name__iexact=self.name).exclude(pk=self.pk).exists():
             errors["name"] = "An owner with this name already exists."
+        # An owner cannot be switched off while it still has active properties.
+        if not self.is_active and self.pk:
+            active = self.properties.filter(is_active=True).count()
+            if active:
+                errors["is_active"] = (
+                    f"This owner still has {active} active "
+                    f"propert{'y' if active == 1 else 'ies'}. Deactivate "
+                    f"{'it' if active == 1 else 'them'} or move "
+                    f"{'it' if active == 1 else 'them'} to another owner first."
+                )
         if errors:
             raise ValidationError(errors)
 
@@ -299,6 +367,9 @@ class OwnerDocument(models.Model):
 
     def __str__(self):
         return f"{self.get_doc_type_display()} {self.number}".strip()
+
+    def clean(self):
+        validate_document_rules(self)
 
     @property
     def expiry_status(self):
@@ -415,8 +486,8 @@ class Property(models.Model):
     map_link = models.URLField(
         "Map link", max_length=500, blank=True, help_text="Google Maps link (optional)."
     )
-    year_built = models.PositiveIntegerField(null=True, blank=True)
-    total_floors = models.PositiveIntegerField(null=True, blank=True)
+    year_built = models.PositiveIntegerField(null=True, blank=True, validators=[validate_year_built])
+    total_floors = models.PositiveIntegerField(null=True, blank=True, validators=TOTAL_FLOORS_VALIDATORS)
 
     # Apartments only (a standalone apartment has no units, so it describes itself)
     apartment_type = models.CharField(
@@ -442,7 +513,12 @@ class Property(models.Model):
         validators=[MinValueValidator(0)],
     )
     status = models.CharField(
-        max_length=20, choices=Status.choices, blank=True, default=Status.VACANT
+        max_length=20,
+        choices=Status.choices,
+        blank=True,
+        default=Status.VACANT,
+        help_text="Chosen by hand for now. Once leases are added, Occupied and Vacant will "
+        "follow the lease automatically.",
     )
 
     # Management fee - not used when the owner is "Company Owned"
@@ -606,11 +682,18 @@ class Unit(models.Model):
         help_text="A number from 1 to 10.",
     )
     area_sqft = models.DecimalField(
-        "Area (sq ft)", max_digits=10, decimal_places=2, null=True, blank=True
+        "Area (sq ft)", max_digits=10, decimal_places=2, null=True, blank=True,
+        validators=AREA_VALIDATORS,
     )
     furnished = models.BooleanField(default=False)
-    # Optional for now: later it will follow the lease (leased, not leased, under maintenance ...)
-    status = models.CharField(max_length=20, choices=Status.choices, blank=True, default="")
+    # Chosen by hand for now: once leases exist, Occupied / Vacant will follow the lease.
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.VACANT,
+        help_text="Chosen by hand for now. Once leases are added, Occupied and Vacant will "
+        "follow the lease automatically.",
+    )
     asking_rent = models.DecimalField(
         "Asking rent (AED / year)",
         max_digits=12,

@@ -272,7 +272,8 @@ class FormBehaviour(TestCase):
     def test_unit_form_normalises_the_number(self):
         prop = building("FRM")
         form = UnitAdminForm(
-            data={"property": prop.pk, "unit_number": " 7a ", "floor": "3", "unit_type": "studio"}
+            data={"property": prop.pk, "unit_number": " 7a ", "floor": "3", "unit_type": "studio",
+                  "status": "vacant"}
         )
         self.assertTrue(form.is_valid(), form.errors)
         self.assertEqual(form.cleaned_data["unit_number"], "7A")
@@ -480,3 +481,236 @@ class PropertyUnitImport(TestCase):
                 response = self.client.get(reverse(f"admin:properties_{model}_import{suffix}"))
                 self.assertEqual(response.status_code, 200, model + suffix)
             self.assertEqual(self.client.get(reverse(f"admin:properties_{model}_changelist")).status_code, 200)
+
+
+class CleanupRules(TestCase):
+    """Update 13: defaults, limits, document rules, inactive owners, automatic codes."""
+
+    def test_new_unit_is_vacant(self):
+        tower = building("TWR")
+        self.assertEqual(unit(tower, "101").status, "vacant")
+
+    def test_unit_import_without_status_is_vacant(self):
+        Property.objects.create(
+            name="Tower", code="TWR", property_type="residential_building", owner=Owner.company(),
+        )
+        units, errors = import_tools.parse_unit_file(SimpleUploadedFile(
+            "u.csv", b"Property code,Unit number,Floor,Type\nTWR,101,1,Studio\n"
+        ))
+        self.assertEqual(errors, [])
+        self.assertEqual(units[0].status, "vacant")
+
+    def test_blank_unit_statuses_are_repaired_after_migrate(self):
+        from .apps import ensure_company_owner
+        from django.apps import apps
+
+        tower = building("TWR")
+        unit(tower, "101")
+        Unit.objects.update(status="")
+        ensure_company_owner(sender=None, apps=apps)
+        self.assertEqual(Unit.objects.get().status, "vacant")
+
+    def test_inactive_owner_needs_no_active_properties(self):
+        owner = make_owner("Busy")
+        prop = standalone(code="BUSY", owner=owner)
+        prop.save()
+        owner.is_active = False
+        with self.assertRaises(ValidationError) as ctx:
+            owner.full_clean()
+        self.assertIn("is_active", ctx.exception.message_dict)
+        prop.is_active = False
+        prop.save()
+        owner.full_clean()  # fine once its property is inactive too
+
+    def test_limits(self):
+        for field, value in [("year_built", 5), ("year_built", 9999), ("total_floors", 0), ("total_floors", 5000)]:
+            tower = Property(
+                name="T", code="LIM1", property_type=T.RESIDENTIAL_BUILDING, owner=Owner.company(),
+                emirate="dubai", management_fee_type="", **{field: value},
+            )
+            with self.assertRaises(ValidationError, msg=f"{field}={value}") as ctx:
+                tower.full_clean()
+            self.assertIn(field, ctx.exception.message_dict)
+        ok = Property(
+            name="T", code="LIM2", property_type=T.RESIDENTIAL_BUILDING, owner=Owner.company(),
+            emirate="dubai", year_built=2020, total_floors=30,
+        )
+        ok.full_clean()
+        tower = building("AREA")
+        for area in ("0", "-5"):
+            with self.assertRaises(ValidationError) as ctx:
+                Unit(property=tower, unit_number="1", floor="1", unit_type="studio",
+                     area_sqft=Decimal(area)).full_clean()
+            self.assertIn("area_sqft", ctx.exception.message_dict)
+
+    def test_emirates_id_is_checked_and_tidied(self):
+        owner = make_owner("Docs")
+        future = timezone.localdate() + timedelta(days=400)
+        doc = OwnerDocument(owner=owner, doc_type="emirates_id", number="784199012345671", expiry_date=future)
+        doc.full_clean()
+        self.assertEqual(doc.number, "784-1990-1234567-1")
+        for bad in ("12345", "999-1990-1234567-1", "784-1990-12345-1", "ABC"):
+            with self.assertRaises(ValidationError, msg=bad) as ctx:
+                OwnerDocument(owner=owner, doc_type="emirates_id", number=bad, expiry_date=future).full_clean()
+            self.assertIn("number", ctx.exception.message_dict)
+
+    def test_important_documents_need_an_expiry_date(self):
+        owner = make_owner("Docs")
+        for kind in ("emirates_id", "passport", "trade_licence"):
+            with self.assertRaises(ValidationError, msg=kind) as ctx:
+                OwnerDocument(owner=owner, doc_type=kind, number="").full_clean()
+            self.assertIn("expiry_date", ctx.exception.message_dict)
+        OwnerDocument(owner=owner, doc_type="title_deed").full_clean()  # not needed here
+
+    def _document_formset(self, owner, kinds):
+        from django.forms import inlineformset_factory
+
+        from .owner_admin import DocumentFormSet
+
+        FormSet = inlineformset_factory(
+            Owner, OwnerDocument, formset=DocumentFormSet,
+            fields=("doc_type", "number", "expiry_date"), extra=0,
+        )
+        data = {
+            "documents-TOTAL_FORMS": str(len(kinds)), "documents-INITIAL_FORMS": "0",
+            "documents-MIN_NUM_FORMS": "0", "documents-MAX_NUM_FORMS": "1000",
+        }
+        for i, kind in enumerate(kinds):
+            data[f"documents-{i}-doc_type"] = kind
+            data[f"documents-{i}-expiry_date"] = "2031-01-01"
+        return FormSet(data, instance=owner)
+
+    def test_only_one_passport_per_owner(self):
+        owner = make_owner("Docs")
+        self.assertFalse(self._document_formset(owner, ["passport", "passport"]).is_valid())
+        self.assertTrue(self._document_formset(owner, ["passport", "emirates_id"]).is_valid())
+        self.assertTrue(self._document_formset(owner, ["other", "other"]).is_valid())
+
+    def _flag_formset(self, formset_class, model, owner, rows, flag):
+        from django.forms import inlineformset_factory
+
+        prefix = model._meta.get_field("owner").remote_field.get_accessor_name()
+        FormSet = inlineformset_factory(Owner, model, formset=formset_class, fields="__all__", extra=0)
+        data = {
+            f"{prefix}-TOTAL_FORMS": str(len(rows)), f"{prefix}-INITIAL_FORMS": "0",
+            f"{prefix}-MIN_NUM_FORMS": "0", f"{prefix}-MAX_NUM_FORMS": "1000",
+        }
+        for i, row in enumerate(rows):
+            for key, value in row.items():
+                data[f"{prefix}-{i}-{key}"] = value
+        return FormSet(data, instance=owner)
+
+    def test_first_contact_and_first_bank_account_become_primary_and_default(self):
+        from .owner_admin import BankFormSet, ContactFormSet
+
+        owner = make_owner("Flags")
+        contacts = self._flag_formset(
+            ContactFormSet, OwnerContact, owner,
+            [{"name": "A", "role": "owner", "language": "en"}, {"name": "B", "role": "owner", "language": "en"}],
+            "is_primary",
+        )
+        self.assertTrue(contacts.is_valid(), contacts.errors)
+        contacts.save()
+        self.assertEqual(list(OwnerContact.objects.filter(owner=owner, is_primary=True).values_list("name", flat=True)), ["A"])
+
+        banks = self._flag_formset(
+            BankFormSet, OwnerBankAccount, owner,
+            [{"account_holder": "A", "bank_name": "B", "iban": VALID_IBAN}], "is_default",
+        )
+        self.assertTrue(banks.is_valid(), banks.errors)
+        banks.save()
+        self.assertTrue(OwnerBankAccount.objects.get(owner=owner).is_default)
+
+    def test_code_collision_is_retried(self):
+        from unittest import mock
+
+        first = make_owner("First")
+        with mock.patch("properties.models.next_owner_code", side_effect=[first.code, "OWN-7777"]):
+            second = Owner.objects.create(name="Second")
+        self.assertEqual(second.code, "OWN-7777")
+
+
+class OwnerStatsAndExports(TestCase):
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+
+        self.admin = get_user_model().objects.create_superuser("boss8", "b8@example.com", "pw-12345-xyz")
+        self.client.force_login(self.admin)
+        self.owner = make_owner("Stats")
+        active = Property.objects.create(
+            name="Active", code="ACT1", property_type=T.RESIDENTIAL_BUILDING, owner=self.owner, emirate="dubai",
+            management_fee_type="percent", management_fee_percent=Decimal("5"),
+        )
+        unit(active, "101", status="occupied")
+        unit(active, "102")
+        dormant = Property.objects.create(
+            name="Dormant", code="OLD1", property_type=T.RESIDENTIAL_BUILDING, owner=self.owner, emirate="dubai",
+            management_fee_type="percent", management_fee_percent=Decimal("5"), is_active=False,
+        )
+        unit(dormant, "201")
+        self.active, self.dormant = active, dormant
+
+    def test_owner_numbers_leave_out_inactive_properties(self):
+        from django.contrib import admin
+        from django.test import RequestFactory
+
+        from .owner_admin import OwnerAdmin
+
+        request = RequestFactory().get("/")
+        request.user = self.admin
+        row = OwnerAdmin(Owner, admin.site).get_queryset(request).get(pk=self.owner.pk)
+        self.assertEqual((row._property_count, row._unit_count, row._occupied_units), (1, 2, 1))
+        self.assertEqual((row._standalone, row._docs_expired, row._docs_soon), (0, 0, 0))
+
+    def test_property_and_unit_export(self):
+        from django.urls import reverse
+
+        for model, pk, expected in [("property", self.active.pk, "ACT1"), ("unit", Unit.objects.first().pk, "101")]:
+            url = reverse(f"admin:properties_{model}_changelist")
+            for action in ("export_csv", "export_excel"):
+                response = self.client.post(url, {"action": action, "index": 0, "_selected_action": [pk]})
+                self.assertEqual(response.status_code, 200, f"{model} {action}")
+                self.assertIn("attachment", response["Content-Disposition"])
+            csv_text = self.client.post(url, {"action": "export_csv", "index": 0, "_selected_action": [pk]}).content.decode("utf-8-sig")
+            self.assertIn(expected, csv_text)
+
+    def test_exports_cannot_carry_formulas(self):
+        from core.exports import safe_cell
+
+        self.assertEqual(safe_cell("=1+1"), "'=1+1")
+        self.assertEqual(safe_cell("@SUM(A1)"), "'@SUM(A1)")
+        self.assertEqual(safe_cell("-cmd"), "'-cmd")
+        self.assertEqual(safe_cell("+971 50 123 4567"), "+971 50 123 4567")
+        self.assertEqual(safe_cell("-250.50"), "-250.50")
+        self.assertEqual(safe_cell("Normal"), "Normal")
+        self.assertEqual(safe_cell(12), 12)
+
+    def test_one_alert_for_many_documents(self):
+        from django.urls import reverse
+
+        today = timezone.localdate()
+        for kind, days in [("passport", -5), ("emirates_id", 3), ("trade_licence", 10), ("poa", 12)]:
+            OwnerDocument.objects.create(owner=self.owner, doc_type=kind, expiry_date=today + timedelta(days=days))
+        response = self.client.get(reverse("admin:properties_owner_change", args=[self.owner.pk]))
+        html = response.content.decode()
+        self.assertIn("4 documents need attention", html)
+        self.assertIn("and 1 more", html)
+        self.assertEqual(html.count("need attention"), 1)
+
+
+class PhoneLostZero(TestCase):
+    def test_lost_zero_is_spotted(self):
+        from .models_constants import lost_zero_problem
+
+        for text in ("501234567", "21234567", "41234567"):
+            self.assertTrue(lost_zero_problem(text), text)
+        for text in ("0501234567", "+971 50 123 4567", "971501234567", "", "123456"):
+            self.assertEqual(lost_zero_problem(text), "", text)
+
+    def test_owner_import_refuses_it(self):
+        owners, errors = owner_tools.parse_owner_file(SimpleUploadedFile(
+            "o.csv", b"Name,Phone\nAli,501234567\nBo,0501234567\n"
+        ))
+        self.assertEqual(len(errors), 1)
+        self.assertIn("leading zero", errors[0])
+        self.assertEqual([o.name for o in owners], ["Bo"])

@@ -36,6 +36,54 @@ PHONE_REGEX = r"^\+?[0-9][0-9 ()\-]{5,28}$"
 PHONE_ERROR = "Enter a valid phone number, for example +971 50 123 4567."
 
 
+def phone_key(value):
+    """A phone number reduced to its significant digits, so +971 50 123 4567 and 050 123 4567 match."""
+    digits = "".join(ch for ch in (value or "") if ch.isdigit())
+    if digits.startswith("00971"):
+        digits = digits[5:]
+    elif digits.startswith("971") and len(digits) >= 11:
+        digits = digits[3:]
+    return digits.lstrip("0")
+
+
+def lost_zero_problem(text):
+    """
+    Excel turns 0501234567 into 501234567 when a cell is formatted as a number.
+    Returns a short explanation when a phone number looks like that, otherwise "".
+    """
+    text = (text or "").strip()
+    if text.isdigit() and (
+        (len(text) == 9 and text[0] == "5")  # a UAE mobile without its 0
+        or (len(text) == 8 and text[0] in "234679")  # a UAE landline without its 0
+    ):
+        return (
+            "looks like it lost its leading zero (Excel does this to numbers). "
+            "Write it as +971 50 123 4567, or format the Phone column as Text."
+        )
+    return ""
+
+
+# ---- Emirates ID: 784-YYYY-NNNNNNN-C (15 digits) ----
+def emirates_id_digits(value):
+    return "".join(ch for ch in (value or "") if ch.isdigit())
+
+
+def emirates_id_is_valid(value):
+    text = (value or "").strip()
+    digits = emirates_id_digits(text)
+    # only digits and dashes/spaces are allowed, 15 digits, starting with 784 (the UAE code)
+    return (
+        len(digits) == 15
+        and digits.startswith("784")
+        and all(ch.isdigit() or ch in "- " for ch in text)
+    )
+
+
+def normalise_emirates_id(value):
+    digits = emirates_id_digits(value)
+    return f"{digits[:3]}-{digits[3:7]}-{digits[7:14]}-{digits[14]}"
+
+
 def normalise_unit_number(value):
     """' g 01 ' -> 'G 01': trim, collapse repeated spaces, capital letters."""
     return " ".join((value or "").split()).upper()

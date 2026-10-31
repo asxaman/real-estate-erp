@@ -3,16 +3,18 @@ import uuid
 from datetime import timedelta
 from pathlib import Path
 
+from django.core.exceptions import ValidationError
 from django.core.validators import FileExtensionValidator, RegexValidator
 from django.db import models
+from django.db.models import Q
 from django.db.models.signals import post_delete
 from django.dispatch import receiver
 from django.utils import timezone
 
 from core import sysconf
 from core.models import PHOTO_VALIDATORS
-from properties.models import validate_document_size
-from properties.models_constants import PHONE_ERROR, PHONE_REGEX
+from properties.models import save_with_unique_code, validate_document_rules, validate_document_size
+from properties.models_constants import PHONE_ERROR, PHONE_REGEX, phone_key
 
 
 def tenant_photo_path(instance, filename):
@@ -30,6 +32,21 @@ def next_tenant_code():
         if match:
             numbers.append(int(match.group(1)))
     return f"TEN-{max(numbers, default=0) + 1:04d}"
+
+
+def same_person(first, second):
+    """
+    `first` and `second` are (name, email, phone). They look like the same tenant when they
+    have the same email, or the same name together with the same phone number.
+    """
+    name_1, email_1, phone_1 = first
+    name_2, email_2, phone_2 = second
+    email_1, email_2 = (email_1 or "").strip().lower(), (email_2 or "").strip().lower()
+    if email_1 and email_1 == email_2:
+        return True
+    name_1, name_2 = " ".join((name_1 or "").split()).lower(), " ".join((name_2 or "").split()).lower()
+    key_1, key_2 = phone_key(phone_1), phone_key(phone_2)
+    return bool(name_1) and name_1 == name_2 and bool(key_1) and key_1 == key_2
 
 
 class Tenant(models.Model):
@@ -76,18 +93,49 @@ class Tenant(models.Model):
 
     def save(self, *args, **kwargs):
         self.name = " ".join((self.name or "").split())
-        if not self.code:
-            self.code = next_tenant_code()
         old_photo = ""
         if self.pk:
             old_photo = Tenant.objects.filter(pk=self.pk).values_list("photo", flat=True).first() or ""
-        super().save(*args, **kwargs)
+        if self.code:
+            super().save(*args, **kwargs)
+        else:
+            save_with_unique_code(
+                self, lambda: next_tenant_code(), lambda: super(Tenant, self).save(*args, **kwargs)
+            )
         if old_photo and old_photo != (self.photo.name or ""):
             self.photo.storage.delete(old_photo)  # the picture was replaced or removed
+
+    @classmethod
+    def find_duplicate(cls, name, email, phone, exclude_pk=None):
+        """Another tenant that looks like the same person or company, or None."""
+        name = " ".join((name or "").split())
+        email = (email or "").strip().lower()
+        wanted = Q(name__iexact=name) if name else Q(pk__in=[])
+        if email:
+            wanted |= Q(email__iexact=email)
+        others = cls.objects.filter(wanted)
+        if exclude_pk:
+            others = others.exclude(pk=exclude_pk)
+        for other in others:
+            if same_person((name, email, phone), (other.name, other.email, other.phone)):
+                return other
+        return None
 
     def clean(self):
         self.name = " ".join((self.name or "").split())
         self.email = (self.email or "").strip().lower()
+        other = Tenant.find_duplicate(self.name, self.email, self.phone, exclude_pk=self.pk)
+        if other is not None:
+            who = f"{other.code} {other.name}".strip()
+            if self.email and self.email == (other.email or "").lower():
+                raise ValidationError(
+                    {"email": f"Another tenant already uses this email: {who}. "
+                              "If it is the same tenant, open that record instead."}
+                )
+            raise ValidationError(
+                {"phone": f"A tenant with this name and phone number already exists: {who}. "
+                          "If it is the same tenant, open that record instead."}
+            )
 
     def document_counts(self):
         """(expired, expiring soon) among this tenant's documents."""
@@ -181,6 +229,9 @@ class TenantDocument(models.Model):
 
     def __str__(self):
         return f"{self.get_doc_type_display()} {self.number}".strip()
+
+    def clean(self):
+        validate_document_rules(self)
 
     @property
     def expiry_status(self):

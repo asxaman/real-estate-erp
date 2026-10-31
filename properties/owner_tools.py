@@ -5,11 +5,14 @@ from datetime import date
 
 from django.http import HttpResponse
 
-from .models import Owner
+from core.exports import safe_cell
+
+from .models import Owner, Unit
+from .models_constants import lost_zero_problem
 
 EXPORT_HEADERS = [
     "Code", "Name", "Type", "Active", "Email", "Phone", "Address",
-    "Properties", "Units", "Documents", "Notes",
+    "Active properties", "Units", "Documents", "Notes",
 ]
 IMPORT_HEADERS = ["Name", "Type", "Email", "Phone", "Address", "Notes"]
 MAX_IMPORT_ROWS = 1000
@@ -38,6 +41,12 @@ def _docs_label(owner):
 
 def export_rows(queryset):
     for owner in queryset:
+        # Only active properties count (the list page already worked this out; otherwise ask the database).
+        if hasattr(owner, "_property_count"):
+            properties, units = owner._property_count, owner._unit_count
+        else:
+            properties = owner.properties.filter(is_active=True).count()
+            units = Unit.objects.filter(property__owner=owner, property__is_active=True).count()
         yield [
             owner.code or "",
             owner.name,
@@ -46,8 +55,8 @@ def export_rows(queryset):
             owner.email,
             owner.phone,
             owner.address,
-            getattr(owner, "_property_count", owner.properties.count()),
-            getattr(owner, "_unit_count", 0),
+            properties,
+            units,
             _docs_label(owner),
             owner.notes,
         ]
@@ -68,7 +77,7 @@ def excel_response(queryset):
     for cell in sheet[1]:
         cell.font = Font(bold=True)
     for row in export_rows(queryset):
-        sheet.append(row)
+        sheet.append([safe_cell(value) for value in row])
     sheet.freeze_panes = "A2"
     for column, width in zip("ABCDEFGHIJKL", [11, 30, 12, 8, 28, 18, 34, 11, 8, 16, 16, 36]):
         sheet.column_dimensions[column].width = width
@@ -87,7 +96,7 @@ def csv_response(queryset):
     writer = csv.writer(response)
     writer.writerow(EXPORT_HEADERS)
     for row in export_rows(queryset):
-        writer.writerow(row)
+        writer.writerow([safe_cell(value) for value in row])
     return response
 
 
@@ -102,6 +111,8 @@ def template_response():
     for cell in sheet[1]:
         cell.font = Font(bold=True)
     sheet.append(["Example Owner LLC", "Company", "owner@example.com", "+971 50 123 4567", "Abu Dhabi", ""])
+    for row in range(2, 1002):  # Phone column as Text, so Excel keeps a leading 0 or +
+        sheet.cell(row=row, column=4).number_format = "@"
     for column, width in zip("ABCDEF", [30, 12, 28, 18, 34, 36]):
         sheet.column_dimensions[column].width = width
     response = HttpResponse(
@@ -171,6 +182,10 @@ def parse_owner_file(upload):
 
     owners, errors, seen = [], [], set()
     for line, row in body:
+        problem = lost_zero_problem(get(row, "phone"))
+        if problem:
+            errors.append(f'Row {line}: phone "{get(row, "phone")}" {problem}')
+            continue
         raw_type = get(row, "type").lower()
         if raw_type in ("", "individual", "person"):
             owner_type = Owner.OwnerType.INDIVIDUAL

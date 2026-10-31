@@ -5,9 +5,11 @@ from datetime import date
 from django.core.exceptions import ValidationError
 from django.http import HttpResponse
 
+from core.exports import safe_cell
 from properties.import_tools import RowError, _describe, _getter, _load, _pick
+from properties.models_constants import lost_zero_problem
 
-from .models import Tenant
+from .models import Tenant, same_person
 
 EXPORT_HEADERS = [
     "Code", "Name", "Type", "Active", "Nationality", "Email", "Phone", "Address", "Documents", "Notes",
@@ -61,7 +63,7 @@ def excel_response(queryset):
     for cell in sheet[1]:
         cell.font = Font(bold=True)
     for row in export_rows(queryset):
-        sheet.append(row)
+        sheet.append([safe_cell(value) for value in row])
     sheet.freeze_panes = "A2"
     for column, width in zip("ABCDEFGHIJ", [11, 30, 12, 8, 16, 28, 18, 34, 16, 36]):
         sheet.column_dimensions[column].width = width
@@ -78,7 +80,7 @@ def csv_response(queryset):
     writer = csv.writer(response)
     writer.writerow(EXPORT_HEADERS)
     for row in export_rows(queryset):
-        writer.writerow(row)
+        writer.writerow([safe_cell(value) for value in row])
     return response
 
 
@@ -91,6 +93,8 @@ def template_response():
     sheet.title = "Tenants"
     sheet.append(IMPORT_HEADERS)
     sheet.append(["Example Tenant", "Individual", "Egyptian", "tenant@example.com", "+971 50 123 4567", "Abu Dhabi", ""])
+    for row in range(2, 1002):  # Phone column as Text, so Excel keeps a leading 0 or +
+        sheet.cell(row=row, column=5).number_format = "@"
     for cell in sheet[1]:
         cell.font = Font(bold=True)
     for column, width in zip("ABCDEFG", [30, 12, 16, 28, 18, 34, 36]):
@@ -108,9 +112,12 @@ def parse_tenant_file(upload):
         return [], errors
     get = _getter(columns)
     types = Tenant.TenantType.choices
-    result, seen = [], set()
+    result, seen = [], []
     for line, row in body:
         try:
+            problem = lost_zero_problem(get(row, "phone"))
+            if problem:
+                raise RowError(f'Phone "{get(row, "phone")}" {problem}')
             tenant = Tenant(
                 name=get(row, "name"),
                 tenant_type=_pick(get(row, "type"), types, "Type") or Tenant.TenantType.INDIVIDUAL,
@@ -121,10 +128,13 @@ def parse_tenant_file(upload):
                 notes=get(row, "notes"),
             )
             tenant.full_clean(exclude=["photo", "code"])
-            key = (tenant.name.lower(), tenant.email, tenant.phone)
-            if key in seen:
-                raise RowError(f'"{tenant.name}" appears twice in the file with the same email and phone.')
-            seen.add(key)
+            person = (tenant.name, tenant.email, tenant.phone)
+            if any(same_person(person, earlier) for earlier in seen):
+                raise RowError(
+                    f'"{tenant.name}" looks like a duplicate of an earlier row '
+                    "(same email, or same name and phone number)."
+                )
+            seen.append(person)
             result.append(tenant)
         except (RowError, ValidationError) as exc:
             errors.append(f"Row {line}: {_describe(exc)}")

@@ -1,5 +1,22 @@
 # Changelog
 
+## Update 13 - Cleanup of Owners, Properties, Units and Tenants
+Run `python manage.py makemigrations` then `migrate` (the unit status, a few limits and some help texts changed).
+- Tenants: the same email cannot be used twice, and the same name with the same phone number (written any way, +971 / 05...) is refused too. Importing a file twice no longer creates tenants twice.
+- Units: a new unit is Vacant by default (it used to have no status, which threw off the Vacant and Occupancy numbers). Old units without a status are set to Vacant by `migrate`.
+- Status: still chosen by hand for now; a note says that it will follow the lease automatically once Leases exist.
+- Excel import: a phone number that lost its leading zero (0501234567 became 501234567) is refused with an explanation. The Phone column of the Owner and Tenant templates is set to Text so Excel keeps the zero.
+- Owner header: "Listed rent" is now "Asking rent, all units" and shows what it really is. Counts (properties, units, occupancy, rent) leave out inactive properties.
+- An owner with active properties cannot be made inactive (deactivate or move the properties first).
+- Limits: year built 1900 to 5 years ahead, total floors 1 to 200, area more than 0. An Emirates ID must have 15 digits starting 784 (it is tidied to 784-YYYY-NNNNNNN-C).
+- Documents: Emirates ID, passport, visa and trade licence need an expiry date. Only one Emirates ID, passport, visa, trade licence or VAT certificate per owner / tenant.
+- Expiry warnings: one message for all of a record's documents instead of one per document.
+- The first contact of an owner or tenant becomes Primary, and the first bank account becomes Default, automatically.
+- Properties and Units can now be exported to Excel and CSV (select rows, choose the action).
+- Exports can no longer carry spreadsheet formulas (text starting with = + - or @ is made safe; phone numbers are left alone).
+- Owners list: counts are worked out with sub-queries instead of one huge join, so it stays fast with many units.
+- Owner and tenant codes (OWN-0001, TEN-0001): if two people save at the same moment, the second one gets the next code instead of an error.
+
 ## Update 12g - Fix
 - System settings page crashed with an error when there were no roles yet (Django 6 rejects an HTML snippet with no values). Fixed, and a test now covers a page with no roles.
 

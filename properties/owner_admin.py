@@ -5,7 +5,8 @@ from django import forms
 from django.contrib import admin, messages
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
-from django.db.models import Count, Q, Sum
+from django.db.models import Count, IntegerField, OuterRef, Q, Subquery, Sum, Value
+from django.db.models.functions import Coalesce
 from django.forms.models import BaseInlineFormSet
 from django.shortcuts import redirect, render
 from django.urls import path
@@ -24,6 +25,7 @@ from core.widgets import use_file_widget
 from . import owner_tools
 from .import_admin import ImportMixin
 from .models import (
+    SINGLE_DOCUMENT_TYPES,
     Owner,
     OwnerBankAccount,
     OwnerContact,
@@ -43,6 +45,40 @@ def _initials(name):
 def _owner_avatar(owner, size=32):
     return circle_avatar(owner.photo.url if owner.photo else "", _initials(owner.name), size)
 
+
+
+def document_alert(request, documents):
+    """
+    One message about documents that have expired or expire soon (not one per document).
+    `documents` must have an expiry date and be ordered the way they should be listed.
+    """
+    documents = list(documents)
+    if not documents:
+        return
+    today = timezone.localdate()
+
+    def line(doc):
+        verb = "expired on" if doc.expiry_date < today else "expires on"
+        return f"{doc} {verb} {fmt_date(doc.expiry_date)}"
+
+    if len(documents) == 1:
+        text = line(documents[0]) + "."
+    else:
+        text = f"{len(documents)} documents need attention: " + "; ".join(line(d) for d in documents[:3])
+        text += f" and {len(documents) - 3} more." if len(documents) > 3 else "."
+    show = messages.error if any(d.expiry_date < today for d in documents) else messages.warning
+    show(request, text)
+
+
+def _per_owner(queryset, group_by):
+    """A sub-query that counts rows per owner (much lighter than joining everything together)."""
+    return Coalesce(
+        Subquery(
+            queryset.order_by().values(group_by).annotate(c=Count("pk")).values("c"),
+            output_field=IntegerField(),
+        ),
+        Value(0),
+    )
 
 
 # ---------------------------------------------------------------------------------------
@@ -66,6 +102,20 @@ class OnePerOwnerFormSet(BaseInlineFormSet):
         if flagged > 1:
             raise ValidationError(self.flag_message)
 
+    def save(self, commit=True):
+        saved = super().save(commit=commit)
+        if commit and self.instance.pk:
+            self._make_sure_one_is_flagged()
+        return saved
+
+    def _make_sure_one_is_flagged(self):
+        """If there are rows but none is marked Primary / Default, mark the first one."""
+        rows = self.model._default_manager.filter(**{self.fk.name: self.instance})
+        if rows.exists() and not rows.filter(**{self.flag: True}).exists():
+            first = rows.order_by("pk").first()
+            setattr(first, self.flag, True)
+            first.save(update_fields=[self.flag])
+
 
 class ContactFormSet(OnePerOwnerFormSet):
     flag = "is_primary"
@@ -75,6 +125,29 @@ class ContactFormSet(OnePerOwnerFormSet):
 class BankFormSet(OnePerOwnerFormSet):
     flag = "is_default"
     flag_message = "Only one bank account can be marked as Default."
+
+
+class DocumentFormSet(BaseInlineFormSet):
+    """A person or company has only one Emirates ID, passport, visa ... at a time."""
+
+    def clean(self):
+        super().clean()
+        if any(self.errors):
+            return
+        seen = set()
+        for form in self.forms:
+            data = getattr(form, "cleaned_data", None)
+            if not data or data.get("DELETE"):
+                continue
+            kind = data.get("doc_type")
+            if kind in SINGLE_DOCUMENT_TYPES:
+                if kind in seen:
+                    label = dict(form.fields["doc_type"].choices).get(kind, kind)
+                    raise ValidationError(
+                        f"Only one \"{label}\" can be added. Edit the existing one "
+                        "(for example to change its number or expiry date) instead."
+                    )
+                seen.add(kind)
 
 
 class ContactInline(TabularInline):
@@ -98,6 +171,7 @@ class OwnerDocumentForm(forms.ModelForm):
 class DocumentInline(TabularInline):
     model = OwnerDocument
     form = OwnerDocumentForm
+    formset = DocumentFormSet
     tab = True
     extra = 0
     fields = ("doc_type", "number", "expiry_date", "status", "file", "notes")
@@ -283,29 +357,26 @@ class OwnerAdmin(ImportMixin, TooltipHelpMixin, ModelAdmin):
 
     # ---- queries ---------------------------------------------------------------------
     def get_queryset(self, request):
+        """
+        The counts use sub-queries and only look at ACTIVE properties (an inactive property no
+        longer counts towards an owner's units, occupancy or rent).
+        """
         today = timezone.localdate()
         limit = today + timedelta(days=sysconf.expiry_days())
+        active = Property.objects.filter(owner=OuterRef("pk"), is_active=True)
+        active_units = Unit.objects.filter(property__owner=OuterRef("pk"), property__is_active=True)
+        documents = OwnerDocument.objects.filter(owner=OuterRef("pk"))
         return super().get_queryset(request).annotate(
-            _property_count=Count("properties", distinct=True),
-            _unit_count=Count("properties__units", distinct=True),
-            _occupied_units=Count(
-                "properties__units", filter=Q(properties__units__status="occupied"), distinct=True
+            _property_count=_per_owner(active, "owner"),
+            _unit_count=_per_owner(active_units, "property__owner"),
+            _occupied_units=_per_owner(active_units.filter(status=Unit.Status.OCCUPIED), "property__owner"),
+            _standalone=_per_owner(active.filter(property_type__in=STANDALONE_TYPES), "owner"),
+            _occupied_standalone=_per_owner(
+                active.filter(property_type__in=STANDALONE_TYPES, status=Property.Status.OCCUPIED), "owner"
             ),
-            _standalone=Count(
-                "properties", filter=Q(properties__property_type__in=STANDALONE_TYPES), distinct=True
-            ),
-            _occupied_standalone=Count(
-                "properties",
-                filter=Q(properties__property_type__in=STANDALONE_TYPES, properties__status="occupied"),
-                distinct=True,
-            ),
-            _docs_expired=Count(
-                "documents", filter=Q(documents__expiry_date__lt=today), distinct=True
-            ),
-            _docs_soon=Count(
-                "documents",
-                filter=Q(documents__expiry_date__gte=today, documents__expiry_date__lte=limit),
-                distinct=True,
+            _docs_expired=_per_owner(documents.filter(expiry_date__lt=today), "owner"),
+            _docs_soon=_per_owner(
+                documents.filter(expiry_date__gte=today, expiry_date__lte=limit), "owner"
             ),
         )
 
@@ -341,7 +412,7 @@ class OwnerAdmin(ImportMixin, TooltipHelpMixin, ModelAdmin):
             parts.append(format_html('<a href="mailto:{}">{}</a>', obj.email, obj.email))
         return format_html_join(mark_safe("<br>"), "{}", ((p,) for p in parts)) if parts else "-"
 
-    @admin.display(description="Properties", ordering="_property_count")
+    @admin.display(description="Active properties", ordering="_property_count")
     def property_count(self, obj):
         return obj._property_count
 
@@ -372,9 +443,9 @@ class OwnerAdmin(ImportMixin, TooltipHelpMixin, ModelAdmin):
     def summary_header(self, obj):
         if obj is None or not obj.pk:
             return ""
-        properties = obj.properties.all()
+        properties = obj.properties.filter(is_active=True)  # inactive properties are left out
         standalone = properties.filter(property_type__in=STANDALONE_TYPES)
-        units = Unit.objects.filter(property__owner=obj)
+        units = Unit.objects.filter(property__owner=obj, property__is_active=True)
         unit_total = units.count()
         rentable = unit_total + standalone.count()
         occupied = units.filter(status=Unit.Status.OCCUPIED).count() + standalone.filter(
@@ -395,10 +466,10 @@ class OwnerAdmin(ImportMixin, TooltipHelpMixin, ModelAdmin):
 
         contact = " · ".join(x for x in (obj.code, obj.phone, obj.email) if x)
         stats = [
-            (properties.count(), "Properties"),
+            (properties.count(), "Active properties"),
             (unit_total, "Units"),
             (occupancy, "Occupancy"),
-            (format_amount(rent), "Listed rent (AED / year)"),
+            (format_amount(rent), "Asking rent, all units (AED / year)"),
         ]
         return format_html(
             '<div class="erp-owner-header">{}<div class="erp-oh-main"><div class="erp-oh-name">{}</div>'
@@ -418,12 +489,10 @@ class OwnerAdmin(ImportMixin, TooltipHelpMixin, ModelAdmin):
         if request.method == "GET" and str(object_id).isdigit():
             today = timezone.localdate()
             limit = today + timedelta(days=sysconf.expiry_days())
-            for doc in OwnerDocument.objects.filter(owner_id=object_id, expiry_date__lte=limit):
-                when = fmt_date(doc.expiry_date)
-                if doc.expiry_date < today:
-                    messages.error(request, f"{doc} expired on {when}.")
-                else:
-                    messages.warning(request, f"{doc} expires on {when}.")
+            document_alert(
+                request,
+                OwnerDocument.objects.filter(owner_id=object_id, expiry_date__lte=limit).order_by("expiry_date"),
+            )
         return super().change_view(request, object_id, form_url, extra_context)
 
     # ---- export / import ---------------------------------------------------------------
@@ -440,6 +509,7 @@ class OwnerAdmin(ImportMixin, TooltipHelpMixin, ModelAdmin):
     import_headers = owner_tools.IMPORT_HEADERS
     import_notes = [
         "Only Name is required. Type is Individual or Company (blank = Individual).",
+        "Phone numbers: keep the leading + or 0 (the template's Phone column is already set to Text).",
     ]
 
     def import_parse(self, upload):

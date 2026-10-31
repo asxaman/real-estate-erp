@@ -22,6 +22,7 @@ from properties.owner_admin import (
     DocumentInline,
     DocumentsFilter,
     _initials,
+    document_alert,
 )
 
 from . import tenant_tools
@@ -199,12 +200,10 @@ class TenantAdmin(ImportMixin, TooltipHelpMixin, ModelAdmin):
         if request.method == "GET" and str(object_id).isdigit():
             today = timezone.localdate()
             limit = today + timedelta(days=sysconf.expiry_days())
-            for doc in TenantDocument.objects.filter(tenant_id=object_id, expiry_date__lte=limit):
-                when = fmt_date(doc.expiry_date)
-                if doc.expiry_date < today:
-                    messages.error(request, f"{doc} expired on {when}.")
-                else:
-                    messages.warning(request, f"{doc} expires on {when}.")
+            document_alert(
+                request,
+                TenantDocument.objects.filter(tenant_id=object_id, expiry_date__lte=limit).order_by("expiry_date"),
+            )
         return super().change_view(request, object_id, form_url, extra_context)
 
     # ---- export / import ----------------------------------------------------------------
@@ -218,7 +217,11 @@ class TenantAdmin(ImportMixin, TooltipHelpMixin, ModelAdmin):
 
     import_noun = "tenants"
     import_headers = tenant_tools.IMPORT_HEADERS
-    import_notes = ["Required: Name, Nationality, Email and Phone. Type is Individual or Company (blank = Individual)."]
+    import_notes = [
+        "Required: Name, Nationality, Email and Phone. Type is Individual or Company (blank = Individual).",
+        "A tenant who already exists (same email, or same name and phone) is refused, so importing a file twice does no harm.",
+        "Phone numbers: keep the leading + or 0 (the template's Phone column is already set to Text).",
+    ]
 
     def import_parse(self, upload):
         return tenant_tools.parse_tenant_file(upload)
