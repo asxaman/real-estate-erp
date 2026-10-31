@@ -1422,6 +1422,36 @@
     });
   }
 
+  /* Icons are drawn by an icon font. While it downloads the browser would show the icon names
+     ("dashboard", "chevron_right" ...) as text, so the CSS keeps the icons hidden and we reveal
+     them once the font is ready (or after 2.5 s at the latest). */
+  function iconsReady() {
+    var root = document.documentElement;
+    var done = false;
+    function reveal() {
+      if (!done) {
+        done = true;
+        root.classList.add("erp-icons-ready");
+      }
+    }
+    var waiting = [];
+    try {
+      if (document.fonts && document.fonts.forEach) {
+        document.fonts.forEach(function (face) {
+          if (/material/i.test(String(face.family || ""))) {
+            waiting.push(face.load());
+          }
+        });
+      }
+      if (!waiting.length && document.fonts && document.fonts.ready) {
+        waiting.push(document.fonts.ready);
+      }
+    } catch (err) { /* fall through to the timer */ }
+    Promise.all(waiting.map(function (p) { return Promise.resolve(p).catch(function () { return null; }); })).then(reveal);
+    window.setTimeout(reveal, 2500);
+  }
+  iconsReady();
+
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", init);
   } else {
