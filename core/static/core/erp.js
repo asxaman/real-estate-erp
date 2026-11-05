@@ -651,6 +651,18 @@
 
         // Django itself says it cannot delete (protected related records / no permission).
         if (BLOCKED.test(area ? area.textContent : pageText)) {
+          var builtIn = /built-in account/i.test(area ? area.textContent : pageText) ||
+            (opts.names || []).some(function (n) { return /company owned/i.test(String(n)); });
+          if (builtIn) {  // the built-in owner: a clear, friendly explanation
+            showDialog({
+              title: "Company Owned cannot be deleted",
+              text: "Company Owned is a built-in account. It represents the properties owned by the company " +
+                    "itself and is required by the system, so it cannot be deleted.",
+              sections: (opts.names || []).length > 1
+                ? [{ heading: "", items: ["Untick Company Owned and try again to delete the others."] }] : []
+            });
+            return;
+          }
           var reason = lines.filter(function (l) { return l.length > 25; }).slice(0, 6);
           showDialog({
             title: "This cannot be deleted",

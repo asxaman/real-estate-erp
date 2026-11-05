@@ -504,3 +504,13 @@ class NoDeleteInRelatedMenu(TestCase):
         page = self.client.get(reverse("admin:properties_property_add"))
         self.assertEqual(page.status_code, 200)
         self.assertNotContains(page, "Delete selected")
+
+
+class CompanyOwnedDeleteMessage(TestCase):
+    def test_delete_page_carries_the_marker_for_the_friendly_message(self):
+        self.client.force_login(get_user_model().objects.create_superuser("boss3", "b3@example.com", "Pass-word1!"))
+        company = Owner.company()
+        page = self.client.post(reverse("admin:properties_owner_changelist"), {
+            "action": "delete_selected", "_selected_action": [str(company.pk)],
+        })
+        self.assertContains(page, "built-in account")

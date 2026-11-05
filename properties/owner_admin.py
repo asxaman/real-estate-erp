@@ -363,6 +363,13 @@ class OwnerAdmin(ImportMixin, ExportPermissionMixin, TooltipHelpMixin, ModelAdmi
             return False
         return super().has_delete_permission(request, obj)
 
+    def get_deleted_objects(self, objs, request):
+        """Adds a marker to the "cannot delete" page when the built-in owner is included (erp.js shows a friendly message)."""
+        to_delete, model_count, perms_needed, protected = super().get_deleted_objects(objs, request)
+        if any(getattr(owner, "is_company", False) for owner in objs):
+            perms_needed = set(perms_needed) | {"Company Owned (built-in account)"}
+        return to_delete, model_count, perms_needed, protected
+
     # ---- queries ---------------------------------------------------------------------
     def get_queryset(self, request):
         """
