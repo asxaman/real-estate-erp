@@ -514,3 +514,60 @@ class CompanyOwnedDeleteMessage(TestCase):
             "action": "delete_selected", "_selected_action": [str(company.pk)],
         })
         self.assertContains(page, "built-in account")
+
+
+class DeletingRules(TestCase):
+    """The delete rules: an owner needs no properties, a property needs no units (enforced by the database)."""
+
+    def setUp(self):
+        from django.db.models import ProtectedError
+        from properties.tests import building, standalone, unit
+
+        self.ProtectedError = ProtectedError
+        self.boss = get_user_model().objects.create_superuser("boss4", "b4@example.com", "Pass-word1!")
+        self.client.force_login(self.boss)
+        self.villa = standalone("DEL1")
+        self.villa.save()
+        self.tower = building("DEL2")
+        self.flat = unit(self.tower)
+
+    def test_owner_with_a_property_cannot_be_deleted(self):
+        with self.assertRaises(self.ProtectedError):
+            self.villa.owner.delete()
+        self.assertTrue(Owner.objects.filter(pk=self.villa.owner_id).exists())
+
+    def test_inactive_property_still_blocks_its_owner(self):
+        Property.objects.filter(pk=self.villa.pk).update(is_active=False)
+        with self.assertRaises(self.ProtectedError):
+            self.villa.owner.delete()
+
+    def test_owner_without_properties_can_be_deleted(self):
+        from properties.tests import make_owner
+
+        owner = make_owner("Nobody Owns")
+        OwnerDocument.objects.create(owner=owner, doc_type="trade_licence", number="X1", expiry_date="2030-01-01")
+        owner.delete()
+        self.assertFalse(Owner.objects.filter(pk=owner.pk).exists())
+        self.assertFalse(OwnerDocument.objects.filter(owner_id=owner.pk).exists())
+
+    def test_property_with_a_unit_cannot_be_deleted(self):
+        with self.assertRaises(self.ProtectedError):
+            self.tower.delete()
+        self.assertTrue(Property.objects.filter(pk=self.tower.pk).exists())
+
+    def test_property_without_units_can_be_deleted_after_its_units_go(self):
+        self.flat.delete()
+        self.tower.delete()
+        self.assertFalse(Property.objects.filter(pk=self.tower.pk).exists())
+
+    def test_company_owned_cannot_be_deleted_from_the_admin(self):
+        company = Owner.company()
+        url = reverse("admin:properties_owner_delete", args=[company.pk])
+        self.assertEqual(self.client.post(url, {"post": "yes"}).status_code, 403)
+        self.assertTrue(Owner.objects.filter(pk=company.pk).exists())
+
+    def test_the_admin_refuses_an_owner_that_has_properties(self):
+        url = reverse("admin:properties_owner_delete", args=[self.villa.owner_id])
+        page = self.client.post(url, {"post": "yes"})
+        self.assertEqual(page.status_code, 200)  # the "cannot delete" page, nothing deleted
+        self.assertTrue(Owner.objects.filter(pk=self.villa.owner_id).exists())

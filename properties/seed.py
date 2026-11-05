@@ -60,8 +60,9 @@ def seed_properties() -> str:
         ("Gulf Horizon Investments LLC", "info@gulfhorizon.example.com", "+971 2 000 0002", Owner.OwnerType.COMPANY),
         ("Noura Al Suwaidi", "noura@example.com", "+971 55 000 0003", Owner.OwnerType.INDIVIDUAL),
     ]:
-        owners[name], _ = Owner.objects.get_or_create(
-            name=name, defaults={"email": email, "phone": phone, "owner_type": owner_type}
+        # Names are unique whatever their capitals, so look for an existing one the same way.
+        owners[name] = Owner.objects.filter(name__iexact=name).first() or Owner.objects.create(
+            name=name, email=email, phone=phone, owner_type=owner_type
         )
     _seed_owner_details(owners)
 

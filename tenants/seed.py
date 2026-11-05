@@ -23,11 +23,13 @@ def seed_tenants() -> str:
     ]
     created = 0
     for name, ttype, nationality, email, phone, docs in samples:
-        tenant, new = Tenant.objects.get_or_create(
-            name=name,
-            defaults={"tenant_type": ttype, "nationality": nationality, "email": email, "phone": phone},
-        )
+        # Names and emails are unique whatever their capitals: skip a sample that is already there.
+        tenant = Tenant.objects.filter(name__iexact=name).first() or Tenant.objects.filter(email__iexact=email).first()
+        new = tenant is None
         if new:
+            tenant = Tenant.objects.create(
+                name=name, tenant_type=ttype, nationality=nationality, email=email, phone=phone
+            )
             created += 1
             for doc_type, number, days in docs:
                 TenantDocument.objects.create(
