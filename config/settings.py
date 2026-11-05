@@ -90,7 +90,8 @@ INSTALLED_APPS = [
     # ERP modules
     "core",  # Module 0: foundation (users, roles, data tools)
     "properties",  # Module 1: owners, properties, units
-    "tenants",  # Module 2: tenants (leases next)
+    "tenants",  # Module 2: tenants
+    "leases",  # Module 3: leases and rent payments
 ]
 
 MIDDLEWARE = [
@@ -267,7 +268,7 @@ UNFOLD = {
     "SHOW_VIEW_ON_SITE": False,
     # Our own small style/behaviour layer (info icons, compact forms).
     # Bump the ?v= number whenever these files change so browsers reload them.
-    "STYLES": [lambda request: static("core/erp.css") + "?v=20"],
+    "STYLES": [lambda request: static("core/erp.css") + "?v=21"],
     "SCRIPTS": [lambda request: static("core/erp.js") + "?v=25"],
     "SIDEBAR": {
         "show_search": True,
@@ -325,6 +326,18 @@ UNFOLD = {
                         "icon": "groups",
                         "link": reverse_lazy("admin:tenants_tenant_changelist"),
                         "permission": _can("tenants.view_tenant"),
+                    },
+                    {
+                        "title": "Leases",
+                        "icon": "description",
+                        "link": reverse_lazy("admin:leases_lease_changelist"),
+                        "permission": _can("leases.view_lease"),
+                    },
+                    {
+                        "title": "Rent payments",
+                        "icon": "payments",
+                        "link": reverse_lazy("admin:leases_leasepayment_changelist"),
+                        "permission": _can("leases.view_leasepayment"),
                     },
                 ],
             },

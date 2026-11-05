@@ -8,7 +8,7 @@ from functools import partial
 
 from django.db import models, transaction
 
-APPS = ("core", "properties", "tenants")
+APPS = ("core", "properties", "tenants", "leases")
 
 
 def _file_fields(model):

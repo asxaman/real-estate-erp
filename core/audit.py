@@ -29,6 +29,9 @@ AUDITED_MODELS = (
     "tenants.Tenant",
     "tenants.TenantContact",
     "tenants.TenantDocument",
+    "leases.Lease",
+    "leases.LeasePayment",
+    "leases.LeaseDocument",
     "core.SystemSettings",
     "auth.User",
 )
@@ -38,6 +41,7 @@ OWNER_CHILD_LABELS = {
     "properties.OwnerBankAccount",
 }
 TENANT_CHILD_LABELS = {"tenants.TenantContact", "tenants.TenantDocument"}
+LEASE_CHILD_LABELS = {"leases.LeasePayment", "leases.LeaseDocument"}
 # Fields whose full value must never appear in the log (only the last 4 characters).
 MASKED_FIELDS = {
     "iban", "emirates_id_number", "passport_number", "trn", "trade_licence_number", "number",
@@ -50,6 +54,7 @@ DOCUMENT_LABELS = {
     "properties.PropertyDocument",
     "properties.UnitDocument",
     "tenants.TenantDocument",
+    "leases.LeaseDocument",
 }
 
 # Fields that are technical noise or secret; they never appear in the log.
@@ -167,6 +172,10 @@ def related_owner_id(instance):
             return instance.property.owner_id
         if label in ("properties.UnitDocument", "properties.UnitPhoto"):
             return instance.unit.property.owner_id
+        if label == "leases.Lease":
+            return instance.property.owner_id
+        if label in LEASE_CHILD_LABELS:
+            return instance.lease.property.owner_id
     except Exception:
         return None
     return None
@@ -182,6 +191,10 @@ def related_property_id(instance):
             return instance.property_id
         if label in ("properties.UnitDocument", "properties.UnitPhoto"):
             return instance.unit.property_id
+        if label == "leases.Lease":
+            return instance.property_id
+        if label in LEASE_CHILD_LABELS:
+            return instance.lease.property_id
     except Exception:
         return None
     return None
@@ -194,6 +207,13 @@ def related_unit_id(instance):
         return instance.pk
     if label in ("properties.UnitDocument", "properties.UnitPhoto"):
         return instance.unit_id
+    try:
+        if label == "leases.Lease":
+            return instance.unit_id
+        if label in LEASE_CHILD_LABELS:
+            return instance.lease.unit_id
+    except Exception:
+        return None
     return None
 
 
@@ -204,6 +224,23 @@ def related_tenant_id(instance):
         return instance.pk
     if label in TENANT_CHILD_LABELS:
         return instance.tenant_id
+    try:
+        if label == "leases.Lease":
+            return instance.tenant_id
+        if label in LEASE_CHILD_LABELS:
+            return instance.lease.tenant_id
+    except Exception:
+        return None
+    return None
+
+
+def related_lease_id(instance):
+    """Which lease does this record belong to? (None when it is not lease-related.)"""
+    label = instance._meta.label
+    if label == "leases.Lease":
+        return instance.pk
+    if label in LEASE_CHILD_LABELS:
+        return instance.lease_id
     return None
 
 
@@ -223,6 +260,7 @@ def _write(action, instance, changes):
         related_tenant_id=related_tenant_id(instance),
         related_property_id=related_property_id(instance),
         related_unit_id=related_unit_id(instance),
+        related_lease_id=related_lease_id(instance),
         user_id=user.pk if user is not None else None,
         username=user.get_username() if user is not None else "(system)",
         action=action,

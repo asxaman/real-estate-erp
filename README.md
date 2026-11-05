@@ -170,7 +170,7 @@ Sidebar > **Property management**:
   * **Floor** accepts only: G, LG, UG, R, RF, PH, M, MZ, A, S, SC, GF, L, LV, E, B1, B2, B3 ... (basements),
     P1, P2, P3 ... (podium levels) or a number 1, 2, 3 ... Hover the "i" next to the field to see the list.
   * **Unit type**: Studio, 1BHK, 2BHK, 3BHK, 4BHK, 5BHK for residential buildings; Office or Shop for commercial buildings.
-  * **Status** is optional for now; later it will follow the lease (leased, not leased, under maintenance ...).
+  * **Status** follows the unit's leases automatically (Occupied while a lease is running, Vacant after it ends); you can still change it by hand, for example to Under maintenance.
 * **Rules added in update 6** (all enforced on the server):
   * No owner can be named "Company Owned" (reserved) and two owners cannot share a name (capitals and extra spaces are ignored).
     Owner phone numbers are checked (for example `+971 50 123 4567`).
@@ -196,6 +196,38 @@ Sidebar > **Tenancy** > **Tenants** (leases are the next step of this module):
 * The list can be filtered by type, active and document status, and searched by name, code, phone, email, nationality, contact person or document number (Emirates ID, licence).
 * **Export**: tick tenants, choose *Export selected tenants to Excel / CSV*. **Import**: the *Import* button at the top of the list.
 * Photos and documents are saved in the `media` folder: include it in your backups.
+
+## What you can do in Module 3 (Leases and rent payments)
+
+* **Leases** (sidebar: Tenancy > Leases). A lease is one tenant renting one unit, or one whole standalone property
+  (villa, warehouse, yard ...). Numbers are automatic: `LSE-0001`, `LSE-0002` ...
+  * Choose the **Tenant** (only active, not blacklisted tenants are offered), then either the **Unit** (buildings) or
+    the **Property** (standalone). Enter the start and end dates, the **Annual rent** and the number of payments a year
+    (1, 2, 3, 4, 6 or 12).
+  * When the lease is first saved, the **payment schedule** is created by itself on the **Payments** tab: equal
+    instalments (the last one takes any rounding), one every 12 / n months. Each payment has a method (cheque,
+    transfer, cash, card), cheque number, bank and a status (Pending, Paid, Bounced).
+  * **Deposit, fees and Ejari** tab: security deposit (held / refunded / deducted), agency commission, admin fee,
+    Ejari number and expiry. Tick **VAT (5%)** for commercial leases; every payment then shows the VAT too.
+  * **Rules:** the end date must be after the start date (10 years at most); two leases for the same unit cannot
+    overlap; blacklisted or inactive tenants cannot sign a new lease; inactive properties cannot be leased.
+  * **Renew:** tick one lease in the list and choose "Renew the selected lease": a new lease starts the day after the
+    old one ends, lasts as long, and gets its own payment schedule.
+  * **Terminate early:** set Status to "Terminated early" and fill in the date and reason on the Termination tab.
+  * **Rebuild the payment schedule:** a list action; refused when any payment is already paid or bounced.
+  * A lease with received rent cannot be deleted (terminate it instead). A tenant, unit or property that has a lease
+    cannot be deleted either.
+  * **Documents** tab: the signed contract, Ejari certificate, cheque copies ... with expiry warnings.
+* **Rent payments** (sidebar: Tenancy > Rent payments): every instalment of every lease in one list. Filter by
+  status, overdue, due this week / month or date; search by lease, tenant or cheque number; tick payments and choose
+  **Mark as paid** or **Mark as bounced**.
+* **Unit and property status** follows the leases: a running lease makes the unit Occupied; when the lease ends or is
+  terminated it becomes Vacant. This is done when a lease is saved and the first time anyone signs in each day
+  (or run `python manage.py refresh_leases`).
+* **Dashboard and Expiring documents** show active leases, overdue payments, leases that are about to end and
+  Ejari certificates that expire.
+* **Sample data** adds 5 leases (one ending soon, one with an overdue payment, one terminated, one finished) and
+  gives the demo roles lease permissions.
 
 ## Rules that keep the data clean (update 13)
 
@@ -362,6 +394,8 @@ The `.gitignore` file keeps your database, passwords and the `venv` folder out o
     config/      project settings, URLs
     core/        Module 0: users, roles, seed/erase tools, audit log, safety rules, backup command
     properties/  Module 1: owners, properties, units
+    tenants/     Module 2: tenants
+    leases/      Module 3: leases and rent payments
     media/       uploaded files such as profile pictures (never uploaded to GitHub)
     backups/     database backups made by `backup_db` (never uploaded to GitHub)
     .env         your private settings and database password (never uploaded to GitHub)

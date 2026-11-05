@@ -103,6 +103,15 @@ class AuditEntry(models.Model):
         db_constraint=False,
         related_name="audit_entries",
     )
+    # The lease this entry belongs to (Activity tab on the lease page); no database constraint.
+    related_lease = models.ForeignKey(
+        "leases.Lease",
+        null=True,
+        blank=True,
+        on_delete=models.DO_NOTHING,
+        db_constraint=False,
+        related_name="audit_entries",
+    )
     # {"field name": [old value, new value], ...}
     changes = models.JSONField(default=dict, blank=True)
 

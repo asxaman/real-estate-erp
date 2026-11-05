@@ -574,8 +574,8 @@ class Property(models.Model):
         choices=Status.choices,
         blank=True,
         default=Status.VACANT,
-        help_text="Chosen by hand for now. Once leases are added, Occupied and Vacant will "
-        "follow the lease automatically.",
+        help_text="Occupied and Vacant follow the lease automatically when a lease is saved and when "
+        "someone signs in each day. You can still change it by hand (for example to Under maintenance).",
     )
 
     # Management fee - not used when the owner is "Company Owned"
@@ -776,13 +776,13 @@ class Unit(models.Model):
         "Utility account no.", max_length=30, blank=True,
         help_text="DEWA / ADDC / SEWA account number for this unit (optional).",
     )
-    # Chosen by hand for now: once leases exist, Occupied / Vacant will follow the lease.
+    # Occupied / Vacant follow the unit's leases (see leases/occupancy.py); it can still be changed by hand.
     status = models.CharField(
         max_length=20,
         choices=Status.choices,
         default=Status.VACANT,
-        help_text="Chosen by hand for now. Once leases are added, Occupied and Vacant will "
-        "follow the lease automatically.",
+        help_text="Occupied and Vacant follow the lease automatically when a lease is saved and when "
+        "someone signs in each day. You can still change it by hand (for example to Under maintenance).",
     )
     asking_rent = models.DecimalField(
         "Asking rent (AED / year)",

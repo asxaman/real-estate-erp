@@ -20,8 +20,10 @@ SOURCES = (
     ("Property", "properties.PropertyDocument", "property", "admin:properties_property_change",
      "properties.view_propertydocument"),
     ("Unit", "properties.UnitDocument", "unit", "admin:properties_unit_change", "properties.view_unitdocument"),
+    ("Lease", "leases.LeaseDocument", "lease", "admin:leases_lease_change", "leases.view_leasedocument"),
 )
 KINDS = {label.lower(): label for label, *_ in SOURCES}
+KINDS["lease"] = "Lease"  # lease documents, and the dates leases and Ejari certificates end
 WINDOWS = (30, 60, 90, 180)
 
 
@@ -41,7 +43,7 @@ def collect_documents(request, window=None, kind="", state="attention"):
             continue
         if not request.user.has_perm(permission):
             continue
-        related = "unit__property" if parent == "unit" else parent  # a unit's name includes its property
+        related = {"unit": "unit__property", "lease": "lease__tenant"}.get(parent, parent)  # names include their parents
         queryset = apps.get_model(model_path).objects.filter(expiry_date__isnull=False).select_related(related)
         if state == "expired":
             queryset = queryset.filter(expiry_date__lt=today)
@@ -55,7 +57,7 @@ def collect_documents(request, window=None, kind="", state="attention"):
             rows.append(
                 {
                     "kind": label,
-                    "who": str(owner),
+                    "who": f"{owner} · {owner.tenant.name}" if parent == "lease" else str(owner),
                     "url": reverse(url_name, args=[owner.pk]),
                     "document": doc.get_doc_type_display(),
                     "number": doc.number,
@@ -65,7 +67,43 @@ def collect_documents(request, window=None, kind="", state="attention"):
                     "file": doc.file.url if doc.file else "",
                 }
             )
+    if (not kind or kind == "lease") and request.user.has_perm("leases.view_lease"):
+        rows.extend(_lease_rows(today, limit, state))
     rows.sort(key=lambda r: (r["expiry"], r["kind"], r["who"]))
+    return rows
+
+
+def _lease_rows(today, limit, state):
+    """The end of each running lease, and each Ejari certificate that expires, as rows of the same shape."""
+    from leases.models import Lease
+
+    rows = []
+    leases = Lease.objects.filter(status=Lease.Status.ACTIVE, end_date__gte=today - timedelta(days=90)).select_related(
+        "tenant", "unit__property", "property"
+    ).prefetch_related("renewals")
+    for lease in leases:
+        who = f"{lease.code} · {lease.tenant.name} · {lease.item_name}"
+        url = reverse("admin:leases_lease_change", args=[lease.pk])
+        candidates = []
+        if lease.start_date <= today and not lease.renewals.all():  # a renewed lease is not a worry
+            candidates.append(("Lease ends", "", lease.end_date))
+        if lease.ejari_expiry:
+            candidates.append(("Ejari certificate", lease.ejari_number, lease.ejari_expiry))
+        for document, number, expiry in candidates:
+            days = (expiry - today).days
+            if state == "expired" and days >= 0:
+                continue
+            if state == "soon" and not (0 <= days and expiry <= limit):
+                continue
+            if state == "attention" and expiry > limit:
+                continue
+            rows.append(
+                {
+                    "kind": "Lease", "who": who, "url": url, "document": document, "number": number,
+                    "expiry": expiry, "days": days,
+                    "state": "expired" if days < 0 else ("soon" if expiry <= limit else "valid"), "file": "",
+                }
+            )
     return rows
 
 
@@ -117,7 +155,10 @@ def expiring_documents_view(request):
         query = urlencode({k: v for k, v in params.items() if v not in ("", None)})
         return "?" + query if query else "?"
 
-    available = [label for label, _, _, _, permission in SOURCES if request.user.has_perm(permission)]
+    available = [
+        label for label, _, _, _, permission in SOURCES
+        if request.user.has_perm(permission) or (label == "Lease" and request.user.has_perm("leases.view_lease"))
+    ]
     context = {
         **admin.site.each_context(request),
         "title": "Expiring documents",
@@ -189,6 +230,22 @@ def dashboard_view(request):
     if user.has_perm("tenants.view_tenant"):
         cards.append({"label": "Active tenants", "value": Tenant.objects.filter(is_active=True).count(),
                       "url": reverse("admin:tenants_tenant_changelist") + "?is_active__exact=1", "tone": "violet"})
+
+    if user.has_perm("leases.view_lease"):
+        from leases.models import Lease, LeasePayment
+
+        today_ = timezone.localdate()
+        cards.append({"label": "Active leases",
+                      "value": Lease.objects.filter(status=Lease.Status.ACTIVE, start_date__lte=today_, end_date__gte=today_).count(),
+                      "url": reverse("admin:leases_lease_changelist") + "?state=active", "tone": "green"})
+    if user.has_perm("leases.view_leasepayment"):
+        from leases.models import LeasePayment
+
+        overdue = LeasePayment.objects.filter(
+            status__in=(LeasePayment.Status.PENDING, LeasePayment.Status.BOUNCED), due_date__lt=timezone.localdate()
+        )
+        cards.append({"label": "Overdue payments", "value": overdue.count(),
+                      "url": reverse("admin:leases_leasepayment_changelist") + "?due=overdue", "tone": "red"})
 
     # Documents that need attention
     documents = collect_documents(request, state="attention")

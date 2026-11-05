@@ -257,8 +257,8 @@ Run `python manage.py makemigrations` then `migrate` (the unit status, a few lim
   - A registry (`core/data_registry.py`) so every future module adds its own sample data and eraser automatically
 
 ## Planned modules
-2. Tenants and leases
-3. Rent invoicing and payments (cheques, bank transfers, cash)
+2. Owner agreements and documents
+3. Rent invoicing and receipts
 4. Accounting (chart of accounts, journal entries, reports)
 5. Maintenance requests
 6. Owner portal and tenant portal
@@ -268,3 +268,11 @@ Run `python manage.py makemigrations` then `migrate` (the unit status, a few lim
 
 ### Update 16
 - Picture editor: choosing a photo / logo opens a window to move, zoom and crop it (square, shown round for people) before it appears in the form. Works on Add and Edit for Owners, Tenants and Users; the Add user form now has a profile picture field.
+
+### Update 17 - Leases and rent payments
+- New module "leases": Leases, payment schedule, rent payments list, lease documents, renew and terminate, VAT, deposit, commission and Ejari details.
+- Unit and property status now follows the leases (when a lease is saved and at each day's first sign-in; `refresh_leases` command).
+- Dashboard cards (Active leases, Overdue payments); Expiring documents shows leases that end soon and Ejari expiries.
+- Tenants, units and properties with a lease cannot be deleted; a lease with received rent cannot be deleted.
+- Audit trail and activity tabs cover leases (new Activity tab on the lease page).
+- Sample data: 5 leases with payments; lease permissions for the demo roles.
