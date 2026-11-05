@@ -463,3 +463,44 @@ class DeleteConfirmationPageStillHasItsMarkers(TestCase):
         for marker in ("Summary", "Objects"):
             self.assertIn(marker, html)
         self.assertRegex(html, r"(?i)delete the")
+
+
+class PictureEditorMarkers(TestCase):
+    """The picture editor (erp.js) is switched on by data-crop on the photo widget of each add form."""
+
+    def setUp(self):
+        self.client.force_login(get_user_model().objects.create_superuser("boss", "b@example.com", "Pass-word1!"))
+
+    def test_add_forms_offer_the_picture_editor(self):
+        for url in (
+            reverse("admin:properties_owner_add"),
+            reverse("admin:tenants_tenant_add"),
+            reverse("admin:auth_user_add"),
+        ):
+            page = self.client.get(url)
+            self.assertEqual(page.status_code, 200, url)
+            self.assertContains(page, 'data-crop="1"', msg_prefix=url)
+
+    def test_new_user_can_be_added_with_a_picture(self):
+        from io import BytesIO
+
+        from PIL import Image
+
+        buffer = BytesIO()
+        Image.new("RGB", (10, 10), "red").save(buffer, format="PNG")  # a real (tiny) picture
+        png = buffer.getvalue()
+        response = self.client.post(reverse("admin:auth_user_add"), {
+            "username": "newbie", "password1": "Strong-pass1!", "password2": "Strong-pass1!",
+            "photo": SimpleUploadedFile("me.png", png, content_type="image/png"),
+        })
+        self.assertEqual(response.status_code, 302)
+        user = get_user_model().objects.get(username="newbie")
+        self.assertTrue(user.profile.photo)
+
+
+class NoDeleteInRelatedMenu(TestCase):
+    def test_add_property_page_has_no_delete_selected_entry(self):
+        self.client.force_login(get_user_model().objects.create_superuser("boss2", "b2@example.com", "Pass-word1!"))
+        page = self.client.get(reverse("admin:properties_property_add"))
+        self.assertEqual(page.status_code, 200)
+        self.assertNotContains(page, "Delete selected")

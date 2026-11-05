@@ -56,6 +56,17 @@ class SimpleUserCreationForm(UserCreationForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields.pop("usable_password", None)
+        use_file_widget(
+            self, "photo", preview=True, round=True, accept="image/png,image/jpeg,image/webp"
+        )
+
+    # Optional profile picture (saved to the user's profile in UserAdmin.save_model).
+    photo = forms.ImageField(
+        label="Profile picture",
+        required=False,
+        validators=PHOTO_VALIDATORS,
+        help_text="Optional. JPG, PNG or WebP.",
+    )
 
 
 class SimpleAdminPasswordChangeForm(AdminPasswordChangeForm):
@@ -108,7 +119,7 @@ class UserAdmin(SuperuserOnlyMixin, BaseUserAdmin, ModelAdmin):
     form = SafeUserChangeForm
     add_form = SimpleUserCreationForm
     change_password_form = SimpleAdminPasswordChangeForm
-    add_fieldsets = ((None, {"classes": ("wide",), "fields": ("username", "password1", "password2")}),)
+    add_fieldsets = ((None, {"classes": ("wide",), "fields": ("photo", "username", "password1", "password2")}),)
     list_display = ("avatar", "username", "first_name", "last_name", "email", "is_staff", "is_active")
     list_display_links = ("avatar", "username")
     list_select_related = ("profile",)

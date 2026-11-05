@@ -16,6 +16,17 @@ class CoreConfig(AppConfig):
 
         formats.install()
 
+        # The small menu next to a dropdown has no "Delete selected ..." entry.
+        from django.contrib.admin.widgets import RelatedFieldWidgetWrapper
+
+        original_init = RelatedFieldWidgetWrapper.__init__
+
+        def init_without_delete(self, *args, **kwargs):
+            original_init(self, *args, **kwargs)
+            self.can_delete_related = False
+
+        RelatedFieldWidgetWrapper.__init__ = init_without_delete
+
         # Audit trail: watch owners, properties, units and users.
         from django.apps import apps
         from django.db.models.signals import post_delete, post_save, pre_save

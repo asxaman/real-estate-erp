@@ -265,3 +265,6 @@ Run `python manage.py makemigrations` then `migrate` (the unit status, a few lim
 
 ### Update 15b
 - Tenant email rule now ignores blank emails; three old tests adjusted to the new rules; test output quieter.
+
+### Update 16
+- Picture editor: choosing a photo / logo opens a window to move, zoom and crop it (square, shown round for people) before it appears in the form. Works on Add and Edit for Owners, Tenants and Users; the Add user form now has a profile picture field.

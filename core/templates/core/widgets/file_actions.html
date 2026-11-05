@@ -1,4 +1,4 @@
-<div class="erp-file{% if widget.erp_compact %} erp-file-compact{% endif %}" data-erp-file data-image="{% if widget.erp_is_image %}1{% else %}0{% endif %}">
+<div class="erp-file{% if widget.erp_compact %} erp-file-compact{% endif %}" data-erp-file data-image="{% if widget.erp_is_image %}1{% else %}0{% endif %}"{% if widget.erp_preview %} data-crop="1"{% endif %}{% if widget.erp_round %} data-round="1"{% endif %}>
   <input type="file" name="{{ widget.name }}"{% if widget.attrs.id %} id="{{ widget.attrs.id }}"{% endif %}{% if widget.attrs.accept %} accept="{{ widget.attrs.accept }}"{% endif %} class="erp-file-input" hidden>
   {% if widget.is_initial %}
     {% if not widget.required %}<input type="checkbox" name="{{ widget.checkbox_name }}" id="{{ widget.checkbox_id }}" class="erp-file-clear" hidden>{% endif %}

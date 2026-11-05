@@ -480,6 +480,17 @@
       modal.querySelector(".erp-leave-stay").focus();
     }
 
+    // The small menu next to a dropdown (Change selected X / Add another X / View selected X /
+    // Delete selected X). It opens in its own pop-up window, so the form is not being left.
+    function isRelatedLink(link) {
+      if (link.hasAttribute("data-popup") || link.hasAttribute("data-href-template")) { return true; }
+      if (/related-widget|related-lookup/.test(link.className || "")) { return true; }
+      if (link.closest('[class*="related-widget"]')) { return true; }
+      var text = ((link.getAttribute("title") || "") + " " + (link.getAttribute("aria-label") || "") + " " +
+        (link.textContent || "")).trim();
+      return /^(change selected|add another|view selected|delete selected)\b/i.test(text);
+    }
+
     document.addEventListener("click", function (e) {
       if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) { return; }
       var link = e.target.closest ? e.target.closest("a[href]") : null;
@@ -488,6 +499,7 @@
       if (!href || href.charAt(0) === "#" || /^(javascript|mailto|tel):/i.test(href)) { return; }
       if (link.target && link.target !== "_self") { return; }
       if (link.hasAttribute("download") || link.closest(".related-widget-wrapper") || /_popup=/.test(href)) { return; }
+      if (isRelatedLink(link)) { return; }  // the owner / unit "view, change, add" menu opens its own window
       if (!isDirty()) { return; }
       e.preventDefault();
       e.stopPropagation();
@@ -962,7 +974,7 @@
       if (deleted) {
         setNote(p, "Will be deleted when you save.");
       } else if (chosen) {
-        setNote(p, "New file selected. It is saved when you press Save.");
+        setNote(p, (box.getAttribute("data-crop") === "1" ? "New picture ready. It is saved when you press Save." : "New file selected. It is saved when you press Save."));
       } else {
         setNote(p, "");
       }
@@ -994,16 +1006,161 @@
         p.input.value = "";
       }
       if (p.img && p.img.getAttribute("data-original")) { p.img.src = p.img.getAttribute("data-original"); }
+      else if (p.img && p.img.parentNode.getAttribute("data-made")) { p.img.parentNode.hidden = true; }
       refresh(box);
     });
 
+    // ---- Picture editor: opens when a photo / logo is chosen, so it can be moved, zoomed and cropped ----
+    var OUT_MAX = 800;  // saved pictures are at most this many pixels wide and high
+
+    function openCropper(file, round, done, cancel) {
+      var url = URL.createObjectURL(file);
+      var img = new Image();
+      img.onerror = function () { URL.revokeObjectURL(url); done(null); };  // not readable here: use it as it is
+      img.onload = function () {
+        var W = img.naturalWidth, H = img.naturalHeight;
+        var box = Math.max(200, Math.min(320, window.innerWidth - 80));
+        var scale = 1, minScale = 1, maxScale = 1, x = 0, y = 0;  // x, y: top-left of the picture inside the frame
+        var wrap = document.createElement("div");
+        wrap.className = "erp-crop-backdrop";
+        wrap.innerHTML =
+          '<div class="erp-crop-dialog" role="dialog" aria-modal="true" aria-label="Adjust picture">' +
+          '<h3 class="erp-crop-title">Adjust picture</h3>' +
+          '<p class="erp-crop-hint">Drag the picture to move it. Use the slider to zoom.</p>' +
+          '<div class="erp-crop-frame' + (round ? ' is-round' : '') + '" style="width:' + box + 'px;height:' + box + 'px">' +
+          '<canvas width="' + box + '" height="' + box + '"></canvas><span class="erp-crop-ring"></span></div>' +
+          '<input type="range" class="erp-crop-zoom" min="0" max="100" value="0" step="0.5" aria-label="Zoom">' +
+          '<div class="erp-crop-buttons"><button type="button" class="erp-fbtn" data-crop-cancel>Cancel</button>' +
+          '<button type="button" class="erp-fbtn erp-fbtn-primary" data-crop-ok>Use this picture</button></div></div>';
+        document.body.appendChild(wrap);
+        var canvas = wrap.querySelector("canvas");
+        var ctx = canvas.getContext("2d");
+        var zoom = wrap.querySelector(".erp-crop-zoom");
+
+        function clamp() {
+          x = Math.min(0, Math.max(box - W * scale, x));
+          y = Math.min(0, Math.max(box - H * scale, y));
+        }
+        function draw() {
+          clamp();
+          ctx.clearRect(0, 0, box, box);
+          ctx.drawImage(img, x, y, W * scale, H * scale);
+        }
+        function setScale(next) {  // zoom around the middle of the frame
+          next = Math.min(maxScale, Math.max(minScale, next));
+          var cx = (box / 2 - x) / scale, cy = (box / 2 - y) / scale;
+          scale = next;
+          x = box / 2 - cx * scale;
+          y = box / 2 - cy * scale;
+          zoom.value = maxScale > minScale ? ((scale - minScale) / (maxScale - minScale)) * 100 : 0;
+          draw();
+        }
+        minScale = Math.max(box / W, box / H);  // the picture always fills the frame
+        maxScale = minScale * 4;
+        scale = minScale;
+        x = (box - W * scale) / 2;
+        y = (box - H * scale) / 2;
+        draw();
+
+        zoom.addEventListener("input", function () {
+          setScale(minScale + (maxScale - minScale) * (parseFloat(zoom.value) / 100));
+        });
+        canvas.addEventListener("wheel", function (ev) {
+          ev.preventDefault();
+          setScale(scale * (ev.deltaY < 0 ? 1.08 : 1 / 1.08));
+        }, { passive: false });
+        var drag = null;
+        canvas.addEventListener("pointerdown", function (ev) {
+          drag = { px: ev.clientX, py: ev.clientY, x: x, y: y };
+          canvas.setPointerCapture(ev.pointerId);
+          wrap.classList.add("is-dragging");
+        });
+        canvas.addEventListener("pointermove", function (ev) {
+          if (!drag) { return; }
+          x = drag.x + (ev.clientX - drag.px);
+          y = drag.y + (ev.clientY - drag.py);
+          draw();
+        });
+        function stopDrag() { drag = null; wrap.classList.remove("is-dragging"); }
+        canvas.addEventListener("pointerup", stopDrag);
+        canvas.addEventListener("pointercancel", stopDrag);
+
+        function close() {
+          document.removeEventListener("keydown", onKey, true);
+          wrap.remove();
+          URL.revokeObjectURL(url);
+        }
+        function onKey(ev) {
+          if (ev.key === "Escape") { ev.stopPropagation(); close(); cancel(); }
+        }
+        document.addEventListener("keydown", onKey, true);
+        wrap.addEventListener("click", function (ev) {
+          if (ev.target.closest("[data-crop-cancel]")) { close(); cancel(); }
+          if (ev.target.closest("[data-crop-ok]")) {
+            var side = Math.round(Math.min(OUT_MAX, box / scale));  // the part of the original inside the frame
+            var out = document.createElement("canvas");
+            out.width = side;
+            out.height = side;
+            out.getContext("2d").drawImage(img, -x / scale, -y / scale, box / scale, box / scale, 0, 0, side, side);
+            var png = file.type === "image/png";
+            out.toBlob(function (blob) {
+              close();
+              if (!blob) { done(null); return; }
+              var base = (file.name || "picture").replace(/\.[^.]*$/, "");
+              done(new File([blob], base + (png ? ".png" : ".jpg"), { type: png ? "image/png" : "image/jpeg" }));
+            }, png ? "image/png" : "image/jpeg", 0.92);
+          }
+        });
+        wrap.querySelector("[data-crop-ok]").focus();
+      };
+      img.src = url;
+    }
+
+    function showPreview(box, p, src) {
+      if (box.getAttribute("data-crop") !== "1") { return; }
+      if (!p.img) {  // an empty picture field has no preview yet: make one
+        var holder = document.createElement("div");
+        holder.className = "erp-file-preview" + (box.getAttribute("data-round") === "1" ? " erp-file-round" : "");
+        holder.setAttribute("data-made", "1");
+        var made = document.createElement("img");
+        made.alt = "";
+        holder.appendChild(made);
+        box.insertBefore(holder, box.querySelector(".erp-file-row"));
+        p.img = made;
+      }
+      p.img.parentNode.hidden = false;
+      if (!p.img.getAttribute("data-original") && !p.img.parentNode.getAttribute("data-made")) {
+        p.img.setAttribute("data-original", p.img.src);
+      }
+      p.img.src = src;
+    }
+
     document.addEventListener("change", function (e) {
       if (!e.target.classList || !e.target.classList.contains("erp-file-input")) { return; }
-      var box = e.target.closest("[data-erp-file]");
+      var input = e.target;
+      var box = input.closest("[data-erp-file]");
       var p = parts(box);
-      if (p.clear && e.target.files.length) { p.clear.checked = false; }  // a new file replaces the delete
-      var file = e.target.files && e.target.files[0];
-      if (p.img && file && /^image\//.test(file.type)) {
+      var file = input.files && input.files[0];
+      if (p.clear && file) { p.clear.checked = false; }  // a new file replaces the delete
+      var isPicture = file && /^image\//.test(file.type);
+      if (isPicture && box.getAttribute("data-crop") === "1" && window.File && window.DataTransfer) {
+        openCropper(file, box.getAttribute("data-round") === "1", function (edited) {
+          if (edited) {
+            var list = new DataTransfer();
+            list.items.add(edited);
+            input.files = list.files;
+            showPreview(box, p, URL.createObjectURL(edited));
+          } else {
+            showPreview(box, p, URL.createObjectURL(file));  // could not be edited: keep it as chosen
+          }
+          refresh(box);
+        }, function () {
+          input.value = "";  // cancelled: nothing is chosen
+          refresh(box);
+        });
+        return;
+      }
+      if (isPicture && p.img) {
         if (!p.img.getAttribute("data-original")) { p.img.setAttribute("data-original", p.img.src); }
         p.img.src = URL.createObjectURL(file);
       }
@@ -1392,6 +1549,7 @@
     addInfoIcons(form);
     markRows(form);
     leaveGuard(form);
+    popupCloseButton(form);
     if (form.id === "property_form") {
       propertyFormExtras(form);
     }
@@ -1404,6 +1562,46 @@
         hideTip();
       }
     });
+  }
+
+  /* A form opened inside the pop-up window (View / Change / Add another owner ...): a "Close" button
+     next to Save. It closes the pop-up the same way clicking outside it does. */
+  function popupCloseButton(form) {
+    var inFrame = false;
+    try { inFrame = window.parent !== window; } catch (e) { inFrame = false; }
+    var isPopup = inFrame || /[?&]_popup=/.test(location.search);
+    if (!isPopup) { return; }
+    var save = form.querySelector('[name="_save"]') || document.querySelector('[name="_save"]');
+    if (!save || document.querySelector("[data-erp-popup-close]")) { return; }
+
+    function closeIt() {
+      if (inFrame) {
+        try {
+          var pdoc = window.parent.document;
+          ["keydown", "keyup"].forEach(function (type) {
+            pdoc.dispatchEvent(new window.parent.KeyboardEvent(type, { key: "Escape", code: "Escape", keyCode: 27, bubbles: true }));
+          });
+          // Still open? Click outside it (the backdrop), which also closes it.
+          setTimeout(function () {
+            if (window.parent && window.frameElement && window.frameElement.isConnected &&
+                window.frameElement.offsetParent !== null) {
+              var tall = pdoc.elementFromPoint(4, 4);
+              if (tall) { tall.dispatchEvent(new window.parent.MouseEvent("click", { bubbles: true })); }
+            }
+          }, 150);
+          return;
+        } catch (err) { /* not reachable: fall through */ }
+      }
+      window.close();
+    }
+
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "erp-fbtn erp-popup-close";
+    btn.setAttribute("data-erp-popup-close", "1");
+    btn.textContent = "Close";
+    btn.addEventListener("click", closeIt);
+    save.parentNode.insertBefore(btn, save);
   }
 
   /* Icons are drawn by an icon font. While it downloads the browser would show the icon names

@@ -297,6 +297,32 @@ html.dark .erp-file-note { color: #fbbf24; }
 .erp-file-compact .erp-file-name { white-space: nowrap; }
 .erp-file-compact .erp-fbtn { padding: 6px 8px; }
 .erp-file-compact .erp-fbtn-label { display: none; }
+.erp-file-preview[hidden] { display: none; }
+.erp-fbtn-primary { background: #2563eb; border-color: #2563eb; color: #fff; }
+.erp-fbtn-primary:hover { background: #1d4ed8; }
+html.dark .erp-fbtn-primary { background: #3b82f6; border-color: #3b82f6; color: #fff; }
+html.dark .erp-fbtn-primary:hover { background: #2563eb; }
+/* Picture editor (crop pop-up) */
+.erp-crop-backdrop {
+  position: fixed; inset: 0; z-index: 100002; display: flex; align-items: center;
+  justify-content: center; background: rgba(17, 24, 39, 0.65); padding: 16px; animation: erp-fade 0.12s ease-out;
+}
+.erp-crop-dialog {
+  background: #fff; color: #111827; border-radius: 16px; padding: 20px; width: auto; max-width: 100%;
+  display: flex; flex-direction: column; align-items: center; gap: 12px; box-shadow: 0 20px 50px rgba(0,0,0,.35);
+}
+html.dark .erp-crop-dialog { background: #111827; color: #f3f4f6; }
+.erp-crop-title { margin: 0; font-size: 16px; font-weight: 700; }
+.erp-crop-hint { margin: 0; font-size: 12px; color: #6b7280; }
+html.dark .erp-crop-hint { color: #9ca3af; }
+.erp-crop-frame { position: relative; border-radius: 12px; overflow: hidden; background: #e5e7eb; touch-action: none; }
+html.dark .erp-crop-frame { background: #0b1220; }
+.erp-crop-frame canvas { display: block; cursor: grab; touch-action: none; }
+.erp-crop-backdrop.is-dragging canvas { cursor: grabbing; }
+.erp-crop-ring { position: absolute; inset: 0; pointer-events: none; box-shadow: inset 0 0 0 2px rgba(255,255,255,.9); border-radius: 12px; }
+.erp-crop-frame.is-round .erp-crop-ring { border-radius: 50%; box-shadow: 0 0 0 999px rgba(17,24,39,.55), inset 0 0 0 2px rgba(255,255,255,.95); }
+.erp-crop-zoom { width: 100%; }
+.erp-crop-buttons { display: flex; gap: 8px; justify-content: flex-end; width: 100%; }
 /* Picture pop-up */
 #erp-lightbox {
   position: fixed; inset: 0; z-index: 100001; display: none; align-items: center;
@@ -320,11 +346,11 @@ html.dark .erp-file-note { color: #fbbf24; }
 .erp-select-trigger {
   display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%;
   min-height: 40px; padding: 8px 10px 8px 12px; font: inherit; font-size: 14px; line-height: 1.3;
-  text-align: left; color: inherit; background: #fff; border: 1px solid #d1d5db;
+  text-align: left; color: #111827; background: #fff; border: 1px solid #d1d5db;
   border-radius: 8px; cursor: pointer;
   transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
 }
-html.dark .erp-select-trigger { background: transparent; border-color: #374151; }
+html.dark .erp-select-trigger { background: transparent; border-color: #374151; color: #f3f4f6; }
 .erp-select-trigger:hover:not(:disabled) { border-color: #9ca3af; }
 html.dark .erp-select-trigger:hover:not(:disabled) { border-color: #6b7280; }
 .erp-select-trigger:focus-visible, .erp-select-trigger.is-open {
@@ -480,3 +506,7 @@ html:not(.erp-icons-ready) [class*="material-symbols"] {
   animation: erp-icons-reveal 0s 2.5s forwards;  /* safety net if the script never runs */
 }
 @keyframes erp-icons-reveal { to { visibility: visible; } }
+
+/* No "Delete selected ..." in the small menu next to a dropdown */
+.delete-related { display: none !important; }
+.erp-popup-close { margin-right: 8px; padding: 10px 16px; font-size: 14px; font-weight: 600; }
