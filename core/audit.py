@@ -32,6 +32,8 @@ AUDITED_MODELS = (
     "leases.Lease",
     "leases.LeasePayment",
     "leases.LeaseDocument",
+    "leases.LeaseDeduction",
+    "leases.LeaseNote",
     "core.SystemSettings",
     "auth.User",
 )
@@ -41,7 +43,7 @@ OWNER_CHILD_LABELS = {
     "properties.OwnerBankAccount",
 }
 TENANT_CHILD_LABELS = {"tenants.TenantContact", "tenants.TenantDocument"}
-LEASE_CHILD_LABELS = {"leases.LeasePayment", "leases.LeaseDocument"}
+LEASE_CHILD_LABELS = {"leases.LeasePayment", "leases.LeaseDocument", "leases.LeaseDeduction", "leases.LeaseNote"}
 # Fields whose full value must never appear in the log (only the last 4 characters).
 MASKED_FIELDS = {
     "iban", "emirates_id_number", "passport_number", "trn", "trade_licence_number", "number",

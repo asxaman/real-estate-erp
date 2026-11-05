@@ -26,6 +26,8 @@ from properties.owner_admin import (
     document_alert,
 )
 
+from leases.inlines import TenantLeasesInline
+
 from . import tenant_tools
 from .models import Tenant, TenantContact, TenantDocument
 
@@ -122,7 +124,7 @@ class TenantAdmin(ImportMixin, ExportPermissionMixin, TooltipHelpMixin, ModelAdm
         "name", "code", "email", "phone", "nationality", "emirates_id_number", "passport_number",
         "trade_licence_number", "trn", "contacts__name", "contacts__email", "contacts__mobile", "documents__number",
     )
-    inlines = [TenantContactInline, TenantDocumentInline, TenantActivityInline]
+    inlines = [TenantContactInline, TenantDocumentInline, TenantLeasesInline, TenantActivityInline]
     make_active, make_inactive = bulk.make_actions("tenants")
     actions = ["export_excel", "export_csv", "make_active", "make_inactive"]
     actions_list = ["import_button"]
@@ -169,8 +171,8 @@ class TenantAdmin(ImportMixin, ExportPermissionMixin, TooltipHelpMixin, ModelAdm
 
     def get_inline_instances(self, request, obj=None):
         instances = super().get_inline_instances(request, obj)
-        if obj is None:  # a new tenant has no history yet
-            instances = [i for i in instances if not isinstance(i, TenantActivityInline)]
+        if obj is None:  # a new tenant has no history or leases yet
+            instances = [i for i in instances if not isinstance(i, (TenantActivityInline, TenantLeasesInline))]
         return instances
 
     def get_queryset(self, request):

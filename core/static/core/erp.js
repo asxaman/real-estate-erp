@@ -833,7 +833,7 @@
     return host;
   }
 
-  function showToast(level, parts) {
+  function showToast(level, parts, heading) {
     var style = TOAST_STYLE[level] || TOAST_STYLE.info;
     var kind = TOAST_STYLE[level] ? level : "info";
     var toast = document.createElement("div");
@@ -849,7 +849,7 @@
     body.className = "erp-toast-body";
     var title = document.createElement("div");
     title.className = "erp-toast-title";
-    title.textContent = style.title;
+    title.textContent = heading || style.title;
     var message = document.createElement("div");
     message.className = "erp-toast-text";
     (parts || []).forEach(function (part) {
@@ -916,7 +916,7 @@
     if (!list || !list.length || !document.body) { return; }
     window.__erpToasts = [];
     list.forEach(function (item, i) {
-      setTimeout(function () { showToast(item.level, item.parts); }, i * 150);
+      setTimeout(function () { showToast(item.level, item.parts, item.title); }, i * 150);
     });
   }
   window.erpShowToasts = showToasts;

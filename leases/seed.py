@@ -10,16 +10,16 @@ from core.data_registry import register_eraser, register_seeder
 from properties.models import Property, Unit
 from tenants.models import Tenant
 
-from .models import Lease, LeasePayment
+from .models import Lease, LeaseNote, LeasePayment
 
-MODELS = ("lease", "leasepayment", "leasedocument")
+MODELS = ("lease", "leasepayment", "leasedocument", "leasenote", "leasededuction")
 ACTIONS = ("add", "change", "delete", "view")
 
 # role -> permission codenames
 ROLE_PERMISSIONS = {
-    "Property Manager": [f"{a}_{m}" for m in MODELS for a in ACTIONS],
-    "Accountant": [f"view_{m}" for m in MODELS] + ["change_leasepayment"],  # the Accountant records payments
-    "Leasing Agent": [f"{a}_{m}" for m in ("lease", "leasedocument") for a in ("add", "change", "view")]
+    "Property Manager": [f"{a}_{m}" for m in MODELS for a in ACTIONS] + ["export_lease", "export_leasepayment"],
+    "Accountant": [f"view_{m}" for m in MODELS] + ["change_leasepayment", "add_leasenote", "export_lease", "export_leasepayment"],  # the Accountant records payments
+    "Leasing Agent": [f"{a}_{m}" for m in ("lease", "leasedocument", "leasenote", "leasededuction") for a in ("add", "change", "view")]
     + ["view_leasepayment", "change_leasepayment"],
 }
 
@@ -90,7 +90,14 @@ def _settle(lease, today, keep_last_overdue):
     for index, payment in enumerate(lease.payments.order_by("due_date")):
         payment.cheque_number = f"{lease.pk}00{index + 1}"
         payment.bank_name = "Emirates NBD"
+        payment.cheque_date = payment.due_date
+        if payment.status == LeasePayment.Status.PAID:
+            payment.deposited_on = payment.due_date
         payment.save()
+    if keep_last_overdue:
+        lease.late_fee_per_day = Decimal("50")
+        lease.save(update_fields=["late_fee_per_day"])
+        LeaseNote.objects.create(lease=lease, author="Sample data", text="Tenant promised to hand over the last cheque next week.")
     if lease.status == Lease.Status.TERMINATED:  # nothing more is expected after an early termination
         lease.payments.filter(status=LeasePayment.Status.PENDING, due_date__gt=lease.terminated_on).delete()
 

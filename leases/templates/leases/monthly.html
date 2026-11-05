@@ -1,0 +1,39 @@
+{% extends "admin/base_site.html" %}
+
+{% block content %}
+<div class="erp-dash">
+  <div class="erp-filterbar">
+    <a class="erp-btn erp-btn-light" href="{{ list_url }}">Back to leases</a>
+    <a class="erp-btn erp-btn-light" href="{{ prev_url }}">&larr; {{ year|add:"-1" }}</a>
+    <b>{{ year }}</b>
+    <a class="erp-btn erp-btn-light" href="{{ next_url }}">{{ year|add:"1" }} &rarr;</a>
+    <span class="erp-dash-hello">Payments grouped by the month they fall due (VAT included). Click a month to see its payments.</span>
+  </div>
+  <div class="erp-panel erp-scroll">
+    <table class="erp-table">
+      <thead><tr>
+        <th>Month</th><th class="num">Payments</th><th class="num">Expected</th><th class="num">Received</th>
+        <th class="num">Still open</th><th style="min-width:180px;">Collected</th>
+      </tr></thead>
+      <tbody>
+      {% for r in rows %}
+        <tr{% if r.current %} class="erp-row-now"{% endif %}>
+          <td><a href="{{ r.url }}">{{ r.name }}</a>{% if r.current %} <small>(this month)</small>{% endif %}</td>
+          <td class="num">{{ r.count }}</td>
+          <td class="num">{{ r.expected|floatformat:"2g" }}</td>
+          <td class="num">{{ r.received|floatformat:"2g" }}</td>
+          <td class="num">{% if r.open %}{{ r.open|floatformat:"2g" }}{% else %}-{% endif %}</td>
+          <td>{% if r.percent is not None %}<div class="erp-pbar"><div class="erp-pbar-fill{% if r.percent >= 100 %} erp-pbar-done{% endif %}" style="width:{{ r.percent }}%"></div></div><div class="erp-pbar-text">{{ r.percent }}%</div>{% else %}-{% endif %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+      <tfoot><tr>
+        <th>Year total (AED)</th><th></th>
+        <th class="num">{{ total.expected|floatformat:"2g" }}</th><th class="num">{{ total.received|floatformat:"2g" }}</th>
+        <th class="num">{{ total.open|floatformat:"2g" }}</th>
+        <th>{% if total.percent is not None %}{{ total.percent }}%{% endif %}</th>
+      </tr></tfoot>
+    </table>
+  </div>
+</div>
+{% endblock %}

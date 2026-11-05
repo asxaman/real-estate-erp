@@ -276,3 +276,35 @@ Run `python manage.py makemigrations` then `migrate` (the unit status, a few lim
 - Tenants, units and properties with a lease cannot be deleted; a lease with received rent cannot be deleted.
 - Audit trail and activity tabs cover leases (new Activity tab on the lease page).
 - Sample data: 5 leases with payments; lease permissions for the demo roles.
+
+### Update 18 - Leases: faster work
+No migration needed. Run `python manage.py test`.
+- Lease form fills itself in: rent from the unit's/property's asking rent, VAT ticked for commercial units, end date = start + 1 year - 1 day, and a warning under the unit when it already has a lease that overlaps.
+- "Record payment" pop-up (date received, method, cheque number, bank) and a "Cheque bounced" button, from the lease page, the Leases list and the Rent payments list.
+- Quick-filter chips with counts above the Leases list (All, Active, Ending soon, Overdue payments, Not started, Expired, Terminated).
+- Renew and Terminate pop-ups on the lease page and in the list. Renew can keep the rent, change it by a percentage, or set a new amount. Terminate can cancel the unpaid payments after the termination date and set what happens to the deposit.
+- Cheque numbering: enter the first cheque number and every unpaid payment is numbered in date order (zeros and letter prefixes are kept).
+
+### Update 19 - Leases: more detail
+Run `python manage.py makemigrations`, then `migrate`, then `test`.
+- Payment progress bar in the Leases list and in the lease header (red when something is overdue, green when fully paid).
+- New "Money" tab on the lease: rent, VAT, total, deposit, commission, fee, received, still to receive, late fees, and a note if the payments do not add up to the annual rent.
+- Timeline strip under the lease header: start → every payment (green paid, grey pending, red overdue/bounced) → Ejari expiry → end, with today marked.
+- "Leases" tab on the Tenant, Unit and Property pages; the Units list has "Current tenant" and "Lease ends" columns.
+- Days overdue column in Rent payments, and an optional "Late fee per day" on the lease (shown, never charged automatically).
+- Deposit tracking: refund date and amount, a "Deposit deductions" tab (date, reason, amount) and a deposit summary.
+- Cheque date and "Deposited in bank on" on every payment (a cheque cannot be deposited before its date).
+- "Notes" tab: dated notes with the name of the writer, newest first; saved notes cannot be edited.
+
+### Update 19c
+- Fixed: the lease progress bar styles overrode the colours of the "Units by status" bars on the dashboard (all bars turned blue). The lease bar now has its own class names.
+
+### Update 20 - Leases: reports and look
+Run `python manage.py makemigrations`, then `migrate`, then `test`.
+- Rent payments list: four summary cards on top (Due this week, Overdue, Collected this month, Bounced cheques) with AED amounts; click one to filter. New "Received" filter (this month / last month).
+- Due dates are coloured with the days left or late ("5 days overdue" red, "in 3 days" amber, paid green).
+- Monthly collection page (Leases > Reports): expected, received and still-open money per month, with a yearly total; click a month to see its payments.
+- Rent roll page: every running lease with rent, received, overdue and next payment, with Excel / CSV download.
+- Export to Excel / CSV for selected leases and selected payments. New permissions "Can export leases" and "Can export rent payments"; Property Manager and Accountant roles get them.
+- Printable pages from the lease header: Tenancy summary and Payment statement (browser Print / Save as PDF).
+- Dashboard: "Needs attention" list (overdue payments, bounced cheques, payments due this week, leases ending without renewal, Ejari expiring) and "Next leases to end" with a Renew button.

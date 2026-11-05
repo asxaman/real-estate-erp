@@ -15,7 +15,7 @@ from properties.tests import building, make_owner, standalone, unit
 from tenants.models import Tenant
 
 from . import occupancy
-from .models import Lease, LeaseDocument, LeasePayment, add_months
+from .models import Lease, LeaseDeduction, LeaseDocument, LeaseNote, LeasePayment, add_months
 
 
 def make_tenant(name="Test Tenant", **kwargs):
@@ -324,7 +324,7 @@ class LeasePages(Setup):
             "tenant": self.tenant.pk, "unit": other.pk, "property": "", "start_date": start.isoformat(),
             "end_date": (start + timedelta(days=364)).isoformat(), "annual_rent": "48000", "installments": "4",
             "status": "active", "security_deposit": "0", "deposit_status": "held", "commission": "0", "admin_fee": "0",
-            "ejari_number": "", "ejari_expiry": "", "terminated_on": "", "termination_reason": "", "notes": "",
+            "deposit_refund_date": "", "deposit_refund_amount": "0", "late_fee_per_day": "0", "ejari_number": "", "ejari_expiry": "", "terminated_on": "", "termination_reason": "", "notes": "",
             "documents-TOTAL_FORMS": "0", "documents-INITIAL_FORMS": "0", "documents-MIN_NUM_FORMS": "0",
             "documents-MAX_NUM_FORMS": "1000",
         })
@@ -377,3 +377,495 @@ class SampleData(TestCase):
         self.assertEqual(Lease.objects.count(), count)
         seed.erase_leases()
         self.assertEqual(Lease.objects.count(), 0)
+
+
+class AlertHeadings(Setup):
+    def test_overdue_notice_has_its_own_heading_not_just_error(self):
+        boss = get_user_model().objects.create_superuser("alertboss", "ab@example.com", "Pass-word1!")
+        self.client.force_login(boss)
+        lease = make_lease(self.tenant, self.flat, start=timezone.localdate() - timedelta(days=200))
+        page = self.client.get(reverse("admin:leases_lease_change", args=[lease.pk]))
+        self.assertContains(page, "Payments overdue")
+        self.assertContains(page, '"level": "error"')
+
+
+class RenewTerminateAndCheques(Setup):
+    def test_renew_can_change_the_rent(self):
+        old = make_lease(self.tenant, self.flat, rent="60000")
+        new = old.renew(Decimal("63000"))
+        self.assertEqual(new.annual_rent, Decimal("63000.00"))
+        self.assertEqual(sum(p.amount for p in new.payments.all()), Decimal("63000.00"))
+
+    def test_renew_refuses_a_zero_rent(self):
+        with self.assertRaises(ValidationError):
+            make_lease(self.tenant, self.flat).renew(Decimal("0"))
+
+    def test_terminate_cancels_only_unpaid_payments_after_the_date(self):
+        lease = make_lease(self.tenant, self.flat, start=timezone.localdate() - timedelta(days=100), rent="40000")
+        first = lease.payments.order_by("due_date").first()
+        first.record(first.due_date, "cheque", "111", "ENBD")
+        cancelled = lease.terminate(timezone.localdate() + timedelta(days=5), "Moved abroad")
+        self.assertEqual(cancelled, 2)  # the two that fall due after the date; the paid one and the earlier one stay
+        self.assertEqual(lease.payments.count(), 2)
+        lease.refresh_from_db()
+        self.assertEqual((lease.status, lease.termination_reason), ("terminated", "Moved abroad"))
+
+    def test_terminate_can_keep_the_payments_and_set_the_deposit(self):
+        lease = make_lease(self.tenant, self.flat, security_deposit=Decimal("2000"))
+        self.assertEqual(lease.terminate(lease.start_date + timedelta(days=60), "Left", cancel_unpaid=False, deposit_status="refunded"), 0)
+        self.assertEqual(lease.payments.count(), 4)
+        self.assertEqual(lease.deposit_status, "refunded")
+
+    def test_terminate_needs_a_reason_a_valid_date_and_works_only_once(self):
+        lease = make_lease(self.tenant, self.flat)
+        with self.assertRaises(ValidationError):
+            lease.terminate(lease.start_date + timedelta(days=5), "")
+        lease = Lease.objects.get(pk=lease.pk)
+        with self.assertRaises(ValidationError):
+            lease.terminate(lease.end_date + timedelta(days=5), "Late")
+        lease = Lease.objects.get(pk=lease.pk)
+        lease.terminate(lease.start_date + timedelta(days=5), "Left")
+        with self.assertRaises(ValidationError):
+            lease.terminate(lease.start_date + timedelta(days=6), "Again")
+
+    def test_cheques_are_numbered_in_order_keeping_zeros_and_prefix(self):
+        lease = make_lease(self.tenant, self.flat)
+        paid = lease.payments.order_by("due_date").first()
+        paid.record(paid.due_date, "transfer")
+        self.assertEqual(lease.assign_cheques("CQ-0098", "ENBD"), 3)  # the paid one is skipped
+        numbers = list(lease.payments.exclude(status="paid").order_by("due_date").values_list("cheque_number", flat=True))
+        self.assertEqual(numbers, ["CQ-0098", "CQ-0099", "CQ-0100"])
+        self.assertEqual(lease.payments.exclude(status="paid").first().bank_name, "ENBD")
+
+    def test_cheque_start_must_end_in_a_number(self):
+        lease = make_lease(self.tenant, self.flat)
+        for bad in ("", "abc", "12 34x"):
+            with self.assertRaises(ValidationError):
+                lease.assign_cheques(bad)
+
+    def test_record_and_bounce(self):
+        payment = make_lease(self.tenant, self.flat).payments.first()
+        payment.record(date(2026, 3, 1), "cheque", "555", "ENBD")
+        payment.refresh_from_db()
+        self.assertEqual((payment.status, payment.paid_on, payment.cheque_number), ("paid", date(2026, 3, 1), "555"))
+        payment.bounce()
+        payment.refresh_from_db()
+        self.assertEqual((payment.status, payment.paid_on), ("bounced", None))
+        with self.assertRaises(ValidationError):
+            payment.record(date(2026, 3, 1), "gold")
+
+
+class PopupEndpoints(Setup):
+    def setUp(self):
+        super().setUp()
+        self.boss = get_user_model().objects.create_superuser("popboss", "pb@example.com", "Pass-word1!")
+        self.client.force_login(self.boss)
+        self.lease = make_lease(self.tenant, self.flat, rent="60000")
+
+    def url(self, name, *args):
+        return reverse(f"admin:leases_{name}", args=args)
+
+    def test_info_fills_rent_vat_and_end_date(self):
+        Unit.objects.filter(pk=self.flat.pk).update(asking_rent=Decimal("55000"))
+        other = Lease.objects.get(pk=self.lease.pk)
+        other.delete()
+        data = self.client.get(self.url("lease_info"), {"unit": self.flat.pk, "start": "2027-01-01"}).json()
+        self.assertEqual(data["rent"], "55000")
+        self.assertFalse(data["vat"])
+        self.assertEqual(data["end"], "2027-12-31")
+        office = self.client.get(self.url("lease_info"), {"unit": unit(self.tower, "301", unit_type="office").pk}).json()
+        self.assertTrue(office["vat"])
+
+    def test_info_warns_about_a_lease_that_is_in_the_way(self):
+        start = (self.lease.start_date + timedelta(days=30)).isoformat()
+        data = self.client.get(self.url("lease_info"), {"unit": self.flat.pk, "start": start}).json()
+        self.assertIn(self.lease.code, data["warning"])
+        own = self.client.get(self.url("lease_info"), {"unit": self.flat.pk, "start": start, "lease": self.lease.pk}).json()
+        self.assertEqual(own["warning"], "")  # a lease is not in its own way
+
+    def test_info_for_a_standalone_property_and_nothing(self):
+        Property.objects.filter(pk=self.villa.pk).update(annual_rent=Decimal("90000"))
+        self.assertEqual(self.client.get(self.url("lease_info"), {"property": self.villa.pk}).json()["rent"], "90000")
+        self.assertEqual(self.client.get(self.url("lease_info")).json()["rent"], "")
+
+    def test_renew_endpoint(self):
+        reply = self.client.post(self.url("lease_renew", self.lease.pk), {"mode": "percent", "value": "5"}).json()
+        self.assertTrue(reply["ok"])
+        renewal = Lease.objects.get(renewed_from=self.lease)
+        self.assertEqual(renewal.annual_rent, Decimal("63000.00"))
+        again = self.client.post(self.url("lease_renew", self.lease.pk), {"mode": "same"})
+        self.assertEqual(again.status_code, 400)
+        self.assertFalse(again.json()["ok"])
+
+    def test_renew_endpoint_refuses_nonsense(self):
+        other = make_lease(self.tenant, self.villa)
+        self.assertEqual(self.client.post(self.url("lease_renew", other.pk), {"mode": "percent", "value": "abc"}).status_code, 400)
+        self.assertEqual(self.client.post(self.url("lease_renew", other.pk), {"mode": "percent", "value": "900"}).status_code, 400)
+        self.assertEqual(self.client.post(self.url("lease_renew", other.pk), {"mode": "amount", "value": "0"}).status_code, 400)
+        self.assertFalse(Lease.objects.filter(renewed_from=other).exists())
+
+    def test_terminate_endpoint(self):
+        day = (self.lease.start_date + timedelta(days=30)).isoformat()
+        reply = self.client.post(self.url("lease_terminate", self.lease.pk), {
+            "date": day, "reason": "Moved", "deposit_status": "deducted", "cancel_unpaid": "on",
+        }).json()
+        self.assertTrue(reply["ok"])
+        self.lease.refresh_from_db()
+        self.assertEqual((self.lease.status, self.lease.deposit_status), ("terminated", "deducted"))
+        self.assertEqual(self.lease.payments.count(), 1)  # the first one was due on the start date
+
+    def test_terminate_endpoint_asks_for_a_reason(self):
+        reply = self.client.post(self.url("lease_terminate", self.lease.pk), {"date": self.lease.start_date.isoformat(), "reason": ""})
+        self.assertEqual(reply.status_code, 400)
+        self.lease.refresh_from_db()
+        self.assertEqual(self.lease.status, "active")
+
+    def test_cheques_endpoint(self):
+        reply = self.client.post(self.url("lease_cheques", self.lease.pk), {"first": "0100", "bank": "ENBD"}).json()
+        self.assertTrue(reply["ok"])
+        self.assertEqual(self.lease.payments.order_by("due_date").first().cheque_number, "0100")
+        self.assertEqual(self.client.post(self.url("lease_cheques", self.lease.pk), {"first": "x"}).status_code, 400)
+
+    def test_record_endpoint_paid_and_bounced(self):
+        payment = self.lease.payments.order_by("due_date").first()
+        reply = self.client.post(self.url("leasepayment_record", payment.pk), {
+            "action": "paid", "date": "2026-02-03", "method": "cheque", "cheque_number": "77", "bank_name": "ENBD",
+        }).json()
+        self.assertTrue(reply["ok"])
+        payment.refresh_from_db()
+        self.assertEqual((payment.status, payment.paid_on.isoformat()), ("paid", "2026-02-03"))
+        self.assertTrue(self.client.post(self.url("leasepayment_record", payment.pk), {"action": "bounced"}).json()["ok"])
+        payment.refresh_from_db()
+        self.assertEqual(payment.status, "bounced")
+        self.assertEqual(self.client.post(self.url("leasepayment_record", payment.pk), {"action": "paid", "date": "nope", "method": "cash"}).status_code, 400)
+
+    def test_endpoints_need_a_form_post_and_permission(self):
+        self.assertEqual(self.client.get(self.url("lease_renew", self.lease.pk)).status_code, 405)
+        viewer = get_user_model().objects.create_user("lookonly", password="Pass-word1!", is_staff=True)
+        from django.contrib.auth.models import Permission
+
+        viewer.user_permissions.add(*Permission.objects.filter(codename__in=["view_lease", "view_leasepayment"]))
+        self.client.force_login(viewer)
+        payment = self.lease.payments.first()
+        for name, args, data in (
+            ("lease_renew", [self.lease.pk], {"mode": "same"}),
+            ("lease_terminate", [self.lease.pk], {"date": "2026-01-01", "reason": "x"}),
+            ("lease_cheques", [self.lease.pk], {"first": "1"}),
+            ("leasepayment_record", [payment.pk], {"action": "paid", "date": "2026-01-01", "method": "cash"}),
+        ):
+            self.assertEqual(self.client.post(self.url(name, *args), data).status_code, 403, name)
+        self.assertEqual(Lease.objects.filter(renewed_from=self.lease).count(), 0)
+
+    def test_pages_show_the_buttons_and_the_chips(self):
+        page = self.client.get(self.url("lease_change", self.lease.pk))
+        for act in ("record", "renew", "terminate", "cheques"):
+            self.assertContains(page, f'data-erp-act="{act}"')
+        listing = self.client.get(self.url("lease_changelist"))
+        self.assertContains(listing, "erp-chips")
+        self.assertContains(listing, 'data-erp-act="record"')
+        payments = self.client.get(self.url("leasepayment_changelist"))
+        self.assertContains(payments, 'data-erp-act="record"')
+
+    def test_chip_counts(self):
+        make_lease(self.tenant, self.villa, start=timezone.localdate() + timedelta(days=10))
+        chips = {c["label"]: c["count"] for c in self.client.get(self.url("lease_changelist")).context["lease_chips"]}
+        self.assertEqual((chips["All"], chips["Active"], chips["Not started"]), (2, 1, 1))
+
+
+class MoreDetail(Setup):
+    """Update 19: late fees, deposit tracking, cheque dates, notes and the extra panels."""
+
+    def setUp(self):
+        super().setUp()
+        self.boss = get_user_model().objects.create_superuser("detailboss", "db@example.com", "Pass-word1!")
+        self.client.force_login(self.boss)
+        self.today = timezone.localdate()
+        self.lease = make_lease(
+            self.tenant, self.flat, start=self.today - timedelta(days=100), rent="40000", security_deposit=Decimal("4000"),
+            late_fee_per_day=Decimal("50"),
+        )
+
+    def test_days_overdue_and_late_fee(self):
+        first = self.lease.payments.order_by("due_date").first()
+        self.assertEqual(first.days_overdue(), 100)
+        self.assertEqual(first.late_fee(), Decimal("5000.00"))
+        first.record(self.today, "cash")
+        self.assertEqual((first.days_overdue(), first.late_fee()), (0, Decimal("0.00")))
+        second = self.lease.payments.order_by("due_date")[1]  # also past due, so it keeps adding up
+        self.assertGreater(second.late_fee(), 0)
+        self.assertEqual(self.lease.late_fees(), second.late_fee())
+
+    def test_no_daily_fee_means_no_late_fee(self):
+        Lease.objects.filter(pk=self.lease.pk).update(late_fee_per_day=0)
+        lease = Lease.objects.get(pk=self.lease.pk)
+        self.assertEqual(lease.late_fees(), Decimal("0.00"))
+        self.assertEqual(lease.payments.order_by("due_date").first().late_fee(), Decimal("0.00"))
+
+    def test_cheque_dates_are_checked_and_cleared_for_other_methods(self):
+        payment = self.lease.payments.order_by("due_date").first()
+        payment.method, payment.cheque_date, payment.deposited_on = "cheque", date(2026, 3, 10), date(2026, 3, 5)
+        with self.assertRaises(ValidationError):
+            payment.save()
+        payment.deposited_on = date(2026, 3, 12)
+        payment.save()
+        payment.refresh_from_db()
+        self.assertEqual(payment.deposited_on, date(2026, 3, 12))
+        payment.method = "transfer"
+        payment.save()
+        payment.refresh_from_db()
+        self.assertEqual((payment.cheque_date, payment.deposited_on), (None, None))
+
+    def test_deposit_balance_follows_deductions_and_refund(self):
+        self.assertEqual(self.lease.deposit_balance(), Decimal("4000.00"))
+        LeaseDeduction.objects.create(lease=self.lease, reason="Repainting", amount=Decimal("1500"))
+        self.lease.deposit_refund_amount, self.lease.deposit_refund_date = Decimal("2000"), self.today
+        self.lease.save()
+        lease = Lease.objects.get(pk=self.lease.pk)
+        self.assertEqual((lease.deposit_deducted(), lease.deposit_balance()), (Decimal("1500.00"), Decimal("500.00")))
+
+    def test_deposit_rules(self):
+        lease = Lease.objects.get(pk=self.lease.pk)
+        lease.deposit_refund_amount = Decimal("5000")
+        lease.deposit_refund_date = self.today
+        with self.assertRaises(ValidationError):
+            lease.clean()
+        lease.deposit_refund_amount = Decimal("100")
+        lease.deposit_refund_date = None
+        with self.assertRaises(ValidationError):
+            lease.clean()
+        deduction = LeaseDeduction(lease=self.lease, reason="Too much", amount=Decimal("4500"))
+        with self.assertRaises(ValidationError):
+            deduction.clean()
+
+    def test_renewal_keeps_the_late_fee_rate(self):
+        self.assertEqual(self.lease.renew().late_fee_per_day, Decimal("50.00"))
+
+    def test_panels_and_tabs_open(self):
+        LeaseNote.objects.create(lease=self.lease, author="Someone", text="Called the tenant")
+        page = self.client.get(reverse("admin:leases_lease_change", args=[self.lease.pk]))
+        self.assertEqual(page.status_code, 200)
+        for marker in ("erp-pbar", "erp-tl", "erp-sum", "Called the tenant"):
+            self.assertContains(page, marker)
+        self.assertContains(self.client.get(reverse("admin:leases_lease_changelist")), "erp-pbar")
+        late = self.client.get(reverse("admin:leases_leasepayment_changelist"))
+        self.assertContains(late, "100 days")
+
+    def test_money_summary_flags_a_mismatch(self):
+        LeasePayment.objects.filter(pk=self.lease.payments.first().pk).update(amount=Decimal("1"))
+        page = self.client.get(reverse("admin:leases_lease_change", args=[self.lease.pk]))
+        self.assertContains(page, "payments add up to")
+
+    def test_new_notes_get_the_writer_and_saved_notes_cannot_be_edited(self):
+        from django.contrib import admin as django_admin
+
+        from leases.admin import LeaseAdmin, NoteInline
+
+        class FakeFormset:
+            model = LeaseNote
+            deleted_objects = []
+
+            def save(inner, commit=True):
+                return [LeaseNote(lease=self.lease, text="Promised to pay on Friday")]
+
+            def save_m2m(inner):
+                pass
+
+        request = type("Request", (), {"user": self.boss})()
+        LeaseAdmin(Lease, django_admin.site).save_formset(request, None, FakeFormset(), True)
+        note = LeaseNote.objects.get(text="Promised to pay on Friday")
+        self.assertEqual(note.author, "detailboss")
+        self.assertFalse(NoteInline(Lease, django_admin.site).has_change_permission(request))
+
+    def test_lease_tabs_on_tenant_unit_and_property_pages(self):
+        for name, args in (
+            ("admin:tenants_tenant_change", [self.tenant.pk]), ("admin:properties_unit_change", [self.flat.pk]),
+            ("admin:properties_property_change", [self.tower.pk]),
+        ):
+            page = self.client.get(reverse(name, args=args))
+            self.assertContains(page, self.lease.code, msg_prefix=name)
+        for name in ("admin:tenants_tenant_add", "admin:properties_unit_add", "admin:properties_property_add"):
+            self.assertEqual(self.client.get(reverse(name)).status_code, 200, name)
+
+    def test_units_list_shows_the_current_tenant_and_end_date(self):
+        listing = self.client.get(reverse("admin:properties_unit_changelist"))
+        self.assertContains(listing, self.tenant.name)
+        self.assertContains(listing, "Lease ends")
+
+    def test_sample_data_has_notes_and_a_late_fee(self):
+        from leases import seed
+
+        seed._settle(self.lease, self.today, keep_last_overdue=True)  # what the sample data does to its overdue lease
+        self.assertTrue(LeaseNote.objects.filter(lease=self.lease).exists())
+        self.lease.refresh_from_db()
+        self.assertEqual(self.lease.late_fee_per_day, Decimal("50.00"))
+        self.assertTrue(self.lease.payments.filter(status="paid", deposited_on__isnull=False).exists())
+
+    def test_new_models_are_in_the_audit_trail(self):
+        from core.audit import AUDITED_MODELS
+
+        self.assertIn("leases.LeaseNote", AUDITED_MODELS)
+        self.assertIn("leases.LeaseDeduction", AUDITED_MODELS)
+
+
+class ReportsAndLook(Setup):
+    """Update 20: payment summary strip, due-date colours, exports, rent roll, monthly view, print pages, dashboard."""
+
+    def setUp(self):
+        super().setUp()
+        self.boss = get_user_model().objects.create_superuser("repboss", "rb@example.com", "Pass-word1!")
+        self.client.force_login(self.boss)
+        self.today = timezone.localdate()
+        self.lease = make_lease(self.tenant, self.flat, start=self.today - timedelta(days=100), rent="40000")
+
+    def staff(self, *codenames):
+        from django.contrib.auth.models import Permission
+
+        self.staff_count = getattr(self, "staff_count", 0) + 1
+        user = get_user_model().objects.create_user(f"limited{self.staff_count}", password="Pass-word1!", is_staff=True)
+        user.user_permissions.add(*Permission.objects.filter(codename__in=codenames))
+        self.client.force_login(user)
+        return user
+
+    # ---- payments list -------------------------------------------------------------
+    def test_payment_strip_and_filters(self):
+        url = reverse("admin:leases_leasepayment_changelist")
+        page = self.client.get(url)
+        for text in ("Due this week", "Overdue", "Collected this month", "Bounced cheques", "Monthly collection"):
+            self.assertContains(page, text)
+        for query in ("?received=month", "?received=lastmonth", "?due=week", "?due=overdue", "?status__exact=bounced"):
+            self.assertEqual(self.client.get(url + query).status_code, 200, query)
+
+    def test_strip_counts_and_amounts(self):
+        late = self.client.get(reverse("admin:leases_leasepayment_changelist")).context["pay_strip"]
+        overdue = next(c for c in late if c["label"] == "Overdue")
+        self.assertEqual(overdue["count"], 2)  # the payments due 100 and about 9 days ago
+        self.assertEqual(overdue["amount"], "AED 20,000")
+        first = self.lease.payments.order_by("due_date").first()
+        first.record(self.today, "cash")
+        strip = self.client.get(reverse("admin:leases_leasepayment_changelist")).context["pay_strip"]
+        self.assertEqual(next(c for c in strip if c["label"] == "Collected this month")["amount"], "AED 10,000")
+
+    def test_due_dates_are_coloured_with_days(self):
+        page = self.client.get(reverse("admin:leases_leasepayment_changelist"))
+        self.assertContains(page, "erp-due-bad")
+        self.assertContains(page, "100 days overdue")
+        self.assertContains(page, "erp-due-mute")
+
+    # ---- exports -------------------------------------------------------------------
+    def export(self, name, action, pk):
+        return self.client.post(reverse(name), {"action": action, "_selected_action": [pk], "index": 0})
+
+    def test_lease_and_payment_exports(self):
+        response = self.export("admin:leases_lease_changelist", "export_csv", self.lease.pk)
+        self.assertIn("text/csv", response["Content-Type"])
+        self.assertIn(self.lease.code, response.content.decode("utf-8-sig"))
+        response = self.export("admin:leases_lease_changelist", "export_excel", self.lease.pk)
+        self.assertIn("spreadsheetml", response["Content-Type"])
+        payment = self.lease.payments.first()
+        response = self.export("admin:leases_leasepayment_changelist", "export_csv", payment.pk)
+        self.assertIn("Cheque no.", response.content.decode("utf-8-sig"))
+        response = self.export("admin:leases_leasepayment_changelist", "export_excel", payment.pk)
+        self.assertIn("spreadsheetml", response["Content-Type"])
+
+    def test_export_needs_its_own_permission(self):
+        self.staff("view_lease", "view_leasepayment")
+        for name, action in (("admin:leases_lease_changelist", "export_csv"), ("admin:leases_leasepayment_changelist", "export_excel")):
+            response = self.export(name, action, self.lease.pk)
+            self.assertNotIn("attachment", response.get("Content-Disposition", ""), name)
+        self.staff("view_lease", "export_lease")
+        self.assertIn("text/csv", self.export("admin:leases_lease_changelist", "export_csv", self.lease.pk)["Content-Type"])
+
+    def test_managers_and_accountants_get_the_export_permissions(self):
+        from django.contrib.auth.models import Group
+
+        from leases import seed
+
+        for role in ("Property Manager", "Accountant"):
+            Group.objects.get_or_create(name=role)
+        seed.grant_role_permissions()
+        for role in ("Property Manager", "Accountant"):
+            codes = set(Group.objects.get(name=role).permissions.values_list("codename", flat=True))
+            self.assertTrue({"export_lease", "export_leasepayment"} <= codes, role)
+
+    # ---- rent roll -----------------------------------------------------------------
+    def test_rent_roll_lists_only_running_leases(self):
+        make_lease(self.tenant, self.villa, start=self.today + timedelta(days=30))  # not started
+        page = self.client.get(reverse("admin:leases_lease_rentroll"))
+        self.assertContains(page, self.lease.code)
+        self.assertEqual(len(page.context["rows"]), 1)
+        self.assertEqual(page.context["totals"]["rent"], Decimal("40000.00"))
+        self.assertEqual(page.context["totals"]["overdue"], Decimal("20000.00"))
+
+    def test_rent_roll_downloads(self):
+        url = reverse("admin:leases_lease_rentroll")
+        self.assertIn("text/csv", self.client.get(url + "?export=csv")["Content-Type"])
+        self.assertIn("spreadsheetml", self.client.get(url + "?export=xlsx")["Content-Type"])
+        self.staff("view_lease")
+        self.assertEqual(self.client.get(url).status_code, 200)
+        self.assertEqual(self.client.get(url + "?export=csv").status_code, 404)
+
+    # ---- monthly view --------------------------------------------------------------
+    def test_monthly_collection_adds_up(self):
+        from leases.reports import monthly_rows
+
+        year = self.today.year
+        rows = monthly_rows(year)
+        in_year = [p for p in self.lease.payments.all() if p.due_date.year == year]
+        self.assertEqual(sum(r["expected"] for r in rows), sum(p.total for p in in_year))
+        first = self.lease.payments.order_by("due_date").first()
+        first.record(self.today, "cash")
+        rows = monthly_rows(first.due_date.year)
+        month = rows[first.due_date.month - 1]
+        self.assertEqual(month["received"], first.total)
+        self.assertEqual(month["percent"], 100)
+
+    def test_monthly_page_and_year_handling(self):
+        url = reverse("admin:leases_lease_monthly")
+        page = self.client.get(url)
+        self.assertEqual(page.status_code, 200)
+        self.assertContains(page, "January")
+        self.assertEqual(self.client.get(url + "?year=2031").context["year"], 2031)
+        self.assertEqual(self.client.get(url + "?year=abc").context["year"], self.today.year)
+        self.assertEqual(self.client.get(url + "?year=99999").context["year"], self.today.year)
+
+    # ---- print pages ---------------------------------------------------------------
+    def test_print_pages(self):
+        for kind, marker in (("summary", "Tenancy summary"), ("statement", "Rent payment statement")):
+            page = self.client.get(reverse("admin:leases_lease_print", args=[self.lease.pk, kind]))
+            self.assertEqual(page.status_code, 200, kind)
+            for text in (marker, self.tenant.name, self.lease.code, "window.print()"):
+                self.assertContains(page, text)
+        self.assertEqual(self.client.get(reverse("admin:leases_lease_print", args=[self.lease.pk, "other"])).status_code, 404)
+
+    def test_print_page_needs_view_permission_and_header_links_exist(self):
+        header = self.client.get(reverse("admin:leases_lease_change", args=[self.lease.pk]))
+        self.assertContains(header, "Tenancy summary")
+        self.assertContains(header, "Payment statement")
+        self.staff("add_tenant")
+        self.assertEqual(self.client.get(reverse("admin:leases_lease_print", args=[self.lease.pk, "summary"])).status_code, 404)
+
+    # ---- dashboard -----------------------------------------------------------------
+    def test_dashboard_panels(self):
+        ending = make_lease(self.tenant, self.villa, start=self.today - timedelta(days=350), days=364, rent="90000")
+        page = self.client.get(reverse("dashboard"))
+        self.assertContains(page, "Needs attention")
+        self.assertContains(page, "Next leases to end")
+        self.assertContains(page, ending.code)
+        self.assertContains(page, 'data-erp-act="renew"')
+        self.assertContains(page, "Overdue payments")
+        codes = [r["lease"].code for r in page.context["panels"]["renewals"]]
+        self.assertEqual(codes[0], ending.code)  # the one that ends first comes first
+
+    def test_dashboard_leaves_out_renewed_leases_and_hides_renew_without_permission(self):
+        self.lease.renew()
+        page = self.client.get(reverse("dashboard"))
+        self.assertNotIn(self.lease.code, [r["lease"].code for r in page.context["panels"]["renewals"]])
+        self.staff("view_lease")
+        page = self.client.get(reverse("dashboard"))
+        self.assertNotContains(page, 'data-erp-act="renew"')
+
+    def test_dashboard_without_lease_permission_shows_no_lease_panels(self):
+        self.staff("view_tenant")
+        panels = self.client.get(reverse("dashboard")).context["panels"]
+        self.assertNotIn("renewals", panels)
+        self.assertNotIn("attention", panels)

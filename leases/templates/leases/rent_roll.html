@@ -1,0 +1,46 @@
+{% extends "admin/base_site.html" %}
+
+{% block content %}
+<div class="erp-dash">
+  <div class="erp-filterbar">
+    <a class="erp-btn erp-btn-light" href="{{ list_url }}">Back to leases</a>
+    {% if can_export %}
+      <a class="erp-btn erp-btn-light" href="?export=xlsx">Download Excel</a>
+      <a class="erp-btn erp-btn-light" href="?export=csv">Download CSV</a>
+    {% endif %}
+    <span class="erp-dash-hello">{{ rows|length }} running lease{{ rows|length|pluralize }} on {{ today|date:"j F Y" }}</span>
+  </div>
+  <div class="erp-panel erp-scroll">
+    {% if rows %}
+    <table class="erp-table">
+      <thead><tr>
+        <th>Property</th><th>Rented</th><th>Tenant</th><th>Lease</th><th>Ends</th>
+        <th class="num">Annual rent</th><th class="num">Monthly</th><th class="num">Received</th>
+        <th class="num">Overdue</th><th>Next payment</th>
+      </tr></thead>
+      <tbody>
+      {% for r in rows %}
+        <tr>
+          <td>{{ r.property }}</td><td>{{ r.rented }}</td><td>{{ r.tenant }}</td>
+          <td><a href="{% url 'admin:leases_lease_change' r.lease.pk %}">{{ r.lease.code }}</a></td>
+          <td>{{ r.ends|date:"j M Y" }}</td>
+          <td class="num">{{ r.rent|floatformat:"2g" }}{% if r.vat %} <small>+VAT</small>{% endif %}</td>
+          <td class="num">{{ r.monthly|floatformat:"2g" }}</td>
+          <td class="num">{{ r.paid|floatformat:"2g" }}</td>
+          <td class="num{% if r.overdue %} erp-due-bad{% endif %}">{% if r.overdue %}{{ r.overdue|floatformat:"2g" }}{% else %}-{% endif %}</td>
+          <td>{% if r.next_due %}{{ r.next_due|date:"j M Y" }} · {{ r.next_amount|floatformat:"2g" }}{% else %}-{% endif %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+      <tfoot><tr>
+        <th colspan="5">Total (AED)</th>
+        <th class="num">{{ totals.rent|floatformat:"2g" }}</th><th class="num">{{ totals.monthly|floatformat:"2g" }}</th>
+        <th class="num">{{ totals.paid|floatformat:"2g" }}</th><th class="num">{{ totals.overdue|floatformat:"2g" }}</th><th></th>
+      </tr></tfoot>
+    </table>
+    {% else %}
+    <div class="erp-empty">No lease is running today.</div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

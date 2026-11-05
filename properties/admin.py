@@ -2,7 +2,7 @@ from datetime import timedelta
 
 from django import forms
 from django.contrib import admin, messages
-from django.db.models import Count, Q, Sum
+from django.db.models import Count, Prefetch, Q, Sum
 from django.utils import timezone
 from django.utils.html import format_html, format_html_join
 from django.utils.safestring import mark_safe
@@ -12,6 +12,7 @@ from unfold.decorators import display
 from core import sysconf
 from core.admin_utils import ExportPermissionMixin, TooltipHelpMixin, badge, circle_avatar, format_amount
 from core.widgets import use_file_widget
+from leases.inlines import PropertyLeasesInline, UnitLeasesInline
 
 from . import bulk, export_tools, import_tools
 from .import_admin import ImportMixin
@@ -275,7 +276,7 @@ class PropertyAdmin(ImportMixin, ExportPermissionMixin, TooltipHelpMixin, ModelA
         "makani_number", "dewa_premise_number",
     )
     list_select_related = ("owner",)
-    inlines = [UnitInline, PropertyDocumentInline, PropertyActivityInline]
+    inlines = [UnitInline, PropertyDocumentInline, PropertyLeasesInline, PropertyActivityInline]
 
     def get_changeform_initial_data(self, request):
         # A new property starts with "Company Owned" selected (change it if someone else owns it).
@@ -406,7 +407,7 @@ class PropertyAdmin(ImportMixin, ExportPermissionMixin, TooltipHelpMixin, ModelA
         for inline in instances:
             if isinstance(inline, UnitInline) and (obj is None or not obj.has_units):
                 continue
-            if isinstance(inline, PropertyActivityInline) and obj is None:
+            if isinstance(inline, (PropertyActivityInline, PropertyLeasesInline)) and obj is None:
                 continue
             keep.append(inline)
         return keep
@@ -511,11 +512,13 @@ class UnitAdmin(ImportMixin, ExportPermissionMixin, TooltipHelpMixin, ModelAdmin
         "area",
         "rent_aed",
         "show_status",
+        "current_tenant",
+        "lease_ends",
     )
     list_filter = ("status", "unit_type", ("property", BuildingFilter), "furnished", "view")
     search_fields = ("unit_number", "property__name", "property__code", "dewa_account_number")
     list_select_related = ("property",)
-    inlines = [UnitPhotoInline, UnitDocumentInline, UnitActivityInline]
+    inlines = [UnitPhotoInline, UnitDocumentInline, UnitLeasesInline, UnitActivityInline]
 
     _header = (None, {"fields": ("summary_header",)})
     _overview = (
@@ -542,8 +545,8 @@ class UnitAdmin(ImportMixin, ExportPermissionMixin, TooltipHelpMixin, ModelAdmin
 
     def get_inline_instances(self, request, obj=None):
         instances = super().get_inline_instances(request, obj)
-        if obj is None:  # a new unit has no history yet
-            instances = [i for i in instances if not isinstance(i, UnitActivityInline)]
+        if obj is None:  # a new unit has no history or leases yet
+            instances = [i for i in instances if not isinstance(i, (UnitActivityInline, UnitLeasesInline))]
         return instances
 
     @admin.display(description="")
@@ -587,6 +590,32 @@ class UnitAdmin(ImportMixin, ExportPermissionMixin, TooltipHelpMixin, ModelAdmin
                 property_type__in=Property.BUILDING_TYPES
             )
         return super().formfield_for_foreignkey(db_field, request, **kwargs)
+
+    def get_queryset(self, request):
+        from leases.models import Lease
+
+        return super().get_queryset(request).prefetch_related(
+            Prefetch("leases", queryset=Lease.objects.select_related("tenant"), to_attr="_all_leases")
+        )
+
+    def _running_lease(self, obj):
+        today = timezone.localdate()
+        for lease in getattr(obj, "_all_leases", []):
+            if lease.state(today) == "active":
+                return lease
+        return None
+
+    @admin.display(description="Current tenant")
+    def current_tenant(self, obj):
+        lease = self._running_lease(obj)
+        return lease.tenant.name if lease else "-"
+
+    @admin.display(description="Lease ends")
+    def lease_ends(self, obj):
+        from core.formats import fmt_date
+
+        lease = self._running_lease(obj)
+        return fmt_date(lease.end_date) if lease else "-"
 
     @admin.display(description="Unit", ordering="unit_number")
     def reference(self, obj):

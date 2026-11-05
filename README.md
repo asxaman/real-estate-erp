@@ -211,13 +211,23 @@ Sidebar > **Tenancy** > **Tenants** (leases are the next step of this module):
     Ejari number and expiry. Tick **VAT (5%)** for commercial leases; every payment then shows the VAT too.
   * **Rules:** the end date must be after the start date (10 years at most); two leases for the same unit cannot
     overlap; blacklisted or inactive tenants cannot sign a new lease; inactive properties cannot be leased.
-  * **Renew:** tick one lease in the list and choose "Renew the selected lease": a new lease starts the day after the
-    old one ends, lasts as long, and gets its own payment schedule.
-  * **Terminate early:** set Status to "Terminated early" and fill in the date and reason on the Termination tab.
+  * **Auto-fill (update 18):** picking a unit or property fills the rent, ticks VAT for commercial ones and suggests the end date.
+  * **Renew** (button on the lease page or in the list): a new lease starts the day after the old one ends and lasts as long;
+    keep the rent, change it by a percentage, or enter a new amount.
+  * **Terminate** (button): date, reason, deposit outcome, and an option to cancel unpaid payments after that date.
+  * **Record payment / Cheque bounced / Cheque numbers:** buttons on the lease, and a Record button on every payment row.
+  * **Chips** above the list filter leases (Active, Ending soon, Overdue payments ...) with counts.
+  * **More detail (update 19):** a progress bar of rent received, a **Money** tab, a timeline strip under the header,
+    a **Leases** tab on Tenant / Unit / Property pages, **Days late** in Rent payments (with an optional late fee per
+    day), deposit refund and **deductions**, cheque date and deposited-on date, and a dated **Notes** tab.
   * **Rebuild the payment schedule:** a list action; refused when any payment is already paid or bounced.
   * A lease with received rent cannot be deleted (terminate it instead). A tenant, unit or property that has a lease
     cannot be deleted either.
   * **Documents** tab: the signed contract, Ejari certificate, cheque copies ... with expiry warnings.
+* **Reports (update 20):** on the Leases and Rent payments lists, the **Reports** links open the **Rent roll** (all running
+  leases, with Excel / CSV download) and the **Monthly collection** page (expected vs received per month). The lease
+  header has **Tenancy summary** and **Payment statement** buttons that open a printable page (use the browser's
+  Print > Save as PDF). Selected leases or payments can be exported with the list action (needs the export permission).
 * **Rent payments** (sidebar: Tenancy > Rent payments): every instalment of every lease in one list. Filter by
   status, overdue, due this week / month or date; search by lease, tenant or cheque number; tick payments and choose
   **Mark as paid** or **Mark as bounced**.

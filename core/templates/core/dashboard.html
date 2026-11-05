@@ -42,6 +42,39 @@
     </div>
     {% endif %}
 
+    {% if panels.attention is not None %}
+    <div class="erp-panel">
+      <h3>Needs attention</h3>
+      {% if panels.attention %}
+      <ul class="erp-attn">
+        {% for item in panels.attention %}
+        <li><a href="{{ item.url }}">{{ item.label }}{% if item.detail %}<small>{{ item.detail }}</small>{% endif %}</a><span class="erp-pill erp-pill-{% if item.tone == 'red' %}expired{% else %}soon{% endif %}">{{ item.count }}</span></li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <div class="erp-empty">Nothing needs attention. Rent is on time and no lease is about to end.</div>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    {% if panels.renewals is not None %}
+    <div class="erp-panel">
+      <h3>Next leases to end</h3>
+      {% if panels.renewals %}
+      <ul class="erp-list">
+        {% for r in panels.renewals %}
+        <li>
+          <span><a href="{{ r.url }}">{{ r.lease.code }} · {{ r.lease.tenant.name }}</a><small>{{ r.lease.item_name }} · ends {{ r.date_text }} ({{ r.when }})</small></span>
+          <span>{{ r.button }}</span>
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <div class="erp-empty">No running lease is waiting for a renewal.</div>
+      {% endif %}
+    </div>
+    {% endif %}
+
     {% if panels.status_bars %}
     <div class="erp-panel">
       <h3>Units by status <a href="{{ units_url }}">Open units</a></h3>

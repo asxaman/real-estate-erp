@@ -1,0 +1,13 @@
+{% if report_links %}
+<div class="erp-reports">
+  <span>Reports</span>
+  {% for label, url in report_links %}<a href="{{ url }}">{{ label }}</a>{% endfor %}
+</div>
+{% endif %}
+{% if lease_chips %}
+<div class="erp-chips" role="navigation" aria-label="Quick filters">
+  {% for chip in lease_chips %}
+    <a class="erp-chip erp-chip-{{ chip.tone }}{% if chip.active %} is-active{% endif %}" href="{{ chip.url }}">{{ chip.label }} <b>{{ chip.count }}</b></a>
+  {% endfor %}
+</div>
+{% endif %}

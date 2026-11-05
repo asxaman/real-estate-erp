@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ title }}</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: "Segoe UI", Arial, sans-serif; color: #111827; margin: 0; background: #f3f4f6; }
+  .sheet { max-width: 880px; margin: 24px auto; background: #fff; padding: 36px 40px; box-shadow: 0 1px 6px rgba(0,0,0,.12); }
+  h1 { font-size: 22px; margin: 0 0 2px; } h2 { font-size: 15px; margin: 26px 0 8px; border-bottom: 2px solid #111827; padding-bottom: 4px; }
+  .muted { color: #6b7280; font-size: 13px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { padding: 6px 8px; border-bottom: 1px solid #e5e7eb; text-align: left; vertical-align: top; }
+  th { background: #f9fafb; font-size: 12px; text-transform: uppercase; letter-spacing: .03em; color: #4b5563; }
+  .num { text-align: right; white-space: nowrap; } .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 28px; font-size: 14px; }
+  .grid div { display: flex; justify-content: space-between; border-bottom: 1px dotted #d1d5db; padding: 3px 0; } .grid span { color: #6b7280; }
+  .bad { color: #b91c1c; font-weight: 600; } .good { color: #15803d; font-weight: 600; }
+  .bar { display: flex; justify-content: space-between; align-items: flex-start; }
+  .btn { background: #111827; color: #fff; border: 0; border-radius: 6px; padding: 9px 16px; font-size: 14px; cursor: pointer; }
+  .sign { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; margin-top: 56px; font-size: 13px; }
+  .sign div { border-top: 1px solid #111827; padding-top: 6px; }
+  @media print { body { background: #fff; } .sheet { box-shadow: none; margin: 0; padding: 0; max-width: none; } .noprint { display: none; } }
+</style>
+</head>
+<body>
+<div class="sheet">
+  <div class="noprint" style="text-align:right;margin-bottom:12px;">
+    <button class="btn" type="button" onclick="window.print()">Print / Save as PDF</button>
+  </div>
+  <div class="bar">
+    <div>
+      <h1>{% if kind == "summary" %}Tenancy summary{% else %}Rent payment statement{% endif %}</h1>
+      <div class="muted">{{ lease.code }} · printed {{ today|date:"j F Y" }}</div>
+    </div>
+    <div class="muted" style="text-align:right;">Status: <b>{{ state }}</b></div>
+  </div>
+
+  <h2>Tenancy</h2>
+  <div class="grid">
+    <div><span>Tenant</span><b>{{ lease.tenant.name }}</b></div>
+    <div><span>Rented</span><b>{{ lease.item_name }}</b></div>
+    <div><span>Starts</span><b>{{ lease.start_date|date:"j F Y" }}</b></div>
+    <div><span>Ends</span><b>{{ lease.end_date|date:"j F Y" }}</b></div>
+    {% if lease.status == "terminated" %}<div><span>Terminated on</span><b>{{ lease.terminated_on|date:"j F Y" }}</b></div><div><span>Reason</span><b>{{ lease.termination_reason }}</b></div>{% endif %}
+    <div><span>Annual rent</span><b>AED {{ lease.annual_rent|floatformat:"2g" }}</b></div>
+    <div><span>VAT (5%)</span><b>{% if lease.vat_applies %}AED {{ lease.vat_amount|floatformat:"2g" }}{% else %}Not applied{% endif %}</b></div>
+    {% if lease.ejari_number %}<div><span>Ejari number</span><b>{{ lease.ejari_number }}</b></div><div><span>Ejari expires</span><b>{{ lease.ejari_expiry|date:"j F Y" }}</b></div>{% endif %}
+  </div>
+
+  {% if kind == "summary" %}
+  <h2>Money</h2>
+  <div class="grid">
+    <div><span>Rent with VAT</span><b>AED {{ lease.total_with_vat|floatformat:"2g" }}</b></div>
+    <div><span>Security deposit</span><b>AED {{ lease.security_deposit|floatformat:"2g" }}</b></div>
+    <div><span>Agency commission</span><b>AED {{ lease.commission|floatformat:"2g" }}</b></div>
+    <div><span>Admin / contract fee</span><b>AED {{ lease.admin_fee|floatformat:"2g" }}</b></div>
+    <div><span>Received so far</span><b class="good">AED {{ paid|floatformat:"2g" }}</b></div>
+    <div><span>Still to receive</span><b>AED {{ outstanding|floatformat:"2g" }}</b></div>
+    {% if lease.security_deposit %}
+    <div><span>Deposit deducted</span><b>AED {{ deducted|floatformat:"2g" }}</b></div>
+    <div><span>Deposit still held</span><b>AED {{ deposit_left|floatformat:"2g" }}</b></div>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  <h2>Payments</h2>
+  <table>
+    <thead><tr>
+      <th>#</th><th>Due</th><th class="num">Amount</th>{% if lease.vat_applies %}<th class="num">VAT</th>{% endif %}<th class="num">Total</th>
+      <th>Method</th><th>Cheque</th><th>Status</th><th>Paid on</th>{% if kind == "statement" %}<th class="num">Received to date</th>{% endif %}
+    </tr></thead>
+    <tbody>
+    {% for r in rows %}
+      <tr>
+        <td>{{ r.p.part }}</td><td>{{ r.p.due_date|date:"j M Y" }}</td>
+        <td class="num">{{ r.p.amount|floatformat:"2g" }}</td>
+        {% if lease.vat_applies %}<td class="num">{{ r.p.vat|floatformat:"2g" }}</td>{% endif %}
+        <td class="num">{{ r.p.total|floatformat:"2g" }}</td>
+        <td>{{ r.p.get_method_display }}</td>
+        <td>{{ r.p.cheque_number }}{% if r.p.bank_name %}<br><span class="muted">{{ r.p.bank_name }}</span>{% endif %}</td>
+        <td class="{% if r.state == 'Overdue' or r.state == 'Bounced' %}bad{% elif r.state == 'Paid' %}good{% endif %}">{{ r.state }}{% if r.late %}<br><span class="muted">{{ r.late }} day{{ r.late|pluralize }} late</span>{% endif %}</td>
+        <td>{{ r.p.paid_on|date:"j M Y"|default:"-" }}</td>
+        {% if kind == "statement" %}<td class="num">{% if r.received_so_far is not None %}{{ r.received_so_far|floatformat:"2g" }}{% endif %}</td>{% endif %}
+      </tr>
+    {% endfor %}
+    </tbody>
+    <tfoot><tr>
+      <th colspan="{% if lease.vat_applies %}4{% else %}3{% endif %}" class="num">Total</th>
+      <th class="num">{{ total|floatformat:"2g" }}</th><th colspan="{% if kind == 'statement' %}5{% else %}4{% endif %}"></th>
+    </tr></tfoot>
+  </table>
+  <p style="margin-top:14px;font-size:14px;">
+    Received: <b class="good">AED {{ paid|floatformat:"2g" }}</b> &nbsp; Outstanding: <b {% if outstanding %}class="bad"{% endif %}>AED {{ outstanding|floatformat:"2g" }}</b>
+    {% if late_fees %}&nbsp; Late fees built up: <b class="bad">AED {{ late_fees|floatformat:"2g" }}</b>{% endif %}
+  </p>
+  {% if kind == "summary" %}<div class="sign"><div>Landlord / agent signature</div><div>Tenant signature</div></div>{% endif %}
+</div>
+</body>
+</html>

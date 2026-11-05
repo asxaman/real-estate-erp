@@ -1,0 +1,15 @@
+{% if report_links %}
+<div class="erp-reports">
+  <span>Reports</span>
+  {% for label, url in report_links %}<a href="{{ url }}">{{ label }}</a>{% endfor %}
+</div>
+{% endif %}
+{% if pay_strip %}
+<div class="erp-strip">
+  {% for card in pay_strip %}
+    <a class="erp-strip-card erp-strip-{{ card.tone }}" href="{{ card.url }}">
+      <span>{{ card.label }}</span><b>{{ card.amount }}</b><small>{{ card.count }} payment{{ card.count|pluralize }}</small>
+    </a>
+  {% endfor %}
+</div>
+{% endif %}

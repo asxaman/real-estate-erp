@@ -54,10 +54,26 @@ def _parts(message):
     return [{"t": text}]
 
 
+TITLE_TAG = "title:"
+
+
+def titled(title):
+    """extra_tags for a message that should carry its own heading, e.g. extra_tags=titled("Payments overdue")."""
+    return TITLE_TAG + title
+
+
+def _title(message):
+    for tag in (message.extra_tags or "").split("|"):
+        if tag.startswith(TITLE_TAG):
+            return tag[len(TITLE_TAG):].strip()
+    return ""
+
+
 def toast_messages(request):
     storage = get_messages(request)
     items = [
-        {"level": (m.level_tag or "info").split()[0], "parts": _parts(m.message)} for m in storage
+        {"level": (m.level_tag or "info").split()[0], "parts": _parts(m.message), "title": _title(m)}
+        for m in storage
     ]
     request._erp_toasts = items
     return {"messages": [], "DEFAULT_MESSAGE_LEVELS": DEFAULT_LEVELS}

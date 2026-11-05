@@ -107,6 +107,59 @@ def _lease_rows(today, limit, state):
     return rows
 
 
+def _lease_panels(user, panels):
+    """'Next leases to end' (with a Renew button) and 'Needs attention' for the dashboard."""
+    from django.db.models import Count, Q
+
+    from leases.admin import _button, _money, lease_info
+    from leases.models import Lease, LeasePayment
+
+    today = timezone.localdate()
+    limit = today + timedelta(days=sysconf.expiry_days())
+    open_ = (LeasePayment.Status.PENDING, LeasePayment.Status.BOUNCED)
+    running = Lease.objects.filter(status=Lease.Status.ACTIVE, start_date__lte=today, end_date__gte=today)
+    ending = list(
+        running.filter(renewals__isnull=True).select_related("tenant", "unit__property", "property")
+        .prefetch_related("payments").order_by("end_date", "code")[:5]
+    )
+    can_renew = user.has_perm("leases.add_lease")
+    rows = []
+    for lease in ending:
+        days = (lease.end_date - today).days
+        rows.append({
+            "lease": lease, "url": reverse("admin:leases_lease_change", args=[lease.pk]),
+            "date_text": fmt_date(lease.end_date), "when": _days_text(days), "soon": lease.end_date <= limit,
+            "button": _button("Renew", "renew", reverse("admin:leases_lease_renew", args=[lease.pk]), lease_info(lease, today)) if can_renew else "",
+        })
+    panels["renewals"] = rows
+
+    items = []
+    leases_url = reverse("admin:leases_lease_changelist")
+    ending_unrenewed = running.filter(end_date__lte=limit, renewals__isnull=True).count()
+    if ending_unrenewed:
+        items.append({"label": "Leases ending soon with no renewal", "count": ending_unrenewed, "detail": f"within {sysconf.expiry_days()} days",
+                      "url": leases_url + "?state=soon", "tone": "amber"})
+    ejari = Lease.objects.filter(status=Lease.Status.ACTIVE, end_date__gte=today, ejari_expiry__isnull=False, ejari_expiry__lte=limit).count()
+    if ejari:
+        items.append({"label": "Ejari certificates expiring or expired", "count": ejari, "detail": "",
+                      "url": reverse("expiring_documents") + "?kind=lease", "tone": "amber"})
+    if user.has_perm("leases.view_leasepayment"):
+        pay_url = reverse("admin:leases_leasepayment_changelist")
+        payments = LeasePayment.objects.select_related("lease")
+
+        def add(label, queryset, url, tone):
+            rows_ = list(queryset)
+            if rows_:
+                items.append({"label": label, "count": len(rows_), "detail": _money(sum((p.total for p in rows_), 0)), "url": url, "tone": tone})
+
+        add("Overdue payments", payments.filter(status=LeasePayment.Status.PENDING, due_date__lt=today), pay_url + "?due=overdue", "red")
+        add("Bounced cheques", payments.filter(status=LeasePayment.Status.BOUNCED), pay_url + "?status__exact=bounced", "red")
+        add("Payments due in the next 7 days",
+            payments.filter(status=LeasePayment.Status.PENDING, due_date__gte=today, due_date__lte=today + timedelta(days=7)),
+            pay_url + "?due=week", "amber")
+    panels["attention"] = items
+
+
 def _days_text(days):
     if days < 0:
         return f"{-days} day{'s' if days != -1 else ''} ago"
@@ -246,6 +299,9 @@ def dashboard_view(request):
         )
         cards.append({"label": "Overdue payments", "value": overdue.count(),
                       "url": reverse("admin:leases_leasepayment_changelist") + "?due=overdue", "tone": "red"})
+
+    if user.has_perm("leases.view_lease"):
+        _lease_panels(user, panels)
 
     # Documents that need attention
     documents = collect_documents(request, state="attention")

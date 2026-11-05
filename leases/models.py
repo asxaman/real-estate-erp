@@ -98,6 +98,15 @@ class Lease(models.Model):
     admin_fee = models.DecimalField(
         "Admin / contract fee (AED)", max_digits=12, decimal_places=2, default=0, validators=[MinValueValidator(0)],
     )
+    deposit_refund_date = models.DateField("Deposit refunded on", null=True, blank=True)
+    deposit_refund_amount = models.DecimalField(
+        "Amount refunded (AED)", max_digits=12, decimal_places=2, default=0, validators=[MinValueValidator(0)],
+        help_text="What was actually paid back to the tenant.",
+    )
+    late_fee_per_day = models.DecimalField(
+        "Late fee per day (AED)", max_digits=10, decimal_places=2, default=0, validators=[MinValueValidator(0)],
+        help_text="Optional. When set, every day a payment is overdue adds this amount (shown, not charged automatically).",
+    )
     ejari_number = models.CharField("Ejari number", max_length=40, blank=True)
     ejari_expiry = models.DateField("Ejari expires on", null=True, blank=True)
     status = models.CharField(max_length=12, choices=Status.choices, default=Status.ACTIVE)
@@ -111,6 +120,7 @@ class Lease(models.Model):
 
     class Meta:
         ordering = ["-start_date", "-id"]
+        permissions = [("export_lease", "Can export leases to Excel / CSV")]
 
     def __str__(self):
         return self.code or "New lease"
@@ -157,6 +167,26 @@ class Lease(models.Model):
     def total_with_vat(self):
         return money(self.annual_rent or 0) + self.vat_amount
 
+    def paid_total(self):
+        """Rent received so far, VAT included."""
+        return sum((p.total for p in self.payments.all() if p.status == LeasePayment.Status.PAID), Decimal("0.00"))
+
+    def scheduled_total(self):
+        """Everything the schedule asks for, VAT included."""
+        return sum((p.total for p in self.payments.all()), Decimal("0.00"))
+
+    def late_fees(self, today=None):
+        """Late fees that have built up on overdue payments (0 when no daily fee is set)."""
+        return sum((p.late_fee(today) for p in self.payments.all()), Decimal("0.00"))
+
+    def deposit_deducted(self):
+        return sum((d.amount for d in self.deductions.all()), Decimal("0.00"))
+
+    def deposit_balance(self):
+        """Deposit still held: deposit - deductions - what was refunded (never below zero)."""
+        left = (self.security_deposit or 0) - self.deposit_deducted() - (self.deposit_refund_amount or 0)
+        return max(money(left), Decimal("0.00"))
+
     # ---- rules ----------------------------------------------------------------------
     def clean(self):
         errors = {}
@@ -182,6 +212,13 @@ class Lease(models.Model):
 
         if self.ejari_expiry and self.start_date and self.ejari_expiry < self.start_date:
             errors["ejari_expiry"] = "The Ejari expiry cannot be before the lease starts."
+
+        if self.deposit_refund_amount and self.deposit_refund_amount > (self.security_deposit or 0):
+            errors["deposit_refund_amount"] = "The refund cannot be more than the security deposit."
+        if self.deposit_refund_amount and not self.deposit_refund_date:
+            errors["deposit_refund_date"] = "Enter the date the deposit was paid back."
+        if self.deposit_refund_date and self.start_date and self.deposit_refund_date < self.start_date:
+            errors["deposit_refund_date"] = "The refund cannot be before the lease starts."
 
         # Early termination needs a date and a reason; an active lease keeps neither.
         if self.status == self.Status.TERMINATED:
@@ -265,23 +302,65 @@ class Lease(models.Model):
         ])
         return self.installments or 1
 
-    def renew(self):
-        """A new lease that starts the day after this one ends and lasts as long. Returns it."""
+    def renew(self, new_rent=None):
+        """
+        A new lease that starts the day after this one ends and lasts as long. `new_rent` is the
+        annual rent of the new lease (the same rent when it is left out). Returns the new lease.
+        """
         if self.status == self.Status.TERMINATED:
             raise ValidationError("A terminated lease cannot be renewed. Make a new lease instead.")
         if self.renewals.exists():
             raise ValidationError(f"{self.code} has already been renewed ({self.renewals.first().code}).")
+        rent = money(new_rent) if new_rent is not None else self.annual_rent
+        if rent <= 0:
+            raise ValidationError("The rent of the new lease must be more than zero.")
         length = self.end_date - self.start_date
         start = self.end_date + timedelta(days=1)
         new = Lease(
             tenant=self.tenant, unit=self.unit, property=self.property, start_date=start, end_date=start + length,
-            annual_rent=self.annual_rent, installments=self.installments, vat_applies=self.vat_applies,
-            security_deposit=self.security_deposit, deposit_status=self.deposit_status, renewed_from=self,
+            annual_rent=rent, installments=self.installments, vat_applies=self.vat_applies,
+            security_deposit=self.security_deposit, deposit_status=self.deposit_status, late_fee_per_day=self.late_fee_per_day,
+            renewed_from=self,
         )
         new.clean()
         new.save()
         return new
 
+    def terminate(self, on, reason, cancel_unpaid=True, deposit_status=None):
+        """
+        End the lease early. Unpaid payments that fall due after the termination date are cancelled
+        (deleted) when `cancel_unpaid` is true. Returns how many payments were cancelled.
+        """
+        if self.status == self.Status.TERMINATED:
+            raise ValidationError(f"{self.code} has already been terminated.")
+        self.status = self.Status.TERMINATED
+        self.terminated_on = on
+        self.termination_reason = reason
+        if deposit_status:
+            self.deposit_status = deposit_status
+        self.clean()
+        self.save()
+        if cancel_unpaid:
+            return self.payments.filter(status=LeasePayment.Status.PENDING, due_date__gt=on).delete()[0]
+        return 0
+
+    def assign_cheques(self, first, bank=""):
+        """Number the cheques of every payment that is not paid yet, in due-date order. Returns how many."""
+        match = re.fullmatch(r"(\D*)(\d+)", (first or "").strip())
+        if not match:
+            raise ValidationError("Enter the first cheque number, for example 000123 (letters first are fine: CQ-0042).")
+        prefix, digits = match.groups()
+        width, number = len(digits), int(digits)
+        count = 0
+        for payment in self.payments.exclude(status=LeasePayment.Status.PAID).order_by("due_date", "part"):
+            payment.method = LeasePayment.Method.CHEQUE
+            payment.cheque_number = f"{prefix}{number:0{width}d}"[:30]
+            if bank:
+                payment.bank_name = bank.strip()[:60]
+            payment.save()
+            number += 1
+            count += 1
+        return count
 
 
 @receiver(post_save, sender=Lease, dispatch_uid="lease-schedule")
@@ -312,6 +391,8 @@ class LeasePayment(models.Model):
     method = models.CharField(max_length=10, choices=Method.choices, default=Method.CHEQUE)
     cheque_number = models.CharField("Cheque no.", max_length=30, blank=True)
     bank_name = models.CharField("Bank", max_length=60, blank=True)
+    cheque_date = models.DateField("Date on cheque", null=True, blank=True)
+    deposited_on = models.DateField("Deposited in bank on", null=True, blank=True)
     status = models.CharField(max_length=10, choices=Status.choices, default=Status.PENDING)
     paid_on = models.DateField("Paid on", null=True, blank=True)
     notes = models.CharField(max_length=200, blank=True)
@@ -320,6 +401,7 @@ class LeasePayment(models.Model):
         ordering = ["due_date", "part"]
         verbose_name = "payment"
         verbose_name_plural = "Payments"
+        permissions = [("export_leasepayment", "Can export rent payments to Excel / CSV")]
 
     def __str__(self):
         return f"{self.lease.code} payment {self.part}"
@@ -335,6 +417,31 @@ class LeasePayment(models.Model):
     def is_overdue(self, today=None):
         return self.status != self.Status.PAID and self.due_date < (today or timezone.localdate())
 
+    def days_overdue(self, today=None):
+        """How many days late (0 when paid or not yet due)."""
+        today = today or timezone.localdate()
+        return (today - self.due_date).days if self.is_overdue(today) else 0
+
+    def late_fee(self, today=None):
+        rate = self.lease.late_fee_per_day or 0
+        return money(rate * self.days_overdue(today)) if rate else Decimal("0.00")
+
+    def record(self, on, method, cheque_number="", bank_name=""):
+        """The money has arrived."""
+        if method not in self.Method.values:
+            raise ValidationError("Choose how the payment was made.")
+        self.status = self.Status.PAID
+        self.paid_on = on
+        self.method = method
+        self.cheque_number = (cheque_number or "").strip()[:30]
+        self.bank_name = (bank_name or "").strip()[:60]
+        self.save()
+
+    def bounce(self):
+        """The cheque came back unpaid."""
+        self.status = self.Status.BOUNCED
+        self.save()
+
     def clean(self):
         if self.status == self.Status.PAID:
             if not self.paid_on:
@@ -344,6 +451,10 @@ class LeasePayment(models.Model):
         if self.method != self.Method.CHEQUE:
             self.cheque_number = ""
             self.bank_name = ""
+            self.cheque_date = None
+            self.deposited_on = None
+        elif self.cheque_date and self.deposited_on and self.deposited_on < self.cheque_date:
+            raise ValidationError({"deposited_on": "A cheque cannot be deposited before the date written on it."})
 
     def save(self, *args, **kwargs):
         self.clean()
@@ -395,3 +506,44 @@ class LeaseDocument(models.Model):
 def remove_lease_document_file(sender, instance, **kwargs):
     if instance.file:
         instance.file.delete(save=False)
+
+
+class LeaseDeduction(models.Model):
+    """Money kept from the security deposit (repairs, unpaid bills ...) with the reason."""
+
+    lease = models.ForeignKey(Lease, on_delete=models.CASCADE, related_name="deductions")
+    date = models.DateField("Date", default=timezone.localdate)
+    reason = models.CharField("Reason", max_length=200)
+    amount = models.DecimalField("Amount (AED)", max_digits=12, decimal_places=2, validators=[MinValueValidator(Decimal("0.01"))])
+
+    class Meta:
+        ordering = ["date", "id"]
+        verbose_name = "deduction"
+        verbose_name_plural = "Deposit deductions"
+
+    def __str__(self):
+        return f"{self.reason} ({self.amount})"
+
+    def clean(self):
+        lease = self.lease if self.lease_id else None
+        if lease is not None and self.amount:
+            others = sum((d.amount for d in lease.deductions.exclude(pk=self.pk)), Decimal("0"))
+            if others + self.amount > (lease.security_deposit or 0):
+                raise ValidationError({"amount": "The deductions cannot be more than the security deposit."})
+
+
+class LeaseNote(models.Model):
+    """A dated note on the lease (a phone call, a promise to pay, a complaint ...)."""
+
+    lease = models.ForeignKey(Lease, on_delete=models.CASCADE, related_name="lease_notes")
+    text = models.TextField("Note")
+    author = models.CharField("Written by", max_length=150, blank=True, editable=False)
+    created_at = models.DateTimeField("When", auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+        verbose_name = "note"
+        verbose_name_plural = "Notes"
+
+    def __str__(self):
+        return self.text[:40]

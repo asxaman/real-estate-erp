@@ -20,6 +20,7 @@ from core.admin_utils import ExportPermissionMixin, TooltipHelpMixin, badge, cir
 from core import sysconf
 from core.formats import fmt_date
 from core.models import AuditEntry
+from core.toasts import titled
 from core.widgets import use_file_widget
 
 from . import bulk, owner_tools
@@ -66,8 +67,9 @@ def document_alert(request, documents):
     else:
         text = f"{len(documents)} documents need attention: " + "; ".join(line(d) for d in documents[:3])
         text += f" and {len(documents) - 3} more." if len(documents) > 3 else "."
-    show = messages.error if any(d.expiry_date < today for d in documents) else messages.warning
-    show(request, text)
+    expired = any(d.expiry_date < today for d in documents)
+    show = messages.error if expired else messages.warning
+    show(request, text, extra_tags=titled("Expired documents" if expired else "Documents expiring soon"))
 
 
 def _per_owner(queryset, group_by):
