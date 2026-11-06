@@ -2,6 +2,7 @@
 Small JSON endpoints used by the pop-ups and the auto-fill on the lease pages (the browser side is
 core/static/core/leases.js). Each one answers {"ok": true, ...} or {"ok": false, "errors": [...]}.
 """
+import json
 import re
 from datetime import timedelta
 from decimal import Decimal, InvalidOperation
@@ -250,6 +251,10 @@ def _follow_lease_amount(payment):
         LeaseDeduction.objects.filter(pk=source.pk).update(amount=payment.amount, date=payment.due_date)
 
 
+class _GridErrors(Exception):
+    """Raised inside the cheque grid's save to roll everything back when any row has a problem."""
+
+
 def read_optional_date(text, label):
     return read_date(text, label) if (text or "").strip() else None
 
@@ -310,8 +315,137 @@ class PaymentApiMixin:
             path("<int:pk>/remove/", wrap(self.remove_view), name="leases_leasepayment_remove"),
             path("for-lease/<int:lease_pk>/add/", wrap(self.add_view_json), name="leases_leasepayment_add_to"),
             path("bulk/", wrap(self.bulk_view), name="leases_leasepayment_bulk"),
+            path("for-lease/<int:lease_pk>/cheques/", wrap(self.cheque_grid_view), name="leases_leasepayment_cheque_grid"),
         ]
         return custom + super().get_urls()
+
+    # ---- the cheque grid on the lease's Payments tab ---------------------------------------
+    @staticmethod
+    def _grid_row(payment):
+        locked = payment.status == LeasePayment.Status.PAID and payment.method != LeasePayment.Method.CHEQUE
+        why = ""
+        if locked:
+            why = f"Received by {payment.get_method_display().lower()}: it has no cheque details."
+        return {
+            "id": payment.pk, "label": payment.label, "kind": payment.get_kind_display(),
+            "due": payment.due_date.isoformat(), "amount": format_amount(payment.total),
+            "status": payment.status, "status_label": payment.get_status_display(),
+            "method": payment.method, "method_label": payment.get_method_display(),
+            "cheque_number": payment.cheque_number, "bank_name": payment.bank_name,
+            "cheque_date": payment.cheque_date.isoformat() if payment.cheque_date else "",
+            "editable": not locked, "why": why,
+        }
+
+    def cheque_grid_view(self, request, lease_pk):
+        """GET: the payment lines of a lease for the grid. POST: save the cheque details of many lines at once."""
+        from core import banks
+
+        if not self.has_change_permission(request):
+            return refuse()
+        if request.method == "GET":
+            lease = get_object_or_404(Lease, pk=lease_pk)
+            lines = lease.payments.exclude(status=LeasePayment.Status.WAIVED).order_by("due_date", "part", "id")
+            return JsonResponse({
+                "ok": True, "code": lease.code, "banks": banks.names(),
+                "rows": [self._grid_row(p) for p in lines],
+            })
+        if request.method != "POST":
+            return fail("This must be sent as a form.", status=405)
+        try:
+            sent = json.loads(request.POST.get("rows") or "[]")
+        except ValueError:
+            return fail("The grid sent something that could not be read. Refresh the page and try again.")
+        if not isinstance(sent, list) or not sent:
+            return fail("Nothing to save.")
+        if len(sent) > 300:
+            return fail("A lease cannot have that many payment lines.")
+
+        errors, saved = [], 0
+        try:
+            with transaction.atomic():
+                lease = Lease.objects.select_for_update().get(pk=lease_pk)  # one at a time per lease
+                lines = {p.pk: p for p in LeasePayment.objects.select_for_update().filter(lease=lease)}
+                for line in lines.values():
+                    line.lease = lease
+                known = {name.lower(): name for name in banks.names()}
+                touched = []
+                for item in sent:
+                    try:
+                        payment = lines.get(int(item.get("id")))
+                    except (AttributeError, TypeError, ValueError):
+                        errors.append("One row of the grid could not be read. Refresh the page and try again.")
+                        continue
+                    if payment is None:
+                        errors.append("A payment in the grid does not belong to this lease any more. Refresh the page.")
+                        continue
+                    if payment.status == LeasePayment.Status.WAIVED:
+                        continue
+                    where = payment.label
+                    number = str(item.get("cheque_number") or "").strip()
+                    bank = str(item.get("bank_name") or "").strip()
+                    day_text = str(item.get("cheque_date") or "").strip()
+                    if len(number) > 30:
+                        errors.append(f"{where}: a cheque number can have at most 30 characters.")
+                        continue
+                    if bank:
+                        canonical = known.get(bank.lower())
+                        if canonical is None and bank.lower() != (payment.bank_name or "").lower():
+                            errors.append(f"{where}: “{bank}” is not in the bank list (System settings, Banks).")
+                            continue
+                        bank = canonical or payment.bank_name
+                    try:
+                        day = read_optional_date(day_text, "date on the cheque")
+                    except ValidationError as exc:
+                        errors.append(f"{where}: {exc.messages[0]}")
+                        continue
+                    if (number, bank, day) == (payment.cheque_number, payment.bank_name, payment.cheque_date):
+                        continue  # nothing changed on this line
+                    has_details = bool(number or bank or day)
+                    if has_details and payment.method != LeasePayment.Method.CHEQUE:
+                        if payment.status == LeasePayment.Status.PAID:
+                            errors.append(f"{where}: it was received by {payment.get_method_display().lower()}, so it has no cheque details.")
+                            continue
+                        payment.method = LeasePayment.Method.CHEQUE
+                    payment.cheque_number, payment.bank_name, payment.cheque_date = number, bank, day
+                    try:
+                        payment.full_clean(exclude=["lease", "part"])
+                    except ValidationError as exc:
+                        errors.append(f"{where}: {' '.join(exc.messages)}")
+                        continue
+                    touched.append(payment)
+
+                # The same cheque number twice on one lease (same bank, or one bank left empty) is a typing slip.
+                for payment in touched:
+                    if not payment.cheque_number:
+                        continue
+                    for other in lines.values():
+                        if other.pk == payment.pk or other.status == LeasePayment.Status.WAIVED:
+                            continue
+                        if other.cheque_number.lower() == payment.cheque_number.lower() and (
+                            not other.bank_name or not payment.bank_name or other.bank_name.lower() == payment.bank_name.lower()
+                        ):
+                            errors.append(f"Cheque number {payment.cheque_number} is used twice ({payment.label} and {other.label}).")
+                            break
+                if errors:
+                    raise _GridErrors
+                for payment in touched:
+                    payment.save()
+                    saved += 1
+        except _GridErrors:
+            seen, unique = set(), []
+            for text in errors:
+                if text not in seen:
+                    seen.add(text)
+                    unique.append(text)
+            return fail(*unique[:12], *(["… and more. Nothing was saved."] if len(unique) > 12 else ["Nothing was saved."]))
+        except Lease.DoesNotExist:
+            return fail("This lease no longer exists.", status=404)
+        if saved:
+            messages.success(
+                request, f"Cheque details were saved for {saved} payment{'s' if saved != 1 else ''} of {lease.code}.",
+                extra_tags=titled("Cheques saved"),
+            )
+        return JsonResponse({"ok": True, "saved": saved, "redirect": ""})
 
     def record_view(self, request, pk):
         if request.method != "POST":

@@ -997,6 +997,10 @@ class LeaseAdmin(LeaseApiMixin, ReportsMixin, ExportPermissionMixin, FilterBarMi
             "Add payment", "addpay", reverse("admin:leases_leasepayment_add_to", args=[obj.pk]),
             {"code": obj.code, "today": today.isoformat()},
         ))
+        actions.append(_button(
+            "Cheque grid", "chequegrid", reverse("admin:leases_leasepayment_cheque_grid", args=[obj.pk]),
+            {"code": obj.code, "today": today.isoformat()},
+        ))
         if obj.status == Lease.Status.ACTIVE:
             if not obj.renewals.exists():
                 actions.append(_button("Renew", "renew", reverse("admin:leases_lease_renew", args=[obj.pk]), lease_info(obj, today)))

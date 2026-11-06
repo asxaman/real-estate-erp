@@ -1,7 +1,16 @@
 # Changelog
 
+## Update 36 - Cheque grid on the lease's Payments tab
+No migration needed. Run `python manage.py test`, then Ctrl+F5.
+- New "Cheque Grid" button (lease header, and at the top of the Payments tab): an Excel-style table of the lease's payment lines (rent, deposit, fees ...) where you fill in the cheque number, bank and cheque date for many payments at once, then save once.
+- Tab, Enter and the arrow keys move between cells; you can paste a column or a block copied from Excel; Ctrl+D copies the cell above; bank cells give a searchable list of the banks in System settings.
+- Helpers above the grid: number the empty cheques from a first number, fill the empty banks, and set empty cheque dates to the due date.
+- Edited cells are highlighted; a repeated cheque number is marked red; Cancel warns when there are unsaved changes. Payments received in cash are locked. Typing cheque details on a cash line that is not received turns it into a cheque.
+- One all-or-nothing save: if any row has a problem (unknown bank, unreadable date, a cheque number used twice, a cheque deposited before its date) nothing is saved and every problem is listed. Two people saving at once are handled one after the other.
+- The "Cheque numbers" feature in the lease header is unchanged.
+
 ## Update 35 - WhatsApp icon
-No migration needed. The WhatsApp button now uses the official icon file when you put it in core/static/core (whatsapp.svg or whatsapp.png); until then it shows the plain green chat button. One place, so every list and form uses it.
+No migration needed. The WhatsApp button now uses the official icon file when you put it in core/static/core (whatsapp.svg or whatsapp.png); until then it shows the plain green chat button. One place, so every list and form uses it. The icon is shown at 18px and the official whatsapp.svg is included.
 
 ## Update 34 - VAT on fees is your choice; one VAT basis on every lease screen
 Run `python manage.py makemigrations`, `migrate` and `test` (two new tick boxes on the lease need a small migration).

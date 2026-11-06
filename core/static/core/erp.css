@@ -804,3 +804,49 @@ html.dark .erp-cal-day:hover { background: #2e1065; }
 .erp-cal-day.is-on { background: #7c3aed; color: #fff; font-weight: 700; }
 .erp-cal-foot { display: flex; justify-content: space-between; margin-top: 8px; }
 .erp-cal-link { border: 0; background: transparent; color: #7c3aed; font-weight: 600; font-size: 13px; cursor: pointer; padding: 4px 6px; }
+
+/* ---- Cheque grid on the lease's Payments tab ---- */
+.erp-addpay-bar { gap: 8px; }
+.erp-dlg-grid { max-width: min(1180px, 96vw); }
+.erp-grid-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; margin: 0 0 10px; }
+.erp-grid-tin { min-height: 36px; width: 210px; padding: 6px 10px; font: inherit; font-size: 13px; color: inherit; background: transparent; border: 1px solid #d1d5db; border-radius: 8px; }
+.erp-grid-tin:focus { outline: none; border-color: #8b5cf6; box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.18); }
+html.dark .erp-grid-tin { border-color: #374151; background: #0b1220; }
+.erp-grid-tools .erp-fbtn { padding: 7px 12px; font-size: 13px; }
+.erp-grid-wrap { max-height: 54vh; overflow: auto; border: 1px solid #e5e7eb; border-radius: 10px; }
+html.dark .erp-grid-wrap { border-color: #374151; }
+.erp-grid { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13px; }
+.erp-grid thead th { position: sticky; top: 0; z-index: 2; padding: 9px 10px; text-align: left; font-size: 12px; font-weight: 700; background: #f9fafb; border-bottom: 1px solid #e5e7eb; white-space: nowrap; }
+html.dark .erp-grid thead th { background: #1f2937; border-bottom-color: #374151; }
+.erp-grid td { padding: 0; border-bottom: 1px solid #f1f5f9; border-right: 1px solid #f1f5f9; vertical-align: middle; }
+html.dark .erp-grid td { border-color: #1f2937; }
+.erp-grid td.erp-grid-info { padding: 8px 10px; white-space: nowrap; }
+.erp-grid td.erp-grid-info small { display: block; color: #6b7280; font-size: 11px; }
+.erp-grid td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.erp-grid-in { display: block; width: 100%; min-width: 130px; border: 0; padding: 9px 10px; background: transparent; font: inherit; font-size: 13px; color: inherit; outline: none; }
+.erp-grid-in:focus { background: #f5f3ff; box-shadow: inset 0 0 0 2px #7c3aed; }
+.erp-grid-in.is-changed { background: #fefce8; }
+.erp-grid-in.is-bad, .erp-grid-in.is-dup { background: #fef2f2; color: #b91c1c; box-shadow: inset 0 0 0 1px #dc2626; }
+.erp-grid-in:disabled { color: #9ca3af; background: #f9fafb; cursor: not-allowed; }
+html.dark .erp-grid-in:focus { background: #1e1b3a; }
+html.dark .erp-grid-in.is-changed { background: #2a2508; }
+html.dark .erp-grid-in.is-bad, html.dark .erp-grid-in.is-dup { background: #2a1214; color: #fca5a5; }
+html.dark .erp-grid-in:disabled { background: #111827; color: #6b7280; }
+.erp-grid tr.is-locked td { background: #fafafa; color: #9ca3af; }
+html.dark .erp-grid tr.is-locked td { background: #0f172a; }
+.is-changing { color: #b45309; font-weight: 600; }
+.erp-grid-st { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 600; background: #f3f4f6; color: #4b5563; }
+.erp-grid-st-paid { background: #dcfce7; color: #166534; }
+.erp-grid-st-held { background: #fef3c7; color: #92400e; }
+.erp-grid-st-bounced { background: #fee2e2; color: #991b1b; }
+.erp-grid-note { margin: 10px 0 0; padding: 8px 12px; border-radius: 8px; font-size: 13px; background: #f5f3ff; color: #5b21b6; }
+.erp-grid-note.is-bad { background: #fef2f2; color: #b91c1c; }
+.erp-grid-note[hidden] { display: none; }
+.erp-grid-actions { align-items: center; margin-top: 12px; }
+.erp-grid-count { margin-right: auto; font-size: 13px; color: #6b7280; }
+.erp-grid-panel { position: fixed; z-index: 100030; max-height: 250px; overflow: auto; padding: 4px; background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; box-shadow: 0 12px 32px rgba(0, 0, 0, .2); }
+.erp-grid-panel[hidden] { display: none; }
+html.dark .erp-grid-panel { background: #111827; border-color: #374151; color: #f3f4f6; }
+.erp-grid-opt { padding: 7px 10px; border-radius: 6px; font-size: 13px; cursor: pointer; }
+.erp-grid-opt:hover, .erp-grid-opt.is-on { background: #ede9fe; }
+html.dark .erp-grid-opt:hover, html.dark .erp-grid-opt.is-on { background: #2e1065; }
