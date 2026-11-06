@@ -12,8 +12,6 @@ from django.utils.http import urlencode
 from django.utils import timezone
 
 from core import exports
-from core.admin_utils import format_amount
-from core.formats import fmt_date
 
 from .models import Lease, LeasePayment
 

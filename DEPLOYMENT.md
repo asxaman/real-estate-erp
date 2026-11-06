@@ -12,7 +12,7 @@ Do these in order. Tick each one.
 - [ ] `DJANGO_ALLOWED_HOSTS` = your website address, for example `erp.mycompany.ae`.
 - [ ] `DJANGO_CSRF_TRUSTED_ORIGINS` = `https://erp.mycompany.ae`
 - [ ] `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_HOST`, `DB_PORT` for the live PostgreSQL database.
-- [ ] Do NOT set `DJANGO_DEBUG=1` on the server.
+- [ ] Do NOT set `DJANGO_DEBUG=1` on the server, and do NOT set `DJANGO_ALLOW_DEV_TOOLS` (it would allow the erase-everything tool).
 - [ ] Behind nginx or a load balancer: `DJANGO_BEHIND_PROXY=1`. Optional: `DJANGO_SESSION_MINUTES` (default 60).
 
 ## 3. Web server

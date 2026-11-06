@@ -154,19 +154,21 @@ class LeaseApiMixin:
         problem = self._checked(request, self.has_add_permission)
         if problem:
             return problem
-        lease = get_object_or_404(Lease, pk=pk)
         mode = request.POST.get("mode", "same")
         try:
-            new_rent = None
-            if mode in ("percent", "amount"):
-                value = read_number(request.POST.get("value"))
-                if mode == "percent":
-                    if not -50 <= value <= 200:
-                        raise ValidationError("The change must be between -50% and 200%.")
-                    new_rent = lease.annual_rent * (Decimal(100) + value) / 100
-                else:
-                    new_rent = value
-            new = lease.renew(new_rent)
+            with transaction.atomic():
+                # Lock the lease while renewing, so a double click cannot make two renewals.
+                lease = get_object_or_404(Lease.objects.select_for_update(), pk=pk)
+                new_rent = None
+                if mode in ("percent", "amount"):
+                    value = read_number(request.POST.get("value"))
+                    if mode == "percent":
+                        if not -50 <= value <= 200:
+                            raise ValidationError("The change must be between -50% and 200%.")
+                        new_rent = lease.annual_rent * (Decimal(100) + value) / 100
+                    else:
+                        new_rent = value
+                new = lease.renew(new_rent)
         except ValidationError as exc:
             return fail(*exc.messages)
         messages.success(
@@ -273,25 +275,32 @@ class PaymentApiMixin:
             return fail("This must be sent as a form.", status=405)
         if not self.has_change_permission(request):
             return refuse()
-        payment = get_object_or_404(LeasePayment.objects.select_related("lease"), pk=pk)
         action = request.POST.get("action", "paid")
         try:
-            if action == "bounced":
-                payment.bounce()
-                messages.warning(
-                    request, f"Payment {payment.part} of {payment.lease.code} was marked as bounced.",
-                    extra_tags=titled("Cheque bounced"),
-                )
-            else:
-                on = read_date(request.POST.get("date"), "date received")
-                payment.record(
-                    on, request.POST.get("method", ""), request.POST.get("cheque_number", ""), request.POST.get("bank_name", ""),
-                )
-                messages.success(
-                    request,
-                    f"Payment {payment.part} of {payment.lease.code} (AED {format_amount(payment.total)}) was recorded as paid on {fmt_date(on)}.",
-                    extra_tags=titled("Payment recorded"),
-                )
+            with transaction.atomic():
+                # Lock the payment, so two people (or a double click) cannot record it twice.
+                payment = get_object_or_404(LeasePayment.objects.select_for_update().select_related("lease"), pk=pk)
+                if action != "bounced" and payment.status == LeasePayment.Status.PAID:
+                    raise ValidationError(
+                        f"Payment {payment.part} of {payment.lease.code} is already recorded as paid"
+                        f"{' on ' + fmt_date(payment.paid_on) if payment.paid_on else ''}. Refresh the page."
+                    )
+                if action == "bounced":
+                    payment.bounce()
+                    messages.warning(
+                        request, f"Payment {payment.part} of {payment.lease.code} was marked as bounced.",
+                        extra_tags=titled("Cheque bounced"),
+                    )
+                else:
+                    on = read_date(request.POST.get("date"), "date received")
+                    payment.record(
+                        on, request.POST.get("method", ""), request.POST.get("cheque_number", ""), request.POST.get("bank_name", ""),
+                    )
+                    messages.success(
+                        request,
+                        f"Payment {payment.part} of {payment.lease.code} (AED {format_amount(payment.total)}) was recorded as paid on {fmt_date(on)}.",
+                        extra_tags=titled("Payment recorded"),
+                    )
         except ValidationError as exc:
             return fail(*exc.messages)
         return JsonResponse({"ok": True, "redirect": ""})

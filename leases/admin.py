@@ -14,7 +14,6 @@ from django.shortcuts import redirect
 from django.urls import reverse
 from django.utils import timezone
 from django.utils.html import format_html, format_html_join
-from django.utils.safestring import mark_safe
 from unfold.admin import ModelAdmin, TabularInline
 from unfold.decorators import display
 

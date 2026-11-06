@@ -350,7 +350,6 @@ class SystemSettingsValues(TestCase):
         from django.test import RequestFactory
         from django.utils import timezone
 
-        from . import sysconf
         from .middleware import SystemSettingsMiddleware
         from .models import SystemSettings
 

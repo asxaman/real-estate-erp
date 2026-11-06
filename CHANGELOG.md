@@ -1,5 +1,14 @@
 # Changelog
 
+## Update 26 (part A) - Audit fixes, no database change
+Just extract and run `python manage.py test`. No `makemigrations` / `migrate` needed.
+- The sample-data and erase-everything tools now work only on your own PC (or when `DJANGO_ALLOW_DEV_TOOLS=1` is set on purpose). A live server refuses them whatever the System settings say.
+- Login lock-out behind nginx / a load balancer (`DJANGO_BEHIND_PROXY=1`) now uses each visitor's own address, so one person's wrong passwords cannot lock everybody out.
+- A lease can no longer be renewed twice by a double click, and a payment already recorded as paid is refused a second time (the first date and method stand).
+- The dashboard "Needs attention" totals are worked out by the database instead of loading every payment: faster with thousands of payments.
+- Downloads (Excel / CSV of owners, tenants, properties, units, leases, payments, rent roll) and sign-ins are now written to the audit log.
+- Unused code removed (13 unused imports); new tests in leases/test_audit_fixes.py.
+
 ## Update 15 - Security and safety audit fixes
 Run `python manage.py makemigrations`, then `migrate`, then `test`.
 - Development mode switch in System settings (Development tab). Off = no sample data, no erase-all, demo accounts switched off. Erase all data also clears the audit log.

@@ -28,6 +28,10 @@ def excel_response(title, headers, rows, stem, widths=None):
     from openpyxl import Workbook
     from openpyxl.styles import Font
 
+    from .audit import log_download
+
+    log_download(f"{title} (Excel)")
+
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = title
@@ -47,6 +51,9 @@ def excel_response(title, headers, rows, stem, widths=None):
 
 
 def csv_response(headers, rows, stem):
+    from .audit import log_download
+
+    log_download(f"{stem.replace('-', ' ')} (CSV)")
     response = HttpResponse(content_type="text/csv; charset=utf-8")
     response["Content-Disposition"] = f'attachment; filename="{filename(stem, "csv")}"'
     response.write("﻿")  # so Excel reads Arabic names correctly

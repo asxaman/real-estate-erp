@@ -28,3 +28,6 @@ backups/
 
 # server logs
 logs/
+
+# machine check reports
+health-report.txt

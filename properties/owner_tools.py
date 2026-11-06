@@ -69,6 +69,9 @@ def _filename(extension):
 
 
 def excel_response(queryset):
+    from core.audit import log_download
+
+    log_download("owners (Excel)")
     from openpyxl import Workbook
     from openpyxl.styles import Font
 
@@ -92,6 +95,9 @@ def excel_response(queryset):
 
 
 def csv_response(queryset):
+    from core.audit import log_download
+
+    log_download("owners (CSV)")
     response = HttpResponse(content_type="text/csv; charset=utf-8")
     response["Content-Disposition"] = f'attachment; filename="{_filename("csv")}"'
     response.write("﻿")  # so Excel reads Arabic names correctly

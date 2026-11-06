@@ -11,7 +11,7 @@ from django.utils import timezone
 
 from core.models import AuditEntry
 from properties.models import Owner, Property, Unit
-from properties.tests import building, make_owner, standalone, unit
+from properties.tests import building, standalone, unit
 from tenants.models import Tenant
 
 from . import occupancy

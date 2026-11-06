@@ -109,14 +109,14 @@ def _lease_rows(today, limit, state):
 
 def _lease_panels(user, panels):
     """'Next leases to end' (with a Renew button) and 'Needs attention' for the dashboard."""
-    from django.db.models import Count, Q
+    from django.db.models import Case, Count, DecimalField, F, Sum, Value, When
+    from django.db.models.functions import Coalesce, Round
 
     from leases.admin import _button, _money, lease_info
-    from leases.models import Lease, LeasePayment
+    from leases.models import VAT_RATE, Lease, LeasePayment
 
     today = timezone.localdate()
     limit = today + timedelta(days=sysconf.expiry_days())
-    open_ = (LeasePayment.Status.PENDING, LeasePayment.Status.BOUNCED)
     running = Lease.objects.filter(status=Lease.Status.ACTIVE, start_date__lte=today, end_date__gte=today)
     ending = list(
         running.filter(renewals__isnull=True).select_related("tenant", "unit__property", "property")
@@ -145,12 +145,20 @@ def _lease_panels(user, panels):
                       "url": reverse("expiring_documents") + "?kind=lease", "tone": "amber"})
     if user.has_perm("leases.view_leasepayment"):
         pay_url = reverse("admin:leases_leasepayment_changelist")
-        payments = LeasePayment.objects.select_related("lease")
+        payments = LeasePayment.objects.all()
+        # amount + VAT, worked out by the database (VAT rounded per payment, the same as LeasePayment.total)
+        vat = Case(
+            When(lease__vat_applies=True, then=Round(F("amount") * Value(VAT_RATE) / 100, 2)),
+            default=Value(0), output_field=DecimalField(max_digits=14, decimal_places=2),
+        )
 
         def add(label, queryset, url, tone):
-            rows_ = list(queryset)
-            if rows_:
-                items.append({"label": label, "count": len(rows_), "detail": _money(sum((p.total for p in rows_), 0)), "url": url, "tone": tone})
+            totals = queryset.aggregate(
+                n=Count("pk"),
+                money=Coalesce(Sum(F("amount") + vat, output_field=DecimalField(max_digits=14, decimal_places=2)), Value(0), output_field=DecimalField()),
+            )
+            if totals["n"]:
+                items.append({"label": label, "count": totals["n"], "detail": _money(totals["money"]), "url": url, "tone": tone})
 
         add("Overdue payments", payments.filter(status=LeasePayment.Status.PENDING, due_date__lt=today), pay_url + "?due=overdue", "red")
         add("Bounced cheques", payments.filter(status=LeasePayment.Status.BOUNCED), pay_url + "?status__exact=bounced", "red")

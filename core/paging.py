@@ -4,7 +4,7 @@ Django treats every unknown address parameter as a database lookup (and redirect
 private parameters used here ('per' = rows per page, 'chip' = quick filter) are taken out of the request
 while the list is built and put back into every link it makes.
 """
-from django.db.models import Count, Q
+from django.db.models import Count
 
 PER_PAGE_CHOICES = (50, 100, 200)
 DEFAULT_PER_PAGE = 100

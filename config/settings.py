@@ -47,6 +47,10 @@ def _flag(name, default):
 # treated as LIVE and gets the strict settings below, unless DJANGO_DEBUG says otherwise.
 _STARTED_WITH_MANAGE_PY = bool(sys.argv) and Path(sys.argv[0]).name == "manage.py"
 DEBUG = _flag("DJANGO_DEBUG", _STARTED_WITH_MANAGE_PY)
+# The sample-data and erase-everything tools may only run on a development copy (DEBUG on, or running the
+# tests). A live server (DEBUG off) refuses them, whatever the System settings say, unless this is set on purpose.
+BEHIND_PROXY = _flag("DJANGO_BEHIND_PROXY", False)  # nginx / a load balancer in front
+ALLOW_DEV_TOOLS = DEBUG or "test" in sys.argv or _flag("DJANGO_ALLOW_DEV_TOOLS", False)
 
 _DEV_KEY = "dev-only-insecure-key-change-me-before-production"
 SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "").strip()
@@ -220,7 +224,7 @@ if "test" in sys.argv:
 if not DEBUG:
     # Everything below needs the site to be served over HTTPS (set DJANGO_HTTPS=0 only for a
     # temporary test on a plain http address).
-    if _flag("DJANGO_BEHIND_PROXY", False):
+    if BEHIND_PROXY:
         SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")  # nginx / a load balancer
     if _flag("DJANGO_HTTPS", True):
         SECURE_SSL_REDIRECT = True

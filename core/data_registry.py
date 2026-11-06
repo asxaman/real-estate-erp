@@ -62,8 +62,12 @@ def register_eraser(label: str, func: Callable[[], str], order: int = 100) -> No
 
 def tools_allowed() -> bool:
     """The sample-data and erase tools work only while Development mode is on (System settings)."""
+    from django.conf import settings
+
     from . import sysconf
 
+    if not getattr(settings, "ALLOW_DEV_TOOLS", False):
+        return False  # a live server never allows them
     sysconf.ensure_current()
     return sysconf.development_mode()
 

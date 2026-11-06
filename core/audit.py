@@ -350,6 +350,35 @@ def log_tool(user, title, lines):
     )
 
 
+def log_event(title, detail="", user=None):
+    """One line in the log for something that is not a record change: a download or a sign-in."""
+    from .models import AuditEntry
+
+    if _suppressed.get():
+        return
+    user = user or current_user()
+    try:
+        AuditEntry.objects.create(
+            user_id=user.pk if user is not None else None,
+            username=user.get_username() if user is not None else "(unknown)",
+            action="tool",
+            model_label="Data tool",
+            object_repr=title[:300],
+            changes={"result": [None, detail[:1000]]} if detail else {},
+        )
+    except Exception:  # the log must never stop a download or a login
+        return
+
+
+def log_download(what):
+    """Record that personal data was downloaded (Excel / CSV)."""
+    log_event(f"Downloaded {what}")
+
+
+def log_login(sender, request, user, **kwargs):
+    log_event("Signed in", user=user)
+
+
 def scrub_old_entries(sender, apps=None, using="default", **kwargs):
     """After `migrate`: hide personal numbers that older log entries still contain."""
     if apps is None:

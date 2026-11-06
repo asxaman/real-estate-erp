@@ -56,6 +56,10 @@ class CoreConfig(AppConfig):
         user_login_failed.connect(lockout.record_failure, dispatch_uid="lockout-failed")
         user_logged_in.connect(lockout.clear_failures, dispatch_uid="lockout-ok")
 
+        from . import audit as audit_log
+
+        user_logged_in.connect(audit_log.log_login, dispatch_uid="audit-login")
+
         # Unfold shows `user.avatar_url` in the sidebar's account block. Django's built-in User
         # has no such attribute, so add one that returns the profile picture (when there is one).
         from django.contrib.auth import get_user_model

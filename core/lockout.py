@@ -18,7 +18,17 @@ WINDOW = timedelta(minutes=15)
 
 
 def _ip(request):
-    return (request.META.get("REMOTE_ADDR") or None) if request is not None else None
+    """The visitor's address. Behind nginx / a load balancer (DJANGO_BEHIND_PROXY=1) it is the last
+    address the proxy added in X-Forwarded-For; otherwise the direct connection."""
+    if request is None:
+        return None
+    from django.conf import settings
+
+    if getattr(settings, "BEHIND_PROXY", False):
+        forwarded = request.META.get("HTTP_X_FORWARDED_FOR", "")
+        if forwarded:
+            return forwarded.split(",")[-1].strip()[:45] or None
+    return request.META.get("REMOTE_ADDR") or None
 
 
 def _name(username):
