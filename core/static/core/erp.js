@@ -76,7 +76,8 @@
     icon.tabIndex = 0;
     icon.setAttribute("role", "button");
     icon.setAttribute("aria-label", "More information");
-    icon.textContent = "i";
+    icon.innerHTML = '<svg viewBox="0 0 10 10" width="8" height="8" fill="currentColor" aria-hidden="true">' +
+      '<circle cx="5" cy="1.7" r="1.15"/><rect x="3.9" y="3.9" width="2.2" height="5.4" rx="1"/></svg>';
     icon.addEventListener("mouseenter", function () { showTip(icon, text); });
     icon.addEventListener("mouseleave", hideTip);
     icon.addEventListener("focus", function () { showTip(icon, text); });
@@ -1650,7 +1651,120 @@
     }).observe(document.body, { childList: true, subtree: true });
   }
 
+  /* Title Case for headings and labels. CSS "capitalize" would also capitalize "and", "of", "the" ...,
+     so this small helper does it properly: every word starts with a capital letter except short joining
+     words (a, an, the, and, or, of, in, on, to, by, for ...), which stay small unless they are the first or
+     last word. Acronyms (TRN, VAT, AED), words with digits and words like iPhone are left as they are.
+     It only touches headings, labels, column titles, tabs, menus and buttons - never table data, input
+     values, help text or messages. window.erpTitleCase(text) can be used anywhere else. */
+  var SMALL = ("a an the and but or nor for yet so as at by in of off on per to up via with from into onto over than vs").split(" ");
+  var KEEP_LOWER = ("sq ft sqm kg km cm mm").split(" ");
+
+  function titleCase(text, first, last) {
+    var parts = String(text).split(/(\s+)/);   // words and the spaces between them
+    var words = [];
+    parts.forEach(function (part, i) { if (part && !/^\s+$/.test(part)) { words.push(i); } });
+    var count = words.length;
+    var afterBreak = false;
+    words.forEach(function (index, n) {
+      var token = parts[index];
+      var isFirst = (n === 0 && first) || afterBreak;
+      var isLast = n === count - 1 && last;
+      parts[index] = token.split(/([\/])/).map(function (piece, k) {
+        return fixWord(piece, isFirst && k === 0, isLast);
+      }).join("");
+      afterBreak = /[:\u2013\u2014]$/.test(token) || token === "-";
+    });
+    return parts.join("");
+  }
+
+  function fixWord(word, mustCapitalize, isLast) {
+    var match = word.match(/^([^A-Za-z0-9]*)(.*?)([^A-Za-z0-9]*)$/);
+    if (!match || !match[2]) { return word; }
+    var lead = match[1], core = match[2], tail = match[3];
+    if (/[0-9]/.test(core) || /^[A-Z]{2,}[a-z]?$/.test(core) || /[a-z][A-Z]/.test(core)) { return word; }
+    if (/[A-Za-z]\.[A-Za-z]/.test(core)) { return word; }                       // e.g.
+    var pieces = core.split("-").map(function (piece, k, arr) {
+      var lower = piece.toLowerCase();
+      if (!piece) { return piece; }
+      if (/[A-Z]/.test(piece.slice(1))) { return piece; }                       // already has its own capitals
+      if (KEEP_LOWER.indexOf(lower) !== -1) { return lower; }
+      if (k === 0 && mustCapitalize) { return piece.charAt(0).toUpperCase() + piece.slice(1); }
+      if (k === 0 && lead.indexOf("(") !== -1) { return piece.charAt(0).toUpperCase() + piece.slice(1); }
+      var inner = k > 0 && k < arr.length - 1;                                  // year-to-date
+      if (SMALL.indexOf(lower) !== -1 && (inner || (arr.length === 1 && !isLast))) { return lower; }
+      return piece.charAt(0).toUpperCase() + piece.slice(1);
+    });
+    return lead + pieces.join("-") + tail;
+  }
+  window.erpTitleCase = titleCase;
+
+  function titleCaseHeadings() {
+    var INCLUDE = [
+      "h1", "h2", "h3", "h4", "h5", "h6", "label", "legend", "caption", "summary", "dt",
+      "thead th", "button", "a.button", "input[type=submit]",
+      "nav a", "aside a", "header a", "[role=tab]", "[role=tablist] a", "[role=tablist] button",
+      "[class*=breadcrumb] a", "[class*=breadcrumb] li", "[class*=title]", "[class*=heading]",
+      ".erp-qbtn", "[class*=btn]", "[class*=button]", "[class*=label]",
+      ".erp-fsel > span", ".erp-reports > span", ".erp-strip-label", ".erp-sum-label"
+    ].join(",");
+    var EXCLUDE = "td, tbody th, input, textarea, select, option, script, style, code, pre, .help, .helptext, " +
+      ".messagelist, .errornote, .errorlist, [class*=toast], [class*=tooltip], [class*=help], [data-no-title-case], .erp-select-panel, .erp-select-label, .erp-info, svg, " +
+      "[class*=material-symbols], .material-icons";
+
+    function inside(el) {
+      return el.closest && el.closest(EXCLUDE);
+    }
+
+    function fixElement(el) {
+      if (inside(el)) { return; }
+      var walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, null);
+      var nodes = [];
+      while (walker.nextNode()) { nodes.push(walker.currentNode); }
+      nodes.forEach(function (node) {
+        var parent = node.parentNode;
+        if (!parent || !node.nodeValue || !/[A-Za-z]/.test(node.nodeValue)) { return; }
+        if (parent !== el && inside(parent)) { return; }
+        var tag = parent.nodeName;
+        if (tag === "SCRIPT" || tag === "STYLE" || tag === "OPTION" || tag === "TEXTAREA") { return; }
+        var first = !node.previousSibling || !/\S/.test(node.previousSibling.textContent || "");
+        var last = !node.nextSibling || !/\S/.test(node.nextSibling.textContent || "");
+        var fixed = titleCase(node.nodeValue, first, last);
+        if (fixed !== node.nodeValue) { node.nodeValue = fixed; }
+      });
+    }
+
+    function run(root) {
+      if (!root || root.nodeType !== 1) { return; }
+      if (root.matches && root.matches(INCLUDE)) { fixElement(root); }
+      if (root.querySelectorAll) { Array.prototype.forEach.call(root.querySelectorAll(INCLUDE), fixElement); }
+      var up = root.closest ? root.closest(INCLUDE) : null;   // text added inside an existing heading
+      if (up) { fixElement(up); }
+    }
+
+    run(document.body);
+    var queued = false;
+    var added = [];
+    new MutationObserver(function (records) {
+      records.forEach(function (r) {
+        Array.prototype.forEach.call(r.addedNodes, function (n) {
+          added.push(n.nodeType === 1 ? n : n.parentNode);
+        });
+        if (r.type === "characterData" && r.target.parentNode) { added.push(r.target.parentNode); }
+      });
+      if (queued || !added.length) { return; }
+      queued = true;
+      requestAnimationFrame(function () {
+        queued = false;
+        var nodes = added; added = [];
+        nodes.forEach(function (n) { if (n && n.isConnected) { run(n); } });
+      });
+    }).observe(document.body, { childList: true, subtree: true, characterData: true });
+    window.addEventListener("load", function () { run(document.body); });
+  }
+
   function init() {
+    titleCaseHeadings();
     noAutofill();
     customSelects();
     fileWidgets();

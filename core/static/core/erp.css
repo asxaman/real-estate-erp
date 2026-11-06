@@ -12,12 +12,12 @@
   border: 1px solid #9ca3af;
   border-radius: 50%;
   color: #6b7280;
-  font: italic 700 10px/1 Georgia, "Times New Roman", serif;
   vertical-align: middle;
   cursor: help;
   user-select: none;
   transition: background-color .15s ease, border-color .15s ease, color .15s ease;
 }
+.erp-info svg { display: block; }
 .erp-info:hover,
 .erp-info:focus-visible {
   background: #7c3aed;
@@ -703,3 +703,20 @@ html.dark .erp-pick-item:hover, html.dark .erp-pick-item.is-active { background:
 .erp-bulk { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 12px; font-size: 13px; color: #6b7280; }
 .erp-bulk-count { font-weight: 700; color: #1d4ed8; }
 .erp-pager { margin-top: 12px; }
+
+/* ---- Update 24: summary line, tags, search hint, highlight, live-search loading ---- */
+.erp-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 0 0 12px; font-size: 13px; color: #4b5563; }
+html.dark .erp-summary { color: #9ca3af; }
+.erp-summary b { color: #111827; }
+html.dark .erp-summary b { color: #f3f4f6; }
+.erp-tag { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; background: #ede9fe; color: #5b21b6; font-size: 12px; font-weight: 600; text-decoration: none; }
+.erp-tag i { font-style: normal; font-weight: 700; opacity: .7; }
+.erp-tag:hover { background: #ddd6fe; }
+.erp-tag:hover i { opacity: 1; color: #dc2626; }
+html.dark .erp-tag { background: #2e1065; color: #ddd6fe; }
+.erp-hint { margin-left: auto; font-size: 12px; color: #6b7280; }
+.erp-snote { margin: 0 0 10px; padding: 8px 12px; border-radius: 8px; background: #fef3c7; color: #92400e; font-size: 13px; }
+html.dark .erp-snote { background: #3a2a0b; color: #fcd34d; }
+mark.erp-hl { background: #fde68a; color: inherit; border-radius: 3px; padding: 0 1px; }
+html.dark mark.erp-hl { background: #854d0e; color: #fef3c7; }
+.erp-loading { opacity: .55; transition: opacity .15s ease; pointer-events: none; }

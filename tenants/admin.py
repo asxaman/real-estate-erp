@@ -14,6 +14,8 @@ from core.admin_utils import ExportPermissionMixin, TooltipHelpMixin, badge, cir
 from core import sysconf
 from core.formats import fmt_date
 from core.models import AuditEntry
+from core.paging import RowsPerPageMixin
+from core.search import SmartSearchMixin
 from core.widgets import use_file_widget
 from properties import bulk
 from properties.import_admin import ImportMixin
@@ -109,7 +111,7 @@ class FilesFilter(admin.SimpleListFilter):
 
 
 @admin.register(Tenant)
-class TenantAdmin(ImportMixin, ExportPermissionMixin, TooltipHelpMixin, ModelAdmin):
+class TenantAdmin(ImportMixin, ExportPermissionMixin, SmartSearchMixin, RowsPerPageMixin, TooltipHelpMixin, ModelAdmin):
     form = TenantAdminForm
     compressed_fields = True
     list_display = (
@@ -124,6 +126,35 @@ class TenantAdmin(ImportMixin, ExportPermissionMixin, TooltipHelpMixin, ModelAdm
         "name", "code", "email", "phone", "nationality", "emirates_id_number", "passport_number",
         "trade_licence_number", "trn", "contacts__name", "contacts__email", "contacts__mobile", "documents__number",
     )
+    search_text = (
+        "name", "code", "email", "phone", "nationality", "emirates_id_number", "passport_number", "trade_licence_number", "trn",
+    )
+    search_digits = ("phone", "emirates_id_number", "trn")
+    search_related = (
+        (TenantContact, "tenant", ["name", "email", "mobile", "whatsapp"], ["mobile", "whatsapp"]),
+        (TenantDocument, "tenant", ["number"], ["number"]),
+    )
+    search_codes = (("code", "TEN", 4),)
+    search_fuzzy = ("name",)
+    search_hint = "name, code (TEN-12), phone in any format, email, Emirates ID, passport or licence number, nationality"
+
+    def quick_chips(self):
+        from leases.models import Lease
+
+        today = timezone.localdate()
+        soon = today + timedelta(days=sysconf.expiry_days())
+        running = Q(status=Lease.Status.ACTIVE, start_date__lte=today, end_date__gte=today)
+        return [
+            ("active", "Active", "success", Q(is_active=True)),
+            ("inactive", "Inactive", "neutral", Q(is_active=False)),
+            ("blacklisted", "Blacklisted", "danger", Q(is_blacklisted=True)),
+            ("expired", "Expired Documents", "danger", Q(Exists(TenantDocument.objects.filter(tenant=OuterRef("pk"), expiry_date__lt=today)))),
+            ("soon", f"Expiring in {sysconf.expiry_days()} Days", "warning",
+             Q(Exists(TenantDocument.objects.filter(tenant=OuterRef("pk"), expiry_date__gte=today, expiry_date__lte=soon)))),
+            ("renting", "Has a Running Lease", "info", Q(Exists(Lease.objects.filter(running, tenant=OuterRef("pk"))))),
+            ("nolease", "No Lease Yet", "neutral", ~Q(Exists(Lease.objects.filter(tenant=OuterRef("pk"))))),
+        ]
+
     inlines = [TenantContactInline, TenantDocumentInline, TenantLeasesInline, TenantActivityInline]
     make_active, make_inactive = bulk.make_actions("tenants")
     actions = ["export_excel", "export_csv", "make_active", "make_inactive"]

@@ -2,7 +2,8 @@ from datetime import timedelta
 
 from django import forms
 from django.contrib import admin, messages
-from django.db.models import Count, Prefetch, Q, Sum
+from django.db.models import Count, Exists, OuterRef, Prefetch, Q, Sum, Value
+from django.db.models.functions import Concat
 from django.utils import timezone
 from django.utils.html import format_html, format_html_join
 from django.utils.safestring import mark_safe
@@ -11,6 +12,8 @@ from unfold.decorators import display
 
 from core import sysconf
 from core.admin_utils import ExportPermissionMixin, TooltipHelpMixin, badge, circle_avatar, format_amount
+from core.paging import RowsPerPageMixin
+from core.search import SmartSearchMixin
 from core.widgets import use_file_widget
 from leases.inlines import PropertyLeasesInline, UnitLeasesInline
 
@@ -220,7 +223,7 @@ class PropertyAdminForm(forms.ModelForm):
 
 
 @admin.register(Property)
-class PropertyAdmin(ImportMixin, ExportPermissionMixin, TooltipHelpMixin, ModelAdmin):
+class PropertyAdmin(ImportMixin, ExportPermissionMixin, SmartSearchMixin, RowsPerPageMixin, TooltipHelpMixin, ModelAdmin):
     form = PropertyAdminForm
     make_active, make_inactive = bulk.make_actions("properties")
     actions = ["export_excel", "export_csv", "make_active", "make_inactive", "change_owner"]
@@ -276,6 +279,29 @@ class PropertyAdmin(ImportMixin, ExportPermissionMixin, TooltipHelpMixin, ModelA
         "makani_number", "dewa_premise_number",
     )
     list_select_related = ("owner",)
+    search_text = (
+        "name", "code", "owner__name", "community", "address", "title_deed_number", "plot_number",
+        "makani_number", "dewa_premise_number",
+    )
+    search_digits = ("makani_number", "dewa_premise_number")
+    search_fuzzy = ("name", "owner__name")
+    search_hint = "property name or code, owner, area, title deed, plot, Makani or utility number"
+
+    def quick_chips(self):
+        today = timezone.localdate()
+        soon = today + timedelta(days=sysconf.expiry_days())
+        standalone = [t for t in Property.PropertyType.values if t not in Property.BUILDING_TYPES]
+        vacant = Exists(Unit.objects.filter(property=OuterRef("pk"), status=Unit.Status.VACANT)) | Q(
+            property_type__in=standalone, status=Property.Status.VACANT)
+        return [
+            ("buildings", "Buildings", "neutral", Q(property_type__in=Property.BUILDING_TYPES)),
+            ("standalone", "Standalone", "neutral", Q(property_type__in=standalone)),
+            ("vacancies", "With Vacancies", "info", Q(vacant)),
+            ("docs", f"Documents Expiring in {sysconf.expiry_days()} Days", "warning",
+             Q(Exists(PropertyDocument.objects.filter(property=OuterRef("pk"), expiry_date__lte=soon)))),
+            ("inactive", "Inactive", "neutral", Q(is_active=False)),
+        ]
+
     inlines = [UnitInline, PropertyDocumentInline, PropertyLeasesInline, PropertyActivityInline]
 
     def get_changeform_initial_data(self, request):
@@ -473,7 +499,7 @@ class BuildingFilter(admin.RelatedFieldListFilter):
 
 
 @admin.register(Unit)
-class UnitAdmin(ImportMixin, ExportPermissionMixin, TooltipHelpMixin, ModelAdmin):
+class UnitAdmin(ImportMixin, ExportPermissionMixin, SmartSearchMixin, RowsPerPageMixin, TooltipHelpMixin, ModelAdmin):
     actions = ["export_excel", "export_csv"]
     actions_list = ["import_button"]
     import_noun = "units"
@@ -518,6 +544,28 @@ class UnitAdmin(ImportMixin, ExportPermissionMixin, TooltipHelpMixin, ModelAdmin
     list_filter = ("status", "unit_type", ("property", BuildingFilter), "furnished", "view")
     search_fields = ("unit_number", "property__name", "property__code", "dewa_account_number")
     list_select_related = ("property",)
+    search_text = ("unit_number", "property__name", "property__code", "dewa_account_number")
+    search_aliases = {"_ref": Concat("property__code", Value("-"), "unit_number")}
+    search_alias_fields = ("_ref",)
+    search_fuzzy = ("property__name",)
+    search_hint = "unit reference (RMT-101), building name or code, utility account number"
+
+    def quick_chips(self):
+        from leases.models import Lease
+
+        today = timezone.localdate()
+        soon = today + timedelta(days=sysconf.expiry_days())
+        ending = Lease.objects.filter(
+            unit=OuterRef("pk"), status=Lease.Status.ACTIVE, start_date__lte=today, end_date__gte=today, end_date__lte=soon)
+        return [
+            ("vacant", "Vacant", "success", Q(status=Unit.Status.VACANT)),
+            ("occupied", "Occupied", "neutral", Q(status=Unit.Status.OCCUPIED)),
+            ("reserved", "Reserved", "info", Q(status=Unit.Status.RESERVED)),
+            ("maintenance", "Under Maintenance", "warning", Q(status=Unit.Status.MAINTENANCE)),
+            ("ending", f"Lease Ending in {sysconf.expiry_days()} Days", "warning", Q(Exists(ending))),
+            ("neverleased", "Never Leased", "neutral", ~Q(Exists(Lease.objects.filter(unit=OuterRef("pk"))))),
+        ]
+
     inlines = [UnitPhotoInline, UnitDocumentInline, UnitLeasesInline, UnitActivityInline]
 
     _header = (None, {"fields": ("summary_header",)})

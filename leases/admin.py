@@ -9,7 +9,7 @@ from django import forms
 from django.contrib import admin, messages
 from django.core.exceptions import ValidationError
 from django.db.models import Count, DecimalField, Exists, OuterRef, Q, Sum, Value
-from django.db.models.functions import Coalesce
+from django.db.models.functions import Coalesce, Concat
 from django.shortcuts import redirect
 from django.urls import reverse
 from django.utils import timezone
@@ -22,6 +22,8 @@ from core import sysconf
 from core import exports
 from core.admin_utils import ExportPermissionMixin, TooltipHelpMixin, badge, circle_avatar, format_amount
 from core.formats import fmt_date
+from core.paging import RowsPerPageMixin
+from core.search import SmartSearchMixin
 from core.toasts import titled
 from core.widgets import use_file_widget
 from properties.models import Owner, Property, Unit
@@ -442,49 +444,6 @@ class DueMonthFilter(MonthFilter):
     field = "due_date"
 
 
-PER_PAGE_CHOICES = (50, 100, 200)
-_PAGED = {}
-
-
-def paged(base):
-    """A change list class that honours ?per=50|100|200 (rows per page).
-
-    Django treats every unknown address parameter as a database lookup (and redirects with ?e=1), so
-    'per' is taken out of the request while the list is built and put back into every link it makes.
-    """
-    if base not in _PAGED:
-        class Paged(base):
-            def __init__(self, request, *args, **kwargs):
-                self.per = None
-                value = request.GET.get("per", "")
-                if value.isdigit() and int(value) in PER_PAGE_CHOICES:
-                    self.per = int(value)
-                original = request.GET
-                if "per" in original:
-                    clean = original.copy()
-                    clean.pop("per", None)
-                    request.GET = clean
-                try:
-                    super().__init__(request, *args, **kwargs)
-                finally:
-                    request.GET = original
-
-            def get_results(self, request):
-                if self.per:
-                    self.list_per_page = self.per
-                super().get_results(request)
-
-            def get_query_string(self, new_params=None, remove=None):
-                new_params = dict(new_params or {})
-                if self.per and "per" not in new_params and "per" not in (remove or []):
-                    new_params["per"] = self.per
-                return super().get_query_string(new_params, remove)
-
-        Paged.__name__ = Paged.__qualname__ = f"Paged{base.__name__}"
-        _PAGED[base] = Paged
-    return _PAGED[base]
-
-
 def build_filter_bar(cl):
     """The list's filters as drop-downs for the bar above the table (read from the change list's own filters)."""
     bar = []
@@ -497,21 +456,14 @@ def build_filter_bar(cl):
     return bar
 
 
-class FilterBarMixin:
-    """Drop-down filters above the table and a 'rows per page' choice (50 / 100 / 200)."""
-
-    list_per_page = 50
-
-    def get_changelist(self, request, **kwargs):
-        return paged(super().get_changelist(request, **kwargs))
+class FilterBarMixin(SmartSearchMixin, RowsPerPageMixin):
+    """Drop-down filters above the table and a 'rows per page' choice (50 / 100 / 200, default 100)."""
 
     def changelist_view(self, request, extra_context=None):
         response = super().changelist_view(request, extra_context)
         data = getattr(response, "context_data", None)
         if data is not None and data.get("cl") is not None:
-            cl = data["cl"]
-            data["filter_bar"] = build_filter_bar(cl)
-            data["per_options"] = [(n, cl.get_query_string({"per": n}, ["p"]), n == cl.list_per_page) for n in PER_PAGE_CHOICES]
+            data["filter_bar"] = build_filter_bar(data["cl"])
         return response
 
 
@@ -592,6 +544,16 @@ class LeaseAdmin(LeaseApiMixin, ReportsMixin, ExportPermissionMixin, FilterBarMi
         "unit__unit_number", "ejari_number",
     )
     list_select_related = ("tenant", "unit__property", "property")
+    search_text = (
+        "code", "tenant__name", "tenant__code", "tenant__email", "tenant__phone", "property__name", "property__code",
+        "unit__unit_number", "ejari_number",
+    )
+    search_digits = ("tenant__phone",)
+    search_aliases = {"_ref": Concat("unit__property__code", Value("-"), "unit__unit_number")}
+    search_alias_fields = ("_ref",)
+    search_codes = (("code", "LSE", 4),)
+    search_fuzzy = ("tenant__name", "property__name")
+    search_hint = "lease number (LSE-12), tenant name or phone, unit (RMT-101), building, Ejari number"
     inlines = [LeasePaymentInline, DeductionInline, LeaseDocumentInline, NoteInline, LeaseActivityInline]
     actions = ["renew_lease", "rebuild_schedule", "export_excel", "export_csv"]
 
@@ -613,7 +575,7 @@ class LeaseAdmin(LeaseApiMixin, ReportsMixin, ExportPermissionMixin, FilterBarMi
         },
     )
     _fees = (
-        "Deposit, Fees and Ejari",
+        "Deposit, fees and Ejari",
         {
             "classes": ["tab"],
             "fields": (
@@ -983,6 +945,16 @@ class LeasePaymentAdmin(PaymentApiMixin, ExportPermissionMixin, FilterBarMixin, 
         "lease__property__name", "lease__unit__unit_number",
     )
     list_select_related = ("lease__tenant", "lease__unit__property", "lease__property")
+    search_text = (
+        "lease__code", "lease__tenant__name", "lease__tenant__code", "cheque_number", "bank_name",
+        "lease__property__name", "lease__unit__unit_number",
+    )
+    search_digits = ("lease__tenant__phone",)
+    search_aliases = {"_ref": Concat("lease__unit__property__code", Value("-"), "lease__unit__unit_number")}
+    search_alias_fields = ("_ref",)
+    search_codes = (("lease__code", "LSE", 4),)
+    search_fuzzy = ("lease__tenant__name",)
+    search_hint = "lease number (LSE-12), tenant name or phone, cheque number, bank, unit (RMT-101), building"
     actions = ["mark_paid", "mark_bounced", "export_excel", "export_csv"]
     fields = ("lease", "part", "due_date", "amount", "method", "cheque_number", "bank_name", "cheque_date", "deposited_on", "status", "paid_on", "notes")
     readonly_fields = ("lease", "part")

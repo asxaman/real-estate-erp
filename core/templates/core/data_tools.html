@@ -18,6 +18,10 @@
       records that already exist are not duplicated.
       Demo users are created with the password <strong>Demo@12345</strong>.
     </p>
+    <p style="margin: 0 0 16px; opacity: .8;">
+      This also creates a large set for speed and paging tests: about 50 owners, 200+ properties,
+      2,000+ units, 2,000 tenants, 2,000 leases and their rent payments. It can take up to a minute.
+    </p>
     <form method="post">
       {% csrf_token %}
       <input type="hidden" name="action" value="seed">

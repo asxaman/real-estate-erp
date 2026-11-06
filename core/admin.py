@@ -25,6 +25,7 @@ from unfold.forms import AdminPasswordChangeForm, UserChangeForm, UserCreationFo
 
 from . import formats, sysconf
 from .admin_utils import TooltipHelpMixin, avatar_html
+from .paging import RowsPerPageMixin
 from .widgets import use_file_widget
 from .models import PHOTO_VALIDATORS, AuditEntry, SystemSettings, UserProfile
 from .safety import superuser_change_problem, user_delete_problem
@@ -115,7 +116,7 @@ class SafeUserChangeForm(UserChangeForm):
 
 
 @admin.register(User)
-class UserAdmin(SuperuserOnlyMixin, BaseUserAdmin, ModelAdmin):
+class UserAdmin(SuperuserOnlyMixin, RowsPerPageMixin, BaseUserAdmin, ModelAdmin):
     form = SafeUserChangeForm
     add_form = SimpleUserCreationForm
     change_password_form = SimpleAdminPasswordChangeForm
@@ -174,14 +175,13 @@ class GroupAdmin(SuperuserOnlyMixin, BaseGroupAdmin, ModelAdmin):
 
 
 @admin.register(AuditEntry)
-class AuditEntryAdmin(ModelAdmin):
+class AuditEntryAdmin(RowsPerPageMixin, ModelAdmin):
     """Read-only audit log (superusers only). Nobody can edit or delete entries."""
 
     list_display = ("timestamp", "username", "show_action", "model_label", "object_repr", "what_changed")
     list_filter = ("action", "model_label", "username")
     search_fields = ("object_repr", "username")
     date_hierarchy = "timestamp"
-    list_per_page = 50
     fields = ("timestamp", "username", "action", "model_label", "object_repr", "object_id", "changes_detail")
     readonly_fields = fields
 

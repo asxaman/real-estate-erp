@@ -265,13 +265,20 @@ UNFOLD = {
     "SITE_SUBHEADER": "Property management suite",
     "SITE_URL": "/",
     "SHOW_HISTORY": True,
+    # Ctrl+K: finds records (tenants, units, properties, owners, leases, payments) as you type.
+    "COMMAND": {
+        "search_models": False,
+        "search_callback": "core.global_search.search_callback",
+        "show_history": True,
+    },
     "SHOW_VIEW_ON_SITE": False,
     # Our own small style/behaviour layer (info icons, compact forms).
     # Bump the ?v= number whenever these files change so browsers reload them.
-    "STYLES": [lambda request: static("core/erp.css") + "?v=28"],
+    "STYLES": [lambda request: static("core/erp.css") + "?v=30"],
     "SCRIPTS": [
-        lambda request: static("core/erp.js") + "?v=28",
+        lambda request: static("core/erp.js") + "?v=30",
         lambda request: static("core/leases.js") + "?v=4",
+        lambda request: static("core/lists.js") + "?v=1",
     ],
     "SIDEBAR": {
         "show_search": True,

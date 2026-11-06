@@ -4,7 +4,8 @@ from datetime import timedelta
 from django.contrib.auth.models import Group, Permission
 from django.utils import timezone
 
-from core.data_registry import register_eraser, register_seeder
+from core import sample_lists as lists
+from core.data_registry import register_eraser, register_seeder, sample_count
 
 from .models import Tenant, TenantContact, TenantDocument
 
@@ -43,6 +44,67 @@ def seed_tenants() -> str:
     return f"{Tenant.objects.count()} tenants ({created} new)"
 
 
+BULK_MARKER_EMAIL = "tenant0001@example.com"
+EXPIRY_OFFSETS = [-20, 10, 45, 300, 500, 700, 90, 900, 150, 365]  # days from today: expired, soon, later ...
+
+
+def seed_bulk_tenants() -> str:
+    """About 2,000 tenants (85% people, 15% companies), each with a contact and documents. Safe to run twice."""
+    count = sample_count(2000)
+    if not count or Tenant.objects.filter(email=BULK_MARKER_EMAIL).exists():
+        return "skipped (large test data is switched off or already there)"
+    import re
+
+    today = timezone.localdate()
+    D = TenantDocument.DocType
+    T = Tenant.TenantType
+    top = 0
+    for code in Tenant.objects.exclude(code__isnull=True).values_list("code", flat=True):
+        match = re.fullmatch(r"TEN-(\d+)", code)
+        if match:
+            top = max(top, int(match.group(1)))
+    taken = {name.lower() for name in Tenant.objects.values_list("name", flat=True)}
+    firsts, lasts = len(lists.FIRST_NAMES), len(lists.LAST_NAMES)
+    tenants = []
+    for i in range(count):
+        if i % 7 == 6:  # about one in seven is a company
+            kind = T.COMPANY
+            base = f"{lists.COMPANY_STEMS[i % len(lists.COMPANY_STEMS)]} {lists.COMPANY_KINDS[(i // len(lists.COMPANY_STEMS)) % len(lists.COMPANY_KINDS)]} LLC"
+        else:
+            kind = T.INDIVIDUAL
+            pair = (i * 37) % (firsts * lasts)  # 37 shares no factor with the list sizes: every pair is different
+            base = f"{lists.FIRST_NAMES[pair % firsts]} {lists.LAST_NAMES[pair // firsts]}"
+        name, extra = base, 1
+        while name.lower() in taken:
+            extra += 1
+            name = f"{base} {extra}"
+        taken.add(name.lower())
+        top += 1
+        phone = f"+971 {('50', '55', '52', '54', '56')[i % 5]} {100 + (i * 7) % 900} {1000 + (i * 13) % 9000}"
+        tenants.append(Tenant(
+            name=name, tenant_type=kind, code=f"TEN-{top:04d}", email=f"tenant{i + 1:04d}@example.com", phone=phone,
+            nationality="United Arab Emirates" if kind == T.COMPANY else lists.NATIONALITIES[(i * 3) % len(lists.NATIONALITIES)],
+        ))
+    Tenant.objects.bulk_create(tenants, batch_size=1000)
+    TenantContact.objects.bulk_create([
+        TenantContact(tenant=t, name=t.name, role=TenantContact.Role.TENANT, is_primary=True, mobile=t.phone, email=t.email)
+        for t in tenants
+    ], batch_size=1000)
+    documents = []
+    for i, t in enumerate(tenants):
+        expiry = lambda shift=0: today + timedelta(days=EXPIRY_OFFSETS[(i + shift) % len(EXPIRY_OFFSETS)])  # noqa: E731
+        if t.tenant_type == T.COMPANY:
+            documents.append(TenantDocument(tenant=t, doc_type=D.TRADE_LICENCE, number=f"TL-{500000 + i}", expiry_date=expiry()))
+            documents.append(TenantDocument(tenant=t, doc_type=D.VAT_CERTIFICATE, number=f"VAT-{100200300 + i}", expiry_date=expiry(3)))
+        else:
+            documents.append(TenantDocument(tenant=t, doc_type=D.EMIRATES_ID, number=f"784-1985-{2000000 + i:07d}-1", expiry_date=expiry()))
+            documents.append(TenantDocument(tenant=t, doc_type=D.PASSPORT, number=f"P{7000000 + i}", expiry_date=expiry(5)))
+            if i % 3 == 0:
+                documents.append(TenantDocument(tenant=t, doc_type=D.VISA, number=f"201/2025/{300000 + i}", expiry_date=expiry(2)))
+    TenantDocument.objects.bulk_create(documents, batch_size=1000)
+    return f"{len(tenants)} tenants with contacts and {len(documents)} documents added"
+
+
 def _grant_role_permissions():
     def perms(*codenames):
         return Permission.objects.filter(content_type__app_label="tenants", codename__in=codenames)
@@ -69,4 +131,5 @@ def erase_tenants() -> str:
 
 # Seed after properties (order 10); erase before it (reverse order).
 register_seeder("Tenants", seed_tenants, order=20)
+register_seeder("Large test data: tenants", seed_bulk_tenants, order=21)
 register_eraser("Tenants", erase_tenants, order=20)

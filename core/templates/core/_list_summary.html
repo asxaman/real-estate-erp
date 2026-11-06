@@ -1,0 +1,10 @@
+{% if search_hint %}<span hidden data-erp-search-hint="{{ search_hint }}"></span>{% endif %}
+{% if search_note %}<div class="erp-snote">{{ search_note }}</div>{% endif %}
+{% if list_summary %}
+<div class="erp-summary" role="status">
+  <span>Showing <b>{{ list_summary.shown }}</b>{% if list_summary.narrowed %} of <b>{{ list_summary.total }}</b>{% endif %}</span>
+  {% for tag in list_summary.tags %}<a class="erp-tag" href="{{ tag.remove }}" title="Remove this filter">{{ tag.label }} <i>&times;</i></a>{% endfor %}
+  {% if list_summary.narrowed %}<a class="erp-fclear" href="{{ list_summary.clear_url }}">Clear all</a>{% endif %}
+  {% if search_hint %}<span class="erp-hint">Search finds: {{ search_hint }}</span>{% endif %}
+</div>
+{% endif %}

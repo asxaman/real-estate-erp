@@ -1,0 +1,10 @@
+{% if per_options %}
+<div class="erp-fbar" role="group" aria-label="Rows per page">
+  <label class="erp-fsel">
+    <span>Rows per page</span>
+    <select data-erp-nav="1">
+      {% for n, url, selected in per_options %}<option value="{{ url }}"{% if selected %} selected{% endif %}>{{ n }}</option>{% endfor %}
+    </select>
+  </label>
+</div>
+{% endif %}

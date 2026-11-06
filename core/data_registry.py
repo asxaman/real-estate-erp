@@ -34,6 +34,18 @@ class Step:
     order: int
 
 
+# The "large test data" steps (hundreds of properties, thousands of units, tenants and leases) read this
+# number: 1.0 = full size, 0.1 = a tenth of it, 0 = skip them. (Tests set it small.)
+SAMPLE_SCALE = 1.0
+
+
+def sample_count(full: int, minimum: int = 1) -> int:
+    """How many records a large-test-data step creates: `full` at scale 1, never below `minimum`."""
+    if SAMPLE_SCALE <= 0:
+        return 0
+    return max(minimum, int(round(full * SAMPLE_SCALE)))
+
+
 _seeders: dict[str, Step] = {}
 _erasers: dict[str, Step] = {}
 

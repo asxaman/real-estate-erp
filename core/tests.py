@@ -1,6 +1,8 @@
 """Automated checks for users, the audit log and the data tools. Run:  python manage.py test"""
 from decimal import Decimal
 
+from unittest import mock
+
 from django.contrib import admin
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
@@ -123,7 +125,8 @@ class AuditTrail(TestCase):
 
 class DataTools(TestCase):
     def test_seed_then_erase_keeps_company_owner_and_does_not_flood_the_log(self):
-        run_seeders()
+        with mock.patch("core.data_registry.SAMPLE_SCALE", 0):  # only the small sample set, not the large test data
+            run_seeders()
         self.assertEqual(Property.objects.count(), 12)
         self.assertEqual(Unit.objects.count(), 80)
         self.assertEqual(Owner.objects.count(), 4)  # three owners + Company Owned

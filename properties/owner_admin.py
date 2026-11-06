@@ -5,7 +5,7 @@ from django import forms
 from django.contrib import admin, messages
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
-from django.db.models import Count, IntegerField, OuterRef, Q, Subquery, Sum, Value
+from django.db.models import Count, Exists, IntegerField, OuterRef, Q, Subquery, Sum, Value
 from django.db.models.functions import Coalesce
 from django.forms.models import BaseInlineFormSet
 from django.shortcuts import redirect, render
@@ -21,6 +21,8 @@ from core import sysconf
 from core.formats import fmt_date
 from core.models import AuditEntry
 from core.toasts import titled
+from core.paging import RowsPerPageMixin
+from core.search import SmartSearchMixin
 from core.widgets import use_file_widget
 
 from . import bulk, owner_tools
@@ -308,7 +310,7 @@ class OwnerAdminForm(forms.ModelForm):
 
 
 @admin.register(Owner)
-class OwnerAdmin(ImportMixin, ExportPermissionMixin, TooltipHelpMixin, ModelAdmin):
+class OwnerAdmin(ImportMixin, ExportPermissionMixin, SmartSearchMixin, RowsPerPageMixin, TooltipHelpMixin, ModelAdmin):
     form = OwnerAdminForm
     compressed_fields = True
     list_display = (
@@ -321,6 +323,31 @@ class OwnerAdmin(ImportMixin, ExportPermissionMixin, TooltipHelpMixin, ModelAdmi
         "name", "code", "email", "phone",
         "contacts__name", "contacts__email", "contacts__mobile", "documents__number",
     )
+    search_text = ("name", "code", "email", "phone", "address", "trn")
+    search_digits = ("phone", "trn")
+    search_related = (
+        (OwnerContact, "owner", ["name", "email", "mobile", "whatsapp"], ["mobile", "whatsapp"]),
+        (OwnerDocument, "owner", ["number"], ["number"]),
+    )
+    search_codes = (("code", "OWN", 4),)
+    search_fuzzy = ("name",)
+    search_hint = "name, code (OWN-12), phone in any format, email, Emirates ID or licence number, contact name"
+
+    def quick_chips(self):
+        today = timezone.localdate()
+        soon = today + timedelta(days=sysconf.expiry_days())
+        vacant = Exists(Unit.objects.filter(property__owner=OuterRef("pk"), status=Unit.Status.VACANT)) | Exists(
+            Property.objects.filter(owner=OuterRef("pk"), property_type__in=STANDALONE_TYPES, status=Property.Status.VACANT))
+        return [
+            ("active", "Active", "success", Q(is_active=True)),
+            ("inactive", "Inactive", "neutral", Q(is_active=False)),
+            ("expired", "Expired Documents", "danger", Q(Exists(OwnerDocument.objects.filter(owner=OuterRef("pk"), expiry_date__lt=today)))),
+            ("soon", f"Expiring in {sysconf.expiry_days()} Days", "warning",
+             Q(Exists(OwnerDocument.objects.filter(owner=OuterRef("pk"), expiry_date__gte=today, expiry_date__lte=soon)))),
+            ("vacancies", "With Vacancies", "info", Q(vacant)),
+            ("noprops", "No Properties", "neutral", ~Q(Exists(Property.objects.filter(owner=OuterRef("pk"))))),
+        ]
+
     inlines = [ContactInline, PropertyListInline, DocumentInline, BankInline, ActivityInline]
     make_active, make_inactive = bulk.make_actions("owners")
     actions = ["export_excel", "export_csv", "make_active", "make_inactive"]

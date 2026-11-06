@@ -160,7 +160,7 @@ class ReportsMixin:
             "paid": sum((r["paid"] for r in rows), ZERO), "overdue": sum((r["overdue"] for r in rows), ZERO),
         }
         per = request.GET.get("per", "")
-        per = int(per) if per.isdigit() and int(per) in (50, 100, 200) else 50
+        per = int(per) if per.isdigit() and int(per) in (50, 100, 200) else 100
         page = Paginator(rows, per).get_page(request.GET.get("page"))
         base = {k: v for k, v in (("q", search), ("per", per)) if v}
         link = lambda **extra: "?" + urlencode({**base, **extra})  # noqa: E731

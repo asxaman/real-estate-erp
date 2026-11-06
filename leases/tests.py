@@ -10,7 +10,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from core.models import AuditEntry
-from properties.models import Property, Unit
+from properties.models import Owner, Property, Unit
 from properties.tests import building, make_owner, standalone, unit
 from tenants.models import Tenant
 
@@ -1128,13 +1128,13 @@ class ScaleTools(Setup):
     def test_rows_per_page_choice(self):
         url = self.url("leasepayment_changelist")
         page = self.client.get(url)
-        self.assertEqual(page.context["cl"].list_per_page, 50)
+        self.assertEqual(page.context["cl"].list_per_page, 100)
         self.assertEqual([n for n, _, _ in page.context["per_options"]], [50, 100, 200])
-        for n in (100, 200):
+        for n in (50, 200):
             reply = self.client.get(url, {"per": n})
             self.assertEqual(reply.status_code, 200)
             self.assertEqual(reply.context["cl"].list_per_page, n)
-        self.assertEqual(self.client.get(url, {"per": "7"}).context["cl"].list_per_page, 50)
+        self.assertEqual(self.client.get(url, {"per": "7"}).context["cl"].list_per_page, 100)
         self.assertEqual(self.client.get(url, {"per": "abc"}).status_code, 200)
         self.assertEqual(self.client.get(self.url("lease_changelist"), {"per": 100}).context["cl"].list_per_page, 100)
 
@@ -1177,11 +1177,12 @@ class ScaleTools(Setup):
         for number in range(54):
             make_lease(make_tenant(f"Roll Tenant {number:02d}"), unit(self.tower, f"8{number:02d}"), rent="1000")
         url = self.url("lease_rentroll")
-        first = self.client.get(url)
+        self.assertEqual(len(self.client.get(url).context["rows"]), 55)  # the default is 100 per page
+        first = self.client.get(url, {"per": 50})
         self.assertEqual(len(first.context["rows"]), 50)
         self.assertEqual(first.context["total_rows"], 55)
         self.assertEqual(first.context["totals"]["rent"], Decimal("55000.00"))
-        second = self.client.get(url, {"page": 2})
+        second = self.client.get(url, {"per": 50, "page": 2})
         self.assertEqual(len(second.context["rows"]), 5)
         self.assertEqual(len(self.client.get(url, {"per": 100}).context["rows"]), 55)
         self.assertEqual(self.client.get(url, {"page": "zzz"}).status_code, 200)
@@ -1306,3 +1307,194 @@ class SameLookEverywhere(Setup):
         js = (Path(__file__).resolve().parent.parent / "core" / "static" / "core" / "erp.js").read_text(encoding="utf-8")
         self.assertIn("function noAutofill", js)
         self.assertIn("noAutofill();", js)
+
+    def test_title_case_helper_is_shipped(self):
+        from pathlib import Path
+        js = (Path(__file__).resolve().parent.parent / "core" / "static" / "core" / "erp.js").read_text(encoding="utf-8")
+        self.assertIn("function titleCaseHeadings", js)
+        self.assertIn("window.erpTitleCase", js)
+        self.assertIn("titleCaseHeadings();", js)
+
+
+class LargeTestData(TestCase):
+    """Update 24: the large test-data seeder (run here at a tenth of its size) and 100 rows per page everywhere."""
+
+    def setUp(self):
+        from unittest import mock
+
+        patcher = mock.patch("core.data_registry.SAMPLE_SCALE", 0.1)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.boss = get_user_model().objects.create_superuser("bigboss", "bb@example.com", "Pass-word1!")
+        self.client.force_login(self.boss)
+
+    def test_seed_builds_consistent_data_and_runs_twice_without_doubling(self):
+        from core.data_registry import run_seeders
+
+        run_seeders()
+        counts = (Owner.objects.count(), Property.objects.count(), Unit.objects.count(), Tenant.objects.count(),
+                  Lease.objects.count(), LeasePayment.objects.count())
+        owners, properties, units, tenants, leases, payments = counts
+        self.assertGreater(owners, 4)
+        self.assertGreater(properties, 30)
+        self.assertGreater(units, 150)
+        self.assertGreater(tenants, 150)
+        self.assertGreater(leases, 150)
+        self.assertGreater(payments, leases)
+        run_seeders()
+        self.assertEqual(counts, (Owner.objects.count(), Property.objects.count(), Unit.objects.count(),
+                                  Tenant.objects.count(), Lease.objects.count(), LeasePayment.objects.count()))
+        # nobody rents the same unit twice, every schedule adds up, and statuses already agree with the leases
+        self.assertEqual(Lease.objects.filter(unit__isnull=False).values("unit").distinct().count(),
+                         Lease.objects.filter(unit__isnull=False).count())
+        for lease in Lease.objects.filter(ejari_number__startswith="BULK-", status=Lease.Status.ACTIVE)[:40]:
+            self.assertEqual(sum(p.amount for p in lease.payments.all()), lease.annual_rent)
+        self.assertEqual(occupancy.refresh_all(), 0)
+        self.assertTrue(LeasePayment.objects.filter(status=LeasePayment.Status.PENDING, due_date__lt=timezone.localdate()).exists())
+        self.assertTrue(Unit.objects.filter(status=Unit.Status.OCCUPIED).exists())
+        self.assertTrue(Unit.objects.filter(status=Unit.Status.VACANT).exists())
+
+    def test_seed_is_off_at_scale_zero(self):
+        from unittest import mock
+
+        from core.data_registry import run_seeders
+
+        with mock.patch("core.data_registry.SAMPLE_SCALE", 0):
+            run_seeders()
+        self.assertEqual(Property.objects.count(), 12)
+        self.assertEqual(Lease.objects.filter(ejari_number__startswith="BULK-").count(), 0)
+
+    def test_every_list_shows_100_rows_by_default_with_a_rows_per_page_choice(self):
+        for name in ("properties_owner_changelist", "properties_property_changelist", "properties_unit_changelist",
+                     "tenants_tenant_changelist", "leases_lease_changelist", "leases_leasepayment_changelist",
+                     "core_auditentry_changelist", "auth_user_changelist"):
+            url = reverse(f"admin:{name}")
+            page = self.client.get(url)
+            self.assertEqual(page.status_code, 200, name)
+            self.assertEqual(page.context["cl"].list_per_page, 100, name)
+            self.assertEqual([n for n, _, _ in page.context["per_options"]], [50, 100, 200], name)
+            self.assertEqual(self.client.get(url, {"per": 200}).context["cl"].list_per_page, 200, name)
+            self.assertContains(page, "Rows per page")
+
+
+class SmartSearchTools(Setup):
+    """Update 24: smart search (phones, IDs, codes, unit references, typos), quick-filter chips, summary line, Ctrl+K search."""
+
+    def setUp(self):
+        super().setUp()
+        self.boss = get_user_model().objects.create_superuser("searchboss", "sb2@example.com", "Pass-word1!")
+        self.client.force_login(self.boss)
+        self.today = timezone.localdate()
+
+    def url(self, name):
+        return reverse(f"admin:{name}")
+
+    def names(self, name, **params):
+        reply = self.client.get(self.url(name), params)
+        self.assertEqual(reply.status_code, 200, params)
+        return reply, [str(obj) for obj in reply.context["cl"].result_list]
+
+    def test_phone_numbers_are_found_in_any_format(self):
+        from tenants.models import Tenant
+
+        Tenant.objects.create(name="Phone Person", email="pp@example.com", phone="+971 50 123 4567")
+        Tenant.objects.create(name="Other Person", email="op@example.com", phone="+971 55 999 8888")
+        for query in ("0501234567", "+971501234567", "971-50-123-4567", "123 4567", "501234567"):
+            self.assertEqual(self.names("tenants_tenant_changelist", q=query)[1], ["Phone Person"], query)
+
+    def test_id_numbers_codes_and_contacts_are_found_without_duplicates(self):
+        from tenants.models import Tenant, TenantContact, TenantDocument
+
+        person = Tenant.objects.create(name="Id Person", email="id@example.com", phone="+971 50 000 0000")
+        TenantDocument.objects.create(tenant=person, doc_type="emirates_id", number="784-1985-1234567-1")
+        for _ in range(2):
+            TenantContact.objects.create(tenant=person, name="Same Contact", mobile="+971 52 111 2222")
+        self.assertEqual(self.names("tenants_tenant_changelist", q="784198512")[1], ["Id Person"])
+        self.assertEqual(self.names("tenants_tenant_changelist", q="Same Contact")[1], ["Id Person"])  # two matching contacts, one row
+        self.assertEqual(self.names("tenants_tenant_changelist", q="0521112222")[1], ["Id Person"])
+        number = int(person.code.split("-")[1])
+        self.assertEqual(self.names("tenants_tenant_changelist", q=f"ten{number}")[1], ["Id Person"])
+
+    def test_unit_reference_lease_code_and_payments_search(self):
+        other = unit(building("LSX"), "202")
+        lease = make_lease(self.tenant, self.flat)
+        self.assertEqual(self.names("properties_unit_changelist", q="LSB-101")[1], [str(self.flat)])
+        self.assertEqual(self.names("properties_unit_changelist", q="lsb-1")[1], [str(self.flat)])
+        self.assertEqual(self.names("properties_unit_changelist", q="LSX 202")[1], [str(other)])
+        number = int(lease.code.split("-")[1])
+        self.assertEqual(len(self.names("leases_lease_changelist", q=f"lse{number}")[1]), 1)
+        self.assertEqual(len(self.names("leases_leasepayment_changelist", q=f"LSE-{number}")[1]), 4)
+        self.assertEqual(len(self.names("leases_lease_changelist", q="LSB-101")[1]), 1)
+
+    def test_typos_show_similar_names_with_a_note(self):
+        from tenants.models import Tenant
+
+        Tenant.objects.create(name="Khalid Al Mansoori", email="km@example.com", phone="+971 50 000 0001")
+        Tenant.objects.create(name="Someone Else", email="se@example.com", phone="+971 50 000 0002")
+        reply, found = self.names("tenants_tenant_changelist", q="Mansoury")
+        self.assertEqual(found, ["Khalid Al Mansoori"])
+        self.assertIn("similar", reply.context["search_note"])
+        reply, found = self.names("tenants_tenant_changelist", q="Mansoori")
+        self.assertEqual(found, ["Khalid Al Mansoori"])
+        self.assertEqual(reply.context["search_note"], "")
+        self.assertEqual(self.names("tenants_tenant_changelist", q="zzzzzzzz")[1], [])
+
+    def test_quick_chips_count_and_filter(self):
+        from tenants.models import Tenant, TenantDocument
+
+        expired = Tenant.objects.create(name="Expired Doc", email="ed@example.com", phone="+971 50 000 0003")
+        TenantDocument.objects.create(tenant=expired, doc_type="emirates_id", number="1", expiry_date=self.today - timedelta(days=5))
+        make_lease(self.tenant, self.flat)
+        reply, found = self.names("tenants_tenant_changelist")
+        chips = {c["label"]: c for c in reply.context["quick_chips"]}
+        self.assertEqual(chips["Expired Documents"]["count"], 1)
+        self.assertEqual(chips["Has a Running Lease"]["count"], 1)
+        self.assertEqual(self.names("tenants_tenant_changelist", chip="expired")[1], ["Expired Doc"])
+        self.assertEqual(self.names("tenants_tenant_changelist", chip="renting")[1], [self.tenant.name])
+        self.assertEqual(len(self.names("tenants_tenant_changelist", chip="nonsense")[1]), 2)
+        for name, chip in (("properties_unit_changelist", "vacant"), ("properties_unit_changelist", "ending"),
+                           ("properties_property_changelist", "vacancies"), ("properties_owner_changelist", "vacancies"),
+                           ("properties_owner_changelist", "soon"), ("properties_property_changelist", "docs")):
+            self.assertEqual(self.client.get(self.url(name), {"chip": chip}).status_code, 200, (name, chip))
+        # the chip is kept in the links of the page (paging, rows per page, search)
+        page = self.client.get(self.url("tenants_tenant_changelist"), {"chip": "expired", "per": 50})
+        self.assertTrue(all("chip=expired" in url for _n, url, _sel in page.context["per_options"]))
+
+    def test_summary_line_shows_what_is_narrowing_the_list(self):
+        make_lease(self.tenant, self.flat)
+        reply = self.client.get(self.url("properties_unit_changelist"), {"q": "LSB", "chip": "occupied"})
+        summary = reply.context["list_summary"]
+        self.assertTrue(summary["narrowed"])
+        labels = [t["label"] for t in summary["tags"]]
+        self.assertIn("Occupied", labels)
+        self.assertTrue(any(label.startswith("Search") for label in labels))
+        self.assertEqual(summary["total"], Unit.objects.count())
+        plain = self.client.get(self.url("properties_unit_changelist")).context["list_summary"]
+        self.assertFalse(plain["narrowed"])
+        self.assertContains(reply, "Clear all")
+        self.assertContains(reply, "data-erp-search-hint")
+
+    def test_global_search_finds_records_and_respects_permissions(self):
+        from django.test import RequestFactory
+
+        from core.global_search import search_callback
+
+        make_lease(self.tenant, self.flat)
+        request = RequestFactory().get("/")
+        request.user = self.boss
+        results = search_callback(request, "LSB-101")
+        self.assertTrue(any("LSB-101" in r.title for r in results))
+        self.assertTrue(all(r.link.startswith("/") for r in results))
+        self.assertEqual(search_callback(request, "x"), [])
+        nobody = get_user_model().objects.create_user("nobody", password="Pass-word1!", is_staff=True)
+        request.user = nobody
+        self.assertEqual(search_callback(request, "LSB-101"), [])
+
+    def test_pieces_are_shipped(self):
+        from pathlib import Path
+
+        from django.conf import settings
+
+        js = (Path(__file__).resolve().parent.parent / "core" / "static" / "core" / "lists.js").read_text(encoding="utf-8")
+        self.assertIn("erp-hl", js)
+        self.assertEqual(settings.UNFOLD["COMMAND"]["search_callback"], "core.global_search.search_callback")

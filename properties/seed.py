@@ -5,9 +5,11 @@ from decimal import Decimal
 from django.contrib.auth.models import Group, Permission
 from django.utils import timezone
 
-from core.data_registry import register_eraser, register_seeder
+from core import sample_lists as lists
+from core.data_registry import register_eraser, register_seeder, sample_count
 
 from .models import Owner, OwnerBankAccount, OwnerContact, OwnerDocument, Property, Unit
+from .models_constants import floor_sort_key
 
 U = Unit.UnitType
 
@@ -177,6 +179,154 @@ def seed_properties() -> str:
     )
 
 
+# ---------------------------------------------------------------------------------------
+# Large test data: about 50 owners, 200+ properties and 2,000+ units (for testing speed and paging).
+# It is made with bulk inserts, so it takes seconds, not minutes. Safe to run twice (it checks a marker).
+# ---------------------------------------------------------------------------------------
+BULK_MARKER_EMAIL = "owner001@example.com"
+# (floors, units per floor) for the sample buildings: 24 to 40 units each
+BUILDING_SHAPES = [(6, 4), (8, 4), (10, 4), (12, 3), (5, 5), (7, 5), (9, 4), (6, 6)]
+EXPIRY_OFFSETS = [-30, 15, 40, 200, 400, 800, 120, 600]  # days from today: expired, soon, later ...
+
+
+def _next_number(model, prefix):
+    import re
+
+    top = 0
+    for code in model.objects.exclude(code__isnull=True).values_list("code", flat=True):
+        match = re.fullmatch(prefix + r"-(\d+)", code)
+        if match:
+            top = max(top, int(match.group(1)))
+    return top
+
+
+def _phone(n):
+    return f"+971 {('50', '55', '52', '54', '56')[n % 5]} {100 + (n * 7) % 900} {1000 + (n * 13) % 9000}"
+
+
+def seed_bulk_properties() -> str:
+    owner_count = sample_count(52)
+    if not owner_count or Owner.objects.filter(email=BULK_MARKER_EMAIL).exists():
+        return "skipped (large test data is switched off or already there)"
+    today = timezone.localdate()
+    S = Property.Status
+    T = Property.PropertyType
+    F = Property.FeeType
+    taken = {name.lower() for name in Owner.objects.values_list("name", flat=True)}
+
+    # ---- owners ----------------------------------------------------------------
+    owners, number = [], _next_number(Owner, "OWN")
+    for i in range(owner_count):
+        if i % 4 == 3:  # every fourth owner is a company
+            kind = Owner.OwnerType.COMPANY
+            base = f"{lists.COMPANY_STEMS[i % len(lists.COMPANY_STEMS)]} {lists.COMPANY_KINDS[(i // 4) % len(lists.COMPANY_KINDS)]} LLC"
+        else:
+            kind = Owner.OwnerType.INDIVIDUAL
+            base = f"{lists.FIRST_NAMES[(i * 7) % len(lists.FIRST_NAMES)]} {lists.LAST_NAMES[(i * 5 + i // 40) % len(lists.LAST_NAMES)]}"
+        name, extra = base, 1
+        while name.lower() in taken:
+            extra += 1
+            name = f"{base} {extra}"
+        taken.add(name.lower())
+        number += 1
+        owners.append(Owner(
+            name=name, owner_type=kind, code=f"OWN-{number:04d}", email=f"owner{i + 1:03d}@example.com", phone=_phone(i),
+            address="Abu Dhabi, United Arab Emirates" if i % 2 == 0 else "Dubai, United Arab Emirates",
+        ))
+    Owner.objects.bulk_create(owners)
+    D = OwnerDocument.DocType
+    OwnerContact.objects.bulk_create([
+        OwnerContact(owner=o, name=o.name, role=OwnerContact.Role.OWNER, is_primary=True, mobile=o.phone, email=o.email)
+        for o in owners
+    ])
+    OwnerDocument.objects.bulk_create([
+        OwnerDocument(
+            owner=o, doc_type=D.TRADE_LICENCE if o.owner_type == Owner.OwnerType.COMPANY else D.EMIRATES_ID,
+            number=f"CN-{2000000 + i}" if o.owner_type == Owner.OwnerType.COMPANY else f"784-1975-{1000000 + i:07d}-1",
+            expiry_date=today + timedelta(days=EXPIRY_OFFSETS[i % len(EXPIRY_OFFSETS)]),
+        )
+        for i, o in enumerate(owners)
+    ])
+
+    # ---- properties --------------------------------------------------------------
+    building_count = sample_count(70)
+    standalone_count = sample_count(140)
+    names_taken = set()
+
+    def fee(owner):
+        return {"management_fee_type": F.PERCENT, "management_fee_percent": Decimal(4 + len(owner.name) % 4)}
+
+    props = []
+    shapes = {}
+    for i in range(building_count):
+        owner = owners[i % len(owners)]
+        commercial = i % 5 == 4
+        area, emirate = lists.AREAS[i % len(lists.AREAS)]
+        kinds = lists.COMMERCIAL_KINDS if commercial else lists.BUILDING_KINDS
+        base = f"{lists.BUILDING_STEMS[i % len(lists.BUILDING_STEMS)]} {kinds[(i // len(lists.BUILDING_STEMS)) % len(kinds)]}"
+        name = base if base not in names_taken else f"{base} {i + 1}"
+        names_taken.add(name)
+        floors, per_floor = (5, 5) if commercial else BUILDING_SHAPES[i % len(BUILDING_SHAPES)]
+        code = f"B{i + 1:03d}"
+        shapes[code] = (floors, per_floor, commercial)
+        props.append(Property(
+            code=code, name=name, owner=owner, emirate=emirate, address=f"{area}, {emirate.replace('_', ' ').title()}",
+            property_type=T.COMMERCIAL_BUILDING if commercial else T.RESIDENTIAL_BUILDING,
+            year_built=2005 + i % 19, total_floors=floors - 1 if commercial else floors, status="", **fee(owner),
+        ))
+    standalone_types = [
+        (T.VILLA, 190000, "Villa"), (T.SHOP, 110000, "Retail Shop"), (T.WAREHOUSE, 150000, "Warehouse"),
+        (T.APARTMENT, 70000, "Apartment"), (T.PARKING_SPOT, 12000, "Parking Spot"), (T.YARD, 90000, "Storage Yard"),
+    ]
+    for i in range(standalone_count):
+        owner = owners[(i * 3) % len(owners)]
+        kind, rent, label = standalone_types[i % len(standalone_types)]
+        area, emirate = lists.AREAS[(i * 5) % len(lists.AREAS)]
+        extra = {}
+        if kind == T.VILLA:
+            extra = {"year_built": 2015 + i % 9, "total_floors": 2}
+        elif kind == T.APARTMENT:
+            extra = {"apartment_type": "1br" if i % 2 else "2br", "bathrooms": 2}
+        props.append(Property(
+            code=f"S{i + 1:04d}", name=f"{label} {i + 1:03d} - {area}", owner=owner, emirate=emirate, address=f"{area}, {emirate.replace('_', ' ').title()}",
+            property_type=kind, annual_rent=Decimal(rent + (i % 9) * 3000), status=S.VACANT, **extra, **fee(owner),
+        ))
+    Property.objects.bulk_create(props)
+
+    # ---- units -------------------------------------------------------------------
+    units = []
+    residential = [U.STUDIO, U.ONE_BR, U.ONE_BR, U.TWO_BR, U.TWO_BR, U.THREE_BR]
+    counter = 0
+    for prop in props:
+        if prop.code not in shapes:
+            continue
+        floors, per_floor, commercial = shapes[prop.code]
+        floor_numbers = range(0, floors) if commercial else range(1, floors + 1)
+        for floor in floor_numbers:
+            for k in range(1, per_floor + 1):
+                counter += 1
+                if commercial:
+                    unit_type = U.SHOP if floor == 0 else U.OFFICE
+                    number = f"G{k:02d}" if floor == 0 else f"{floor}{k:02d}"
+                else:
+                    unit_type = residential[(k + floor) % len(residential)]
+                    number = f"{floor}{k:02d}"
+                baths, area_sqft, rent = UNIT_SPECS[unit_type]
+                # Under maintenance / reserved are fixed here; the leases step marks the rest Occupied or Vacant.
+                state = S.MAINTENANCE if counter % 23 == 22 else S.RESERVED if counter % 31 == 30 else S.VACANT
+                floor_code = "G" if floor == 0 else str(floor)
+                units.append(Unit(
+                    property=prop, unit_number=number, floor=floor_code, floor_sort=floor_sort_key(floor_code),
+                    unit_type=unit_type, bathrooms=baths, area_sqft=Decimal(area_sqft + (counter % 7) * 25),
+                    furnished=counter % 6 == 0, status=state, asking_rent=Decimal(rent + floor * 900 + (counter % 5) * 1000),
+                ))
+    Unit.objects.bulk_create(units, batch_size=1000)
+    return (
+        f"{len(owners)} owners, {len(props)} properties ({building_count} buildings, {standalone_count} standalone), "
+        f"{len(units)} units added"
+    )
+
+
 def _seed_owner_details(owners):
     """Sample contacts, documents (valid / expiring / expired) and a bank account."""
     today = timezone.localdate()
@@ -246,4 +396,5 @@ def erase_properties() -> str:
 
 # Seed after core (order 0); erase before core thanks to reverse ordering.
 register_seeder("Properties & units", seed_properties, order=10)
+register_seeder("Large test data: owners, properties and units", seed_bulk_properties, order=11)
 register_eraser("Properties & units", erase_properties, order=10)
