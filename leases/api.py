@@ -315,7 +315,7 @@ class PaymentApiMixin:
             with transaction.atomic():
                 # Lock the payment, so two people (or a double click) cannot record it twice.
                 payment = get_object_or_404(LeasePayment.objects.select_for_update().select_related("lease"), pk=pk)
-                if action != "bounced" and payment.status == LeasePayment.Status.PAID:
+                if action not in ("bounced", "waived") and payment.status == LeasePayment.Status.PAID:
                     raise ValidationError(
                         f"{payment.label} of {payment.lease.code} is already recorded as paid"
                         f"{' on ' + fmt_date(payment.paid_on) if payment.paid_on else ''}. Refresh the page."
@@ -329,6 +329,12 @@ class PaymentApiMixin:
                         request,
                         f"{payment.label} of {payment.lease.code}: the cheque is held, not cashed (AED {format_amount(payment.total)}).",
                         extra_tags=titled("Cheque held"),
+                    )
+                elif action == "waived":
+                    payment.waive()
+                    messages.success(
+                        request, f"{payment.label} of {payment.lease.code} was waived (written off).",
+                        extra_tags=titled("Payment waived"),
                     )
                 elif action == "bounced":
                     payment.bounce()

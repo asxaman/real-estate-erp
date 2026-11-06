@@ -291,6 +291,7 @@ class PropertyAdmin(PhotoUploadMixin, ImportMixin, ExportPermissionMixin, SmartS
         "unit_count",
         "vacant_count",
         "rent_aed",
+        "show_status",
         "is_active",
     )
     list_filter = ("property_type", "emirate", "is_active", "owner")
@@ -477,6 +478,19 @@ class PropertyAdmin(PhotoUploadMixin, ImportMixin, ExportPermissionMixin, SmartS
     @admin.display(description="Annual rent (AED)", ordering="annual_rent")
     def rent_aed(self, obj):
         return format_amount(obj.annual_rent) if not obj.has_units else "-"
+
+    @display(
+        description="Status",
+        ordering="status",
+        label={
+            Property.Status.VACANT.label: "info",
+            Property.Status.OCCUPIED.label: "success",
+            Property.Status.RESERVED.label: "warning",
+            Property.Status.MAINTENANCE.label: "danger",
+        },
+    )
+    def show_status(self, obj):
+        return (obj.get_status_display() or "-") if not obj.has_units else "-"
 
 
 class UnitAdminForm(UnitBaseForm):

@@ -3,11 +3,14 @@ import io
 import json
 from pathlib import Path
 
+from datetime import timedelta
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.urls import reverse
+from django.utils import timezone
 from PIL import Image
 
 from core import banks
@@ -15,6 +18,7 @@ from core.models import Bank
 from properties.models import PropertyPhoto, UnitPhoto
 
 from .test_charges import full_lease
+from properties.tests import building
 from .tests import Setup
 
 
@@ -228,3 +232,170 @@ class Update31(Setup):
         self.assertTrue(reply.json()["ok"])
         lease.refresh_from_db()
         self.assertEqual(lease.annual_rent, Decimal("13500.00"))
+
+
+class Update32(Setup):
+    def setUp(self):
+        super().setUp()
+        self.boss = get_user_model().objects.create_superuser("u32", "u32@example.com", "Pass-word1!")
+        self.client.force_login(self.boss)
+
+    # dates
+    def test_moving_the_start_date_moves_the_pending_payments(self):
+        lease = full_lease(self)
+        before = {p.pk: p.due_date for p in lease.payments.all()}
+        lease.start_date += timedelta(days=10)
+        lease.end_date += timedelta(days=10)
+        lease.clean()
+        lease.save()
+        for payment in lease.payments.all():
+            if payment.kind == "rent":
+                self.assertEqual(payment.due_date, before[payment.pk] + timedelta(days=10))
+            else:
+                self.assertEqual(payment.due_date, lease.start_date)
+
+    def test_dates_are_fixed_once_money_is_received(self):
+        lease = full_lease(self)
+        lease.payments.filter(kind="rent").order_by("part").first().record(timezone.localdate(), "cash")
+        lease.start_date += timedelta(days=3)
+        with self.assertRaises(ValidationError) as caught:
+            lease.clean()
+        self.assertIn("start_date", caught.exception.message_dict)
+        page = self.client.get(reverse("admin:leases_lease_change", args=[lease.pk]))
+        self.assertNotContains(page, 'name="start_date"')
+        self.assertContains(page, "dates are fixed too")
+
+    # termination
+    def test_terminating_updates_the_annual_rent(self):
+        lease = full_lease(self)
+        lease.terminate(lease.start_date + timedelta(days=100), "Tenant left")
+        lease.refresh_from_db()
+        self.assertEqual(lease.annual_rent, sum(p.amount for p in lease.payments.filter(kind="rent")))
+        self.assertLess(lease.annual_rent, Decimal("18000.00"))
+
+    # renewal and the deposit
+    def test_renewal_does_not_ask_for_a_received_deposit_again(self):
+        lease = full_lease(self)
+        lease.payments.get(kind="deposit").record(timezone.localdate(), "cash")
+        new = lease.renew()
+        self.assertEqual(new.security_deposit, 0)
+        self.assertFalse(new.payments.filter(kind="deposit").exists())
+
+    def test_renewal_still_asks_for_a_deposit_that_was_never_received(self):
+        lease = full_lease(self)
+        new = lease.renew()
+        self.assertEqual(new.payments.get(kind="deposit").amount, Decimal("5000.00"))
+
+    # switching things off
+    def test_a_tenant_or_property_with_a_running_lease_cannot_be_made_inactive(self):
+        full_lease(self)
+        self.tenant.is_active = False
+        with self.assertRaises(ValidationError) as caught:
+            self.tenant.clean()
+        self.assertIn("is_active", caught.exception.message_dict)
+        self.tower.is_active = False
+        with self.assertRaises(ValidationError) as caught:
+            self.tower.clean()
+        self.assertIn("is_active", caught.exception.message_dict)
+
+    def test_a_tenant_without_a_running_lease_can_be_made_inactive(self):
+        lease = full_lease(self)
+        lease.terminate(lease.start_date + timedelta(days=100), "Left")
+        self.tenant.is_active = False
+        self.tenant.inactive_reason = "Moved away"
+        self.tenant.clean()
+
+    # waiving
+    def test_an_overdue_payment_can_be_waived_and_stops_counting_as_late(self):
+        lease = full_lease(self)
+        payment = lease.payments.filter(kind="rent").order_by("part").first()
+        self.assertTrue(payment.is_overdue())
+        reply = self.client.post(reverse("admin:leases_leasepayment_record", args=[payment.pk]), {"action": "waived"})
+        self.assertTrue(reply.json()["ok"], reply.json())
+        payment.refresh_from_db()
+        self.assertEqual(payment.status, "waived")
+        self.assertFalse(payment.is_overdue())
+        self.assertEqual(payment.late_fee(), Decimal("0.00"))
+        self.assertEqual(lease.scheduled_total(), Decimal("13500.00"))
+
+    def test_a_received_payment_cannot_be_waived(self):
+        lease = full_lease(self)
+        payment = lease.payments.filter(kind="rent").order_by("part").first()
+        payment.record(timezone.localdate(), "cash")
+        reply = self.client.post(reverse("admin:leases_leasepayment_record", args=[payment.pk]), {"action": "waived"})
+        self.assertFalse(reply.json()["ok"])
+
+    def test_pages_still_open_with_a_waived_payment(self):
+        lease = full_lease(self)
+        lease.payments.filter(kind="rent").order_by("part").first().waive()
+        for name, args in (("admin:leases_lease_change", [lease.pk]), ("admin:leases_leasepayment_changelist", []),
+                           ("admin:leases_lease_changelist", [])):
+            self.assertEqual(self.client.get(reverse(name, args=args)).status_code, 200, name)
+        self.assertEqual(self.client.get("/admin/").status_code, 200)
+
+    # rebuilding keeps hand-made lines
+    def test_rebuilding_the_schedule_keeps_a_fine_line(self):
+        from .models import LeasePayment
+
+        lease = full_lease(self)
+        LeasePayment.objects.create(lease=lease, kind="fine", part=1, due_date=lease.start_date, amount=Decimal("200"))
+        self.client.post(reverse("admin:leases_lease_changelist"), {
+            "action": "rebuild_schedule", "_selected_action": [lease.pk], "index": 0,
+        })
+        self.assertTrue(lease.payments.filter(kind="fine").exists())
+        self.assertEqual(lease.payments.filter(kind="rent").count(), 4)
+
+    # moving a lease from a unit to a stand-alone property frees the unit
+    def test_moving_a_lease_to_another_place_frees_the_old_one(self):
+        from properties.models import Property, Unit
+
+        lease = full_lease(self)
+        self.flat.refresh_from_db()
+        self.assertEqual(self.flat.status, Unit.Status.OCCUPIED)
+        lease.unit = None
+        lease.property = self.villa
+        lease.clean()
+        lease.save()
+        self.flat.refresh_from_db()
+        self.villa.refresh_from_db()
+        self.assertEqual(self.flat.status, Unit.Status.VACANT)
+        self.assertEqual(self.villa.status, Property.Status.OCCUPIED)
+
+    def test_the_property_list_shows_the_status_of_a_stand_alone_property(self):
+        page = self.client.get(reverse("admin:properties_property_changelist"))
+        self.assertEqual(page.status_code, 200)
+        self.assertContains(page, "Vacant")
+
+    def test_a_unit_moved_to_another_building_takes_its_leases_with_it(self):
+        lease = full_lease(self)
+        other = building("MV2")
+        self.flat.property = other
+        self.flat.save()
+        lease.refresh_from_db()
+        self.assertEqual(lease.property_id, other.pk)
+
+    def test_a_terminated_lease_cannot_be_made_active_again(self):
+        lease = full_lease(self)
+        lease.terminate(lease.start_date + timedelta(days=100), "Left")
+        lease.status = "active"
+        with self.assertRaises(ValidationError) as caught:
+            lease.clean()
+        self.assertIn("status", caught.exception.message_dict)
+
+    def test_the_end_date_cannot_be_before_a_payment_that_is_still_due(self):
+        lease = full_lease(self)
+        lease.end_date = lease.start_date + timedelta(days=120)
+        with self.assertRaises(ValidationError) as caught:
+            lease.clean()
+        self.assertIn("end_date", caught.exception.message_dict)
+
+    def test_a_property_rented_as_a_whole_cannot_become_a_building(self):
+        from properties.models import Property
+
+        from .tests import make_lease
+
+        make_lease(self.tenant, self.villa)
+        self.villa.property_type = Property.PropertyType.RESIDENTIAL_BUILDING
+        with self.assertRaises(ValidationError) as caught:
+            self.villa.clean()
+        self.assertIn("property_type", caught.exception.message_dict)

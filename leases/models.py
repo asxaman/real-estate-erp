@@ -192,8 +192,10 @@ class Lease(models.Model):
         return sum((p.total for p in self.payments.all() if p.is_rent and p.status == LeasePayment.Status.PAID), Decimal("0.00"))
 
     def scheduled_total(self):
-        """All the rent the schedule asks for, VAT included (deposit and fees are not rent)."""
-        return sum((p.total for p in self.payments.all() if p.is_rent), Decimal("0.00"))
+        """All the rent still asked for, VAT included (waived lines are written off; deposit and fees are not rent)."""
+        return sum(
+            (p.total for p in self.payments.all() if p.is_rent and p.status != LeasePayment.Status.WAIVED), Decimal("0.00")
+        )
 
     def charge_lines(self):
         """The deposit and fee lines (everything that is not rent), in a fixed order."""
@@ -244,6 +246,32 @@ class Lease(models.Model):
                 errors["end_date"] = "The end date must be after the start date."
             elif self.end_date > add_months(self.start_date, 12 * MAX_YEARS):
                 errors["end_date"] = f"A lease cannot be longer than {MAX_YEARS} years."
+
+        if self.pk and self.has_received_money():
+            saved = Lease.objects.filter(pk=self.pk).values_list("start_date", "end_date").first()
+            if saved and saved != (self.start_date, self.end_date):
+                errors["start_date"] = (
+                    "A payment was already received on this lease, so its dates are fixed. "
+                    "Renew the lease for a new period instead."
+                )
+
+        if self.pk and self.start_date and self.end_date:
+            saved = Lease.objects.filter(pk=self.pk).values_list("start_date", "status").first()
+            if saved and saved[1] == self.Status.TERMINATED and self.status == self.Status.ACTIVE:
+                errors["status"] = (
+                    "A terminated lease cannot be made active again, because its unpaid payments were cancelled. "
+                    "Make a new lease for this tenant instead."
+                )
+            if saved and "end_date" not in errors:
+                move = self.start_date - saved[0]
+                for line in self.payments.filter(kind=LeasePayment.Kind.RENT):
+                    due = line.due_date + move if line.status == LeasePayment.Status.PENDING else line.due_date
+                    if due > self.end_date:
+                        errors["end_date"] = (
+                            f"A payment falls due on {fmt_date(due)}, after this end date. "
+                            "Move or remove that payment first, or choose a later end date."
+                        )
+                        break
 
         if self.ejari_expiry and self.start_date and self.ejari_expiry < self.start_date:
             errors["ejari_expiry"] = "The Ejari expiry cannot be before the lease starts."
@@ -320,11 +348,16 @@ class Lease(models.Model):
         if self.unit_id and not self.property_id:
             self.property = self.unit.property
         existed = self.pk is not None
+        old_start = (
+            Lease.objects.filter(pk=self.pk).values_list("start_date", flat=True).first() if existed else None
+        )
         if self.code:
             super().save(*args, **kwargs)
         else:
             save_with_unique_code(self, lambda: next_lease_code(), lambda: super(Lease, self).save(*args, **kwargs))
         if existed:
+            if old_start and old_start != self.start_date:
+                self.shift_pending_dates(old_start)
             self.sync_charges()
 
     # ---- payment schedule -----------------------------------------------------------
@@ -342,7 +375,7 @@ class Lease(models.Model):
 
     def build_schedule(self):
         """Create the payments (only when the lease has none yet). Returns how many were created."""
-        if self.payments.exists():
+        if self.payments.filter(kind=LeasePayment.Kind.RENT).exists():
             return 0
         LeasePayment.objects.bulk_create([
             LeasePayment(lease=self, part=number, due_date=due, amount=amount)
@@ -350,6 +383,21 @@ class Lease(models.Model):
         ])
         self.sync_charges()
         return self.installments or 1
+
+    def has_received_money(self):
+        """True once any payment line was received or is held as a cheque."""
+        return bool(self.pk) and self.payments.filter(
+            status__in=(LeasePayment.Status.PAID, LeasePayment.Status.HELD)
+        ).exists()
+
+    def shift_pending_dates(self, old_start):
+        """The lease start moved: move every payment that is still pending by the same distance."""
+        for line in self.payments.filter(status=LeasePayment.Status.PENDING):
+            if line.kind in (kind for kind, _field in CHARGE_FIELDS):
+                line.due_date = self.start_date
+            else:
+                line.due_date = self.start_date + (line.due_date - old_start)
+            line.save()
 
     def sync_rent_total(self):
         """The annual rent is the total of the rent payments: when the payments change, the lease follows them."""
@@ -396,10 +444,15 @@ class Lease(models.Model):
             raise ValidationError("The rent of the new lease must be more than zero.")
         length = self.end_date - self.start_date
         start = self.end_date + timedelta(days=1)
+        # A deposit that was received is still held for this tenant: it stays on this lease and is not asked for again.
+        deposit_held = self.payments.filter(
+            kind=LeasePayment.Kind.DEPOSIT, status__in=(LeasePayment.Status.PAID, LeasePayment.Status.HELD)
+        ).exists() and self.deposit_balance() > 0
         new = Lease(
             tenant=self.tenant, unit=self.unit, property=self.property, start_date=start, end_date=start + length,
             annual_rent=rent, installments=self.installments, vat_applies=self.vat_applies,
-            security_deposit=self.security_deposit, deposit_status=self.deposit_status, late_fee_per_day=self.late_fee_per_day,
+            security_deposit=0 if deposit_held else self.security_deposit, deposit_status=self.deposit_status,
+            late_fee_per_day=self.late_fee_per_day,
             admin_fee=self.admin_fee, ejari_fee=self.ejari_fee,
             renewed_from=self,
         )
@@ -422,9 +475,11 @@ class Lease(models.Model):
         self.clean()
         self.save()
         if cancel_unpaid:
-            return self.payments.filter(
+            cancelled = self.payments.filter(
                 kind=LeasePayment.Kind.RENT, status=LeasePayment.Status.PENDING, due_date__gt=on,
             ).delete()[0]
+            self.sync_rent_total()
+            return cancelled
         return 0
 
     def assign_cheques(self, first, bank=""):
@@ -471,6 +526,7 @@ class LeasePayment(models.Model):
         PAID = "paid", "Paid"
         BOUNCED = "bounced", "Bounced"
         HELD = "held", "Held (cheque not cashed)"
+        WAIVED = "waived", "Waived (written off)"
 
     class Kind(models.TextChoices):
         RENT = "rent", "Rent"
@@ -539,7 +595,8 @@ class LeasePayment(models.Model):
         """Late: not received, no cheque in hand, and the due date has passed."""
         if self.kind == self.Kind.REFUND:
             return False
-        return self.status not in (self.Status.PAID, self.Status.HELD) and self.due_date < (today or timezone.localdate())
+        settled = (self.Status.PAID, self.Status.HELD, self.Status.WAIVED)
+        return self.status not in settled and self.due_date < (today or timezone.localdate())
 
     def days_overdue(self, today=None):
         """How many days late (0 when paid or not yet due)."""
@@ -549,6 +606,15 @@ class LeasePayment(models.Model):
     def late_fee(self, today=None):
         rate = self.lease.late_fee_per_day or 0
         return money(rate * self.days_overdue(today)) if rate and self.is_rent else Decimal("0.00")
+
+    def waive(self):
+        """Write the line off (nothing more is expected, and no late fee builds up). Only for money not received."""
+        if self.status in (self.Status.PAID, self.Status.HELD):
+            raise ValidationError("A payment that was received cannot be waived.")
+        if self.status == self.Status.WAIVED:
+            raise ValidationError("This payment is already waived.")
+        self.status = self.Status.WAIVED
+        self.save()
 
     def record(self, on, method, cheque_number="", bank_name=""):
         """The money has arrived."""

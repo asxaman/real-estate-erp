@@ -644,6 +644,13 @@ class Property(models.Model):
             errors["makani_number"] = "A Makani number has 10 digits."
         if self.is_active:
             self.inactive_reason = ""
+        elif self.pk:
+            running = self.leases.filter(status="active", end_date__gte=timezone.localdate()).count()
+            if running:
+                errors["is_active"] = (
+                    f"This property has {running} running or upcoming lease{'' if running == 1 else 's'}. "
+                    "End the lease first (terminate it, or wait until it finishes), then make the property inactive."
+                )
 
         if self.pk:
             if not self.has_units:
@@ -666,6 +673,13 @@ class Property(models.Model):
                         f"This building has {other_kind} units that do not fit the new type. "
                         "Delete or change those units first."
                     )
+
+        # A property rented as a whole cannot become a building while such a lease exists.
+        if self.pk and self.has_units and self.leases.filter(unit__isnull=True).exists():
+            errors["property_type"] = (
+                "This property is rented as a whole (a lease without a unit), so it cannot be changed to a building. "
+                "End or move that lease first."
+            )
 
         # Year built / floors do not apply to these types: clear anything left over.
         if self.property_type in self.NO_BUILDING_INFO_TYPES:
@@ -816,6 +830,9 @@ class Unit(models.Model):
         self.floor = (self.floor or "").strip().upper()
         self.floor_sort = floor_sort_key(self.floor)
         super().save(*args, **kwargs)
+        # Leases remember the property of their unit: when the unit moves to another building, they follow it.
+        if self.pk:
+            self.leases.exclude(property_id=self.property_id).update(property_id=self.property_id)
 
     def clean(self):
         # "g01 " and "G01" are the same unit number: store it trimmed and in capitals.

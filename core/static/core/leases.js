@@ -356,6 +356,9 @@
       } });
     }
     buttons.push({ label: "Cheque Bounced", kind: "danger", when: function (v) { return held || v.method === "cheque"; }, run: function (v, ui) { send(url, { action: "bounced" }, ui); } });
+    if (info.overdue) {
+      buttons.push({ label: "Waive (Write Off)", kind: "light", run: function (v, ui) { send(url, { action: "waived" }, ui); } });
+    }
     var pickField = [];
     if (info.pick && info.pick.length > 1) {
       pickField = [{ name: "which", label: "Which payment?", type: "select", value: url, full: true,
@@ -445,7 +448,7 @@
     });
   }
 
-  var STATUSES = [["pending", "Pending"], ["paid", "Paid"], ["held", "Held (Cheque Not Cashed)"], ["bounced", "Bounced"]];
+  var STATUSES = [["pending", "Pending"], ["paid", "Paid"], ["held", "Held (Cheque Not Cashed)"], ["bounced", "Bounced"], ["waived", "Waived (Written Off)"]];
   var KINDS = [["fine", "Fine"], ["other", "Other"], ["refund", "Deposit Refund (Paid Back to the Tenant)"],
     ["rent", "Rent"], ["deposit", "Security Deposit"], ["office", "Office Fee"], ["agency", "Agency Fee"], ["ejari", "Ejari Fee"]];
 

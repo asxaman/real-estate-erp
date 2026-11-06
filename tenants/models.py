@@ -206,6 +206,13 @@ class Tenant(models.Model):
             self.blacklist_reason = ""
         if self.is_active:
             self.inactive_reason = ""  # a reason only makes sense while the tenant is inactive
+        elif self.pk:
+            running = self.leases.filter(status="active", end_date__gte=timezone.localdate()).count()
+            if running:
+                errors["is_active"] = (
+                    f"This tenant has {running} running or upcoming lease{'' if running == 1 else 's'}. "
+                    "End the lease first (terminate it, or wait until it finishes), then make the tenant inactive."
+                )
 
         other = Tenant.find_duplicate(self.name, self.email, self.phone, exclude_pk=self.pk)
         if other is not None:

@@ -1,6 +1,6 @@
 """Keeps a unit's (or standalone property's) Occupied / Vacant status in step with its leases."""
 from django.db.models import Q
-from django.db.models.signals import post_delete, post_save
+from django.db.models.signals import post_delete, post_save, pre_save
 from django.utils import timezone
 
 from properties.models import Property, Unit
@@ -59,9 +59,30 @@ def refresh_all(today=None):
     return changed
 
 
+def _remember_old_place(sender, instance, raw=False, **kwargs):
+    """Before a lease is saved, note where it was (the lease may be moved to another unit or property)."""
+    instance._old_place = None
+    if raw or not instance.pk:
+        return
+    old = Lease.objects.filter(pk=instance.pk).values_list("unit_id", "property_id").first()
+    if old:
+        instance._old_place = old
+
+
 def _after_save(sender, instance, raw=False, **kwargs):
-    if not raw:
-        refresh_for_lease(instance)
+    if raw:
+        return
+    refresh_for_lease(instance)
+    # The lease moved away from a unit or property: that place may be empty now.
+    old = getattr(instance, "_old_place", None)
+    if old and old != (instance.unit_id, instance.property_id):
+        old_unit, old_property = old
+        place = Unit.objects.filter(pk=old_unit).first() if old_unit else (
+            Property.objects.filter(pk=old_property).first() if old_property else None
+        )
+        if place is not None:
+            refresh_target(place, had_leases=True)
+    instance._old_place = None
 
 
 def _after_delete(sender, instance, **kwargs):
@@ -72,5 +93,6 @@ def _after_delete(sender, instance, **kwargs):
 
 
 def connect():
+    pre_save.connect(_remember_old_place, sender=Lease, dispatch_uid="lease-occupancy-before-save")
     post_save.connect(_after_save, sender=Lease, dispatch_uid="lease-occupancy-save")
     post_delete.connect(_after_delete, sender=Lease, dispatch_uid="lease-occupancy-delete")

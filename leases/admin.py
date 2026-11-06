@@ -39,6 +39,7 @@ from .pickers import SearchSelect, property_label, unit_label
 from .models import Lease, LeaseDeduction, LeaseDocument, LeaseNote, LeasePayment
 
 OPEN = (LeasePayment.Status.PENDING, LeasePayment.Status.BOUNCED)
+SETTLED = (LeasePayment.Status.PAID, LeasePayment.Status.HELD, LeasePayment.Status.WAIVED)
 _last_lease = contextvars.ContextVar("erp_last_lease", default=None)  # the lease of the row drawn just before
 ZERO = Value(Decimal("0"), output_field=DecimalField(max_digits=14, decimal_places=2))
 
@@ -85,6 +86,8 @@ def timeline(lease, today=None):
             continue  # the strip shows the rent; the deposit and fees are listed under Payments
         if p.status == LeasePayment.Status.PAID:
             kind, word = "ok", "paid"
+        elif p.status == LeasePayment.Status.WAIVED:
+            kind, word = "ok", "waived"
         elif p.status == LeasePayment.Status.BOUNCED:
             kind, word = "bad", "bounced"
         elif p.is_overdue(today):
@@ -124,7 +127,7 @@ def payment_info(payment, today=None):
 
 def record_button(payment, label="Record payment", tone="primary", choices=None):
     """`choices`: on a lease page, the lease's other unpaid payments, so the pop-up can switch between them."""
-    if payment is None or payment.status == LeasePayment.Status.PAID:
+    if payment is None or payment.status in (LeasePayment.Status.PAID, LeasePayment.Status.WAIVED):
         return ""
     if payment.status == LeasePayment.Status.HELD:
         label = "Cash cheque"
@@ -147,6 +150,8 @@ def due_cell(payment, today=None):
     days = (payment.due_date - today).days
     if payment.status == LeasePayment.Status.PAID:
         tone, note = "ok", "paid"
+    elif payment.status == LeasePayment.Status.WAIVED:
+        tone, note = "mute", "waived"
     elif payment.status == LeasePayment.Status.BOUNCED:
         tone, note = "bad", "bounced"
     elif payment.status == LeasePayment.Status.HELD:
@@ -181,6 +186,8 @@ def state_cell(payment, today=None):
     today = today or timezone.localdate()
     if payment.status == LeasePayment.Status.PAID:
         label, tone, small = "Paid", "success", f"on {fmt_date(payment.paid_on)}" if payment.paid_on else ""
+    elif payment.status == LeasePayment.Status.WAIVED:
+        label, tone, small = "Waived", "info", "written off"
     elif payment.status == LeasePayment.Status.BOUNCED:
         label, tone, small = "Bounced", "danger", ""
     elif payment.status == LeasePayment.Status.HELD:
@@ -211,7 +218,7 @@ def lease_info(lease, today=None):
         "code": lease.code, "tenant": lease.tenant.name, "rent": str(lease.annual_rent),
         "start": lease.start_date.isoformat(), "end": lease.end_date.isoformat(), "today": today.isoformat(),
         "new_start_text": fmt_date(new_start), "new_end_text": fmt_date(new_start + timedelta(days=length)),
-        "deposit": lease.deposit_status, "unpaid": sum(1 for p in payments if p.is_rent and p.status not in (LeasePayment.Status.PAID, LeasePayment.Status.HELD)),
+        "deposit": lease.deposit_status, "unpaid": sum(1 for p in payments if p.is_rent and p.status not in SETTLED),
         "pending_later": sum(1 for p in payments if p.is_rent and p.status == LeasePayment.Status.PENDING and p.due_date > today),
     }
 
@@ -636,19 +643,25 @@ class LeaseAdmin(LeaseApiMixin, ReportsMixin, ExportPermissionMixin, FilterBarMi
         "disagree. To change the rent, edit the payments themselves on the Payments tab (Edit on each line, or "
         "Add Payment); the annual rent then becomes the total of the rent payments."
     )
+    DATES_LOCKED_NOTE = (
+        " A payment has been received, so the start and end dates are fixed too. For a new period, renew the lease."
+    )
 
     def get_fieldsets(self, request, obj=None):
         if obj is not None:
             overview = self._overview
             if obj.has_rent_schedule():
-                overview = (overview[0], dict(overview[1], description=self.LOCKED_NOTE))
+                note = self.LOCKED_NOTE + (self.DATES_LOCKED_NOTE if obj.has_received_money() else "")
+                overview = (overview[0], dict(overview[1], description=note))
             return (self._header, overview, self._money, self._fees, self._termination)
         return (self._overview, self._fees, self._termination)
 
     def get_readonly_fields(self, request, obj=None):
         fixed = ("lease_no", "summary_header", "timeline_strip", "money_summary", "deposit_summary")
         if obj is not None and obj.has_rent_schedule():
-            return fixed + ("annual_rent", "installments")
+            fixed += ("annual_rent", "installments")
+            if obj.has_received_money():
+                fixed += ("start_date", "end_date")
         return fixed
 
     @admin.display(description="Lease no.")
@@ -808,7 +821,7 @@ class LeaseAdmin(LeaseApiMixin, ReportsMixin, ExportPermissionMixin, FilterBarMi
         today = timezone.localdate()
         buttons = []
         unpaid = sorted(
-            (p for p in obj.payments.all() if p.status not in (LeasePayment.Status.PAID, LeasePayment.Status.HELD)),
+            (p for p in obj.payments.all() if p.status not in SETTLED),
             key=lambda p: (p.due_date, p.part),
         )
         if unpaid:
@@ -871,7 +884,7 @@ class LeaseAdmin(LeaseApiMixin, ReportsMixin, ExportPermissionMixin, FilterBarMi
         payments = list(obj.payments.all())
         rent_lines = [p for p in payments if p.is_rent]
         paid = sum((p.total for p in rent_lines if p.status == LeasePayment.Status.PAID), Decimal("0"))
-        scheduled = sum((p.total for p in rent_lines), Decimal("0"))
+        scheduled = sum((p.total for p in rent_lines if p.status != LeasePayment.Status.WAIVED), Decimal("0"))
         scheduled_rent = sum((p.amount for p in rent_lines), Decimal("0"))
         rows = [
             ("Annual rent", _money(obj.annual_rent), ""),
@@ -881,7 +894,7 @@ class LeaseAdmin(LeaseApiMixin, ReportsMixin, ExportPermissionMixin, FilterBarMi
             ("Rent still to receive", _money(max(scheduled - paid, Decimal("0"))), "strong"),
         ]
         for line in obj.charge_lines():
-            word = {"paid": "received", "held": "cheque held", "pending": "not received yet", "bounced": "bounced"}[line.status]
+            word = {"paid": "received", "held": "cheque held", "pending": "not received yet", "bounced": "bounced", "waived": "waived"}[line.status]
             rows.append((line.get_kind_display(), f"{_money(line.amount)} · {word}", "good" if line.status == LeasePayment.Status.PAID else ""))
         late = obj.late_fees(today)
         if late:
@@ -905,7 +918,7 @@ class LeaseAdmin(LeaseApiMixin, ReportsMixin, ExportPermissionMixin, FilterBarMi
             return "-"
         deducted = obj.deposit_deducted()
         line = next((p for p in obj.payments.all() if p.kind == LeasePayment.Kind.DEPOSIT), None)
-        received = {"paid": "Received", "held": "Cheque held, not cashed", "pending": "Not received yet", "bounced": "Cheque bounced"}
+        received = {"paid": "Received", "held": "Cheque held, not cashed", "pending": "Not received yet", "bounced": "Cheque bounced", "waived": "Waived"}
         rows = [
             ("Security deposit", _money(obj.security_deposit)),
             ("Received?", received.get(line.status, "-") if line else "No payment line"),
@@ -930,7 +943,7 @@ class LeaseAdmin(LeaseApiMixin, ReportsMixin, ExportPermissionMixin, FilterBarMi
         today = timezone.localdate()
         payments = list(obj.payments.all())
         paid = sum((p.amount for p in payments if p.is_rent and p.status == LeasePayment.Status.PAID), Decimal("0"))
-        scheduled = sum((p.amount for p in payments if p.is_rent), Decimal("0"))
+        scheduled = sum((p.amount for p in payments if p.is_rent and p.status != LeasePayment.Status.WAIVED), Decimal("0"))
         overdue = [p for p in payments if p.is_overdue(today)]
         upcoming = [p for p in payments if p.status == LeasePayment.Status.PENDING and p.due_date >= today]
 
@@ -966,12 +979,12 @@ class LeaseAdmin(LeaseApiMixin, ReportsMixin, ExportPermissionMixin, FilterBarMi
         bar = progress_bar(paid, scheduled, len(overdue))
         actions = []
         next_payment = next(iter(sorted(
-            (p for p in payments if p.status not in (LeasePayment.Status.PAID, LeasePayment.Status.HELD)),
+            (p for p in payments if p.status not in SETTLED),
             key=lambda p: (p.due_date, p.part),
         )), None)
         if next_payment is not None:
             next_payment.lease = obj
-            to_pick = sorted((p for p in payments if p.status != LeasePayment.Status.PAID), key=lambda p: (p.due_date, p.part, p.pk))
+            to_pick = sorted((p for p in payments if p.status not in (LeasePayment.Status.PAID, LeasePayment.Status.WAIVED)), key=lambda p: (p.due_date, p.part, p.pk))
             for p in to_pick:
                 p.lease = obj
             actions.append(record_button(next_payment, "Record payment", "primary", choices=to_pick))
@@ -1059,7 +1072,7 @@ class LeaseAdmin(LeaseApiMixin, ReportsMixin, ExportPermissionMixin, FilterBarMi
             if lease.payments.exclude(status=LeasePayment.Status.PENDING).exists():
                 skipped.append(lease.code)
                 continue
-            lease.payments.all().delete()
+            lease.payments.filter(kind=LeasePayment.Kind.RENT).delete()  # fines and other lines are kept
             lease.build_schedule()
             rebuilt += 1
         if rebuilt:
@@ -1199,7 +1212,7 @@ class LeasePaymentAdmin(PaymentApiMixin, ExportPermissionMixin, FilterBarMixin, 
     @admin.action(description="Mark the selected payments as paid", permissions=["change"])
     def mark_paid(self, request, queryset):
         count = 0
-        for payment in queryset.exclude(status=LeasePayment.Status.PAID):
+        for payment in queryset.exclude(status__in=(LeasePayment.Status.PAID, LeasePayment.Status.WAIVED)):
             payment.status = LeasePayment.Status.PAID
             payment.paid_on = timezone.localdate()
             payment.save()
@@ -1221,7 +1234,7 @@ class LeasePaymentAdmin(PaymentApiMixin, ExportPermissionMixin, FilterBarMixin, 
     @admin.action(description="Mark the selected payments as bounced", permissions=["change"])
     def mark_bounced(self, request, queryset):
         count = 0
-        for payment in queryset.exclude(status=LeasePayment.Status.BOUNCED):
+        for payment in queryset.exclude(status__in=(LeasePayment.Status.BOUNCED, LeasePayment.Status.WAIVED)):
             payment.status = LeasePayment.Status.BOUNCED
             payment.save()
             count += 1

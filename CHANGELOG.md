@@ -1,5 +1,18 @@
 # Changelog
 
+## Update 32 - Lease dates, termination, renewal deposit, switching off, waived payments
+Run `python manage.py makemigrations`, `migrate` and `test` (the new "Waived" payment status needs a small migration).
+- Lease dates: while nothing has been received, you can change the start date and the pending payments move with it. Once a payment is received or a cheque is held, the dates are fixed (renew the lease for a new period).
+- Terminating a lease now also updates its annual rent to the rent that is still scheduled.
+- Renewing a lease no longer asks again for a security deposit that was already received and is still held; it stays with the original lease.
+- A tenant or property with a running or upcoming lease cannot be made inactive.
+- New payment status "Waived": an overdue payment can be written off (Waive button in the Record pop-up). It stops counting as late, builds no late fee and is left out of "still to receive".
+- "Rebuild the payment schedule" only replaces the rent lines; fines and other lines are kept.
+- Moving a lease from one unit or property to another now frees the old place (it becomes Vacant) instead of leaving it Occupied.
+- The Properties list has a Status column for stand-alone properties (Occupied, Vacant ...).
+- A unit moved to another building takes its leases with it (their property no longer goes stale).
+- A terminated lease cannot be made active again; the end date cannot be moved before a payment that is still due; a property rented as a whole cannot be switched to a building.
+
 ## Update 31 - Vacant standalone properties on the dashboard, friendlier delete messages, locked lease total
 No migration needed. Run `python manage.py test`.
 - Dashboard: the Vacant card, the status bars and the vacant list now count vacant units and vacant standalone properties together.

@@ -209,6 +209,7 @@ class ReportsMixin:
                 "p": p, "late": p.days_overdue(today), "state": (
                     "Paid" if p.status == LeasePayment.Status.PAID else "Bounced" if p.status == LeasePayment.Status.BOUNCED
                     else "Cheque held" if p.status == LeasePayment.Status.HELD
+                    else "Waived" if p.status == LeasePayment.Status.WAIVED
                     else "Overdue" if p.is_overdue(today) else "Pending"
                 ),
                 "received_so_far": balance if p.status == LeasePayment.Status.PAID else None,
