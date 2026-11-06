@@ -386,3 +386,7 @@ No migration needed. Run `python manage.py test`, press Ctrl+F5 twice, then try 
 ## Update 27e
 - Data tools: new button "Seed small sample set" (2 owners, 2 properties, 2 units, 2 tenants; no leases or payments).
 - Fixes from system_report: `raise ... from None` in 4 places, loop-variable binding in tenants/seed.py.
+
+
+## Update 28
+- Lease Payments tab: summary cards (total, received, outstanding, overdue, held, next due), progress bar, filter chips, search, status colour bars, line count and total for what is shown; the repeated 'LSE-0001 payment 1' caption is hidden.

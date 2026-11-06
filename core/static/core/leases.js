@@ -362,6 +362,137 @@
   if (document.readyState === "loading") { document.addEventListener("DOMContentLoaded", addPaymentOnTab); }
   else { addPaymentOnTab(); }
 
+  /* ---- The lease's Payments tab: summary cards, progress, filters and totals ---- */
+  function paymentsDashboard() {
+    var group = document.getElementById("payments-group");
+    if (!group || group.getAttribute("data-erp-dash")) { return; }
+    var metas = group.querySelectorAll(".erp-rowmeta");
+    if (!metas.length) { return; }
+    group.setAttribute("data-erp-dash", "1");
+    var table = group.querySelector("table");
+    var rows = [];
+    var source = document.querySelector('[data-erp-act="addpay"]');
+    var code = "";
+    try { code = JSON.parse(source.getAttribute("data-info") || "{}").code || ""; } catch (err) { code = ""; }
+
+    for (var i = 0; i < metas.length; i++) {
+      var m = metas[i], tr = m.closest("tr");
+      if (!tr) { continue; }
+      var d = {
+        tr: tr, kind: m.getAttribute("data-kind"), status: m.getAttribute("data-status"),
+        method: m.getAttribute("data-method"), total: parseFloat(m.getAttribute("data-total")) || 0,
+        due: m.getAttribute("data-due"), overdue: m.getAttribute("data-overdue") === "1"
+      };
+      d.refund = d.kind === "refund";
+      d.fromDeposit = d.method === "deposit";
+      d.rent = d.kind === "rent";
+      d.charge = ["deposit", "office", "agency", "ejari"].indexOf(d.kind) >= 0;
+      tr.setAttribute("data-erp-status", d.overdue ? "overdue" : d.status);
+      tr.classList.add("erp-prow");
+      rows.push(d);
+      /* the small "LSE-0001 payment 1" caption above each row repeats the lease; hide it */
+      var leaves = tr.querySelectorAll("p, span, div, small, a");
+      for (var j = 0; j < leaves.length; j++) {
+        var node = leaves[j];
+        if (node.children.length === 0 && code && node.textContent.trim().indexOf(code + " ") === 0 && !node.closest("button, .erp-rowacts")) {
+          node.classList.add("erp-hide-caption");
+        }
+      }
+    }
+
+    function money(v) {
+      return "AED " + Math.round(v).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+    }
+    function niceDate(iso) {
+      var p = iso.split("-");
+      return p[2] + "-" + p[1] + "-" + p[0];
+    }
+    var counted = rows.filter(function (r) { return !r.refund && !r.fromDeposit; });
+    function sum(list) { return list.reduce(function (a, r) { return a + r.total; }, 0); }
+    var total = sum(counted);
+    var received = sum(counted.filter(function (r) { return r.status === "paid"; }));
+    var held = counted.filter(function (r) { return r.status === "held"; });
+    var open = counted.filter(function (r) { return r.status === "pending" || r.status === "bounced"; });
+    var late = counted.filter(function (r) { return r.overdue && r.status !== "paid" && r.status !== "held"; });
+    var upcoming = open.filter(function (r) { return !r.overdue; }).sort(function (a, b) { return a.due < b.due ? -1 : 1; })[0];
+    var pct = total ? Math.min(100, Math.round(received * 100 / total)) : 0;
+
+    function card(label, value, note, tone) {
+      var c = el("div", "erp-pcard" + (tone ? " erp-pcard-" + tone : ""));
+      c.appendChild(el("span", "erp-pcard-l", label));
+      c.appendChild(el("b", "erp-pcard-v", value));
+      c.appendChild(el("small", "erp-pcard-n", note || ""));
+      return c;
+    }
+    var wrap = el("div", "erp-pdash");
+    var cards = el("div", "erp-pcards");
+    cards.appendChild(card("Total scheduled", money(total), counted.length + " payments"));
+    cards.appendChild(card("Received", money(received), pct + "% collected", "ok"));
+    cards.appendChild(card("Outstanding", money(sum(open)), open.length + " to collect", open.length ? "" : "ok"));
+    cards.appendChild(card("Overdue", money(sum(late)), late.length ? late.length + " late" : "None", late.length ? "bad" : "ok"));
+    if (held.length) { cards.appendChild(card("Cheques held", money(sum(held)), held.length + " not cashed", "warn")); }
+    cards.appendChild(card("Next due", upcoming ? niceDate(upcoming.due) : "-", upcoming ? money(upcoming.total) : "Nothing coming up"));
+    wrap.appendChild(cards);
+    var bar = el("div", "erp-pbar");
+    var fill = el("div", "erp-pbar-fill" + (late.length ? " erp-pbar-bad" : (pct >= 100 ? " erp-pbar-done" : "")));
+    fill.style.width = pct + "%";
+    bar.appendChild(fill);
+    wrap.appendChild(bar);
+
+    /* filter chips and a search box */
+    var tools = el("div", "erp-ptools");
+    var chips = el("div", "erp-pchips");
+    var filters = [
+      ["all", "All", function () { return true; }],
+      ["rent", "Rent", function (r) { return r.rent; }],
+      ["fees", "Deposit & fees", function (r) { return r.charge; }],
+      ["other", "Fines & other", function (r) { return !r.rent && !r.charge; }],
+      ["pending", "Pending", function (r) { return r.status === "pending" && !r.overdue; }],
+      ["overdue", "Overdue", function (r) { return r.overdue && r.status !== "paid" && r.status !== "held"; }],
+      ["paid", "Paid", function (r) { return r.status === "paid"; }],
+      ["held", "Held / bounced", function (r) { return r.status === "held" || r.status === "bounced"; }]
+    ];
+    var active = filters[0], query = "";
+    var footer = el("div", "erp-pfoot");
+    function apply() {
+      var shown = 0, amount = 0;
+      rows.forEach(function (r) {
+        var ok = active[2](r) && (!query || r.tr.textContent.toLowerCase().indexOf(query) >= 0);
+        r.tr.style.display = ok ? "" : "none";
+        if (ok) { shown++; if (!r.refund && !r.fromDeposit) { amount += r.total; } }
+      });
+      footer.textContent = "Showing " + shown + " of " + rows.length + " lines  ·  " + money(amount) + " in the lines shown";
+    }
+    filters.forEach(function (f) {
+      var n = rows.filter(f[2]).length;
+      if (!n && f[0] !== "all") { return; }
+      var b = el("button", "erp-pchip" + (f === active ? " is-on" : ""), f[1] + " (" + n + ")");
+      b.type = "button";
+      b.addEventListener("click", function () {
+        active = f;
+        Array.prototype.forEach.call(chips.children, function (c) { c.classList.remove("is-on"); });
+        b.classList.add("is-on");
+        apply();
+      });
+      chips.appendChild(b);
+    });
+    tools.appendChild(chips);
+    var search = el("input", "erp-psearch");
+    search.type = "search";
+    search.placeholder = "Search cheque no., bank, amount ...";
+    search.addEventListener("input", function () { query = search.value.trim().toLowerCase(); apply(); });
+    tools.appendChild(search);
+    wrap.appendChild(tools);
+
+    var anchor = group.querySelector(".erp-addpay-bar");
+    group.insertBefore(wrap, anchor ? anchor.nextSibling : group.firstChild);
+    if (table && table.parentNode) { table.parentNode.insertBefore(footer, table.nextSibling); }
+    apply();
+  }
+  function startPayments() { addPaymentOnTab(); paymentsDashboard(); }
+  if (document.readyState === "loading") { document.addEventListener("DOMContentLoaded", startPayments); }
+  else { startPayments(); }
+
   document.addEventListener("click", function (e) {
     var btn = e.target.closest ? e.target.closest("[data-erp-act]") : null;
     if (!btn) { return; }

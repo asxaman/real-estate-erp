@@ -226,7 +226,15 @@ class LeasePaymentInline(ReadOnlyInline):
 
     @admin.display(description="#")
     def no(self, obj):
-        return obj.part if obj.is_rent else obj.get_kind_display()
+        # The hidden span carries the facts the page script uses for the summary cards, filters and totals.
+        today = timezone.localdate()
+        return format_html(
+            '<span class="erp-rowmeta" hidden data-kind="{}" data-status="{}" data-method="{}" data-total="{}" '
+            'data-due="{}" data-overdue="{}"></span>{}',
+            obj.kind, obj.status, obj.method, obj.total, obj.due_date.isoformat(),
+            "1" if obj.is_overdue(today) else "0",
+            obj.part if obj.is_rent else obj.get_kind_display(),
+        )
 
     @admin.display(description="Due on")
     def due(self, obj):

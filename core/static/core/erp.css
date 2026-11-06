@@ -735,3 +735,34 @@ html.dark tr:has(.erp-lease-first) td { border-top-color: #374151; }
 .erp-dlg .erp-select-trigger { min-height: 44px; }
 
 .erp-addpay-bar { display: flex; justify-content: flex-end; margin: 0 0 10px; }
+
+/* ---- The lease's Payments tab ---- */
+.erp-hide-caption { display: none !important; }
+.erp-pdash { margin: 0 0 14px; }
+.erp-pcards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin: 0 0 10px; }
+.erp-pcard { display: flex; flex-direction: column; gap: 2px; padding: 12px 14px; border: 1px solid #e5e7eb; border-radius: 10px; background: #fff; border-left: 4px solid #cbd5e1; }
+.erp-pcard-l { font-size: 12px; font-weight: 600; color: #6b7280; text-transform: uppercase; letter-spacing: .03em; }
+.erp-pcard-v { font-size: 19px; font-weight: 700; color: #111827; }
+.erp-pcard-n { font-size: 12px; color: #6b7280; }
+.erp-pcard-ok { border-left-color: #16a34a; }
+.erp-pcard-bad { border-left-color: #dc2626; }
+.erp-pcard-bad .erp-pcard-v { color: #b91c1c; }
+.erp-pcard-warn { border-left-color: #d97706; }
+html.dark .erp-pcard { background: #111827; border-color: #374151; }
+html.dark .erp-pcard-v { color: #f3f4f6; }
+.erp-ptools { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 12px 0 0; }
+.erp-pchips { display: flex; flex-wrap: wrap; gap: 6px; }
+.erp-pchip { border: 1px solid #d1d5db; background: transparent; color: inherit; border-radius: 999px; padding: 4px 12px; font-size: 13px; font-weight: 600; cursor: pointer; }
+.erp-pchip:hover { background: #f3f4f6; }
+.erp-pchip.is-on { background: #7c3aed; border-color: #7c3aed; color: #fff; }
+html.dark .erp-pchip:hover { background: #1f2937; }
+.erp-psearch { margin-left: auto; min-width: 220px; padding: 6px 12px; border: 1px solid #d1d5db; border-radius: 8px; background: transparent; color: inherit; font-size: 13px; }
+.erp-pfoot { padding: 8px 12px; font-size: 13px; color: #6b7280; }
+.erp-prow td:first-child { border-left: 3px solid transparent; }
+.erp-prow[data-erp-status="paid"] td:first-child { border-left-color: #16a34a; }
+.erp-prow[data-erp-status="overdue"] td:first-child, .erp-prow[data-erp-status="bounced"] td:first-child { border-left-color: #dc2626; }
+.erp-prow[data-erp-status="held"] td:first-child { border-left-color: #d97706; }
+.erp-prow[data-erp-status="pending"] td:first-child { border-left-color: #cbd5e1; }
+.erp-prow[data-erp-status="overdue"] td { background: rgba(220, 38, 38, .04); }
+.erp-prow[data-erp-status="paid"] td { color: #4b5563; }
+.erp-prow td { padding-top: 9px; padding-bottom: 9px; }

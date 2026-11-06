@@ -401,3 +401,18 @@ class AddPaymentOnTheLeaseTab(Setup):
         self.assertContains(page, 'data-erp-act="addpay"')
         script = (Path(__file__).resolve().parent.parent / "core/static/core/leases.js").read_text(encoding="utf-8")
         self.assertIn('getElementById("payments-group")', script)
+
+
+class PaymentsTabDashboard(Setup):
+    def test_each_row_carries_the_facts_the_summary_needs(self):
+        from pathlib import Path
+
+        boss = get_user_model().objects.create_superuser("dashboss", "db@example.com", "Pass-word1!")
+        self.client.force_login(boss)
+        lease = full_lease(self)
+        page = self.client.get(reverse("admin:leases_lease_change", args=[lease.pk]))
+        self.assertContains(page, 'class="erp-rowmeta"')
+        self.assertContains(page, 'data-kind="rent"')
+        self.assertContains(page, 'data-overdue="')
+        script = (Path(__file__).resolve().parent.parent / "core/static/core/leases.js").read_text(encoding="utf-8")
+        self.assertIn("paymentsDashboard", script)
