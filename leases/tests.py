@@ -869,3 +869,440 @@ class ReportsAndLook(Setup):
         panels = self.client.get(reverse("dashboard")).context["panels"]
         self.assertNotIn("renewals", panels)
         self.assertNotIn("attention", panels)
+
+
+class CompactAndPopups(Setup):
+    """Update 21: compact payment cells, edit / add / remove pop-ups, filter bar, compact switch."""
+
+    def setUp(self):
+        super().setUp()
+        self.boss = get_user_model().objects.create_superuser("compactboss", "cb@example.com", "Pass-word1!")
+        self.client.force_login(self.boss)
+        self.today = timezone.localdate()
+        self.lease = make_lease(self.tenant, self.flat, start=self.today - timedelta(days=40), rent="40000")
+        self.payment = self.lease.payments.order_by("due_date").first()
+
+    def url(self, name, *args):
+        return reverse(f"admin:leases_{name}", args=args)
+
+    def staff(self, *codenames):
+        from django.contrib.auth.models import Permission
+
+        self.staff_count = getattr(self, "staff_count", 0) + 1
+        user = get_user_model().objects.create_user(f"compact{self.staff_count}", password="Pass-word1!", is_staff=True)
+        user.user_permissions.add(*Permission.objects.filter(codename__in=codenames))
+        self.client.force_login(user)
+
+    def form(self, **extra):
+        data = {
+            "due_date": self.payment.due_date.isoformat(), "amount": "10000", "method": "cheque", "cheque_number": "004512",
+            "bank_name": "ENBD", "cheque_date": "", "deposited_on": "", "status": "pending", "paid_on": "", "notes": "",
+        }
+        data.update(extra)
+        return data
+
+    # ---- the compact cells -----------------------------------------------------------
+    def test_pay_cell_puts_cheque_details_in_one_place(self):
+        from leases.admin import pay_cell
+
+        self.payment.method = "cheque"
+        self.payment.cheque_number, self.payment.bank_name = "004512", "ENBD"
+        self.payment.cheque_date, self.payment.deposited_on = date(2026, 3, 1), date(2026, 3, 3)
+        text = str(pay_cell(self.payment))
+        self.assertIn("Cheque · 004512 · ENBD", text)
+        self.assertIn("dated", text)
+        self.assertIn("deposited", text)
+        self.payment.method = "cash"
+        self.assertIn("Cash", str(pay_cell(self.payment)))
+        self.assertNotIn("004512", str(pay_cell(self.payment)))
+
+    def test_state_cell_shows_paid_date_or_days_late(self):
+        from leases.admin import state_cell
+
+        self.assertIn("Overdue", str(state_cell(self.payment)))
+        self.assertIn("days late", str(state_cell(self.payment)))
+        self.payment.record(self.today, "cash")
+        self.assertIn("Paid", str(state_cell(self.payment)))
+        self.assertIn("on ", str(state_cell(self.payment)))
+
+    def test_notes_show_as_an_icon_with_the_text(self):
+        from leases.admin import note_mark
+
+        self.assertEqual(note_mark(self.payment), "")
+        self.payment.notes = "Tenant will pay Friday"
+        self.assertIn('title="Tenant will pay Friday"', str(note_mark(self.payment)))
+
+    def test_lease_page_has_a_compact_table_without_input_boxes(self):
+        page = self.client.get(self.url("lease_change", self.lease.pk))
+        self.assertEqual(page.status_code, 200)
+        self.assertContains(page, 'data-erp-act="editpay"')
+        self.assertContains(page, 'data-erp-act="addpay"')
+        self.assertContains(page, "erp-pay")
+        self.assertNotContains(page, 'name="payments-0-amount"')
+
+    def test_payment_list_uses_the_merged_columns(self):
+        page = self.client.get(self.url("leasepayment_changelist"))
+        self.assertContains(page, 'data-erp-act="editpay"')
+        self.assertContains(page, self.tenant.name)
+        self.assertNotContains(page, "data-erp-compact")
+
+    # ---- the filter bar --------------------------------------------------------------
+    def test_filter_bar_has_drop_downs_and_marks_active_ones(self):
+        response = self.client.get(self.url("leasepayment_changelist"))
+        titles = [f["title"] for f in response.context["filter_bar"]]
+        self.assertTrue(any("tatus" in t for t in titles))
+        self.assertContains(response, 'data-erp-nav="1"')
+        self.assertFalse(any(f["active"] for f in response.context["filter_bar"]))
+        active = self.client.get(self.url("leasepayment_changelist") + "?status__exact=pending").context["filter_bar"]
+        self.assertTrue(any(f["active"] for f in active))
+        self.assertContains(self.client.get(self.url("lease_changelist")), "erp-fbar")
+
+    def test_filter_bar_options_are_working_links(self):
+        for filt in self.client.get(self.url("leasepayment_changelist")).context["filter_bar"]:
+            for query, _, _ in filt["options"]:
+                self.assertTrue(query.startswith("?"), query)
+                self.assertEqual(self.client.get(self.url("leasepayment_changelist") + query).status_code, 200, query)
+
+    # ---- edit pop-up -----------------------------------------------------------------
+    def test_edit_form_loads_current_values(self):
+        data = self.client.get(self.url("leasepayment_edit", self.payment.pk)).json()
+        self.assertTrue(data["ok"])
+        self.assertEqual(data["values"]["amount"], "10000.00")
+        self.assertEqual(data["part"], self.payment.part)
+        self.assertTrue(data["can_remove"])
+
+    def test_edit_saves_cheque_details(self):
+        reply = self.client.post(self.url("leasepayment_edit", self.payment.pk), self.form(
+            cheque_date="2026-03-01", deposited_on="2026-03-04", notes="Post-dated",
+        )).json()
+        self.assertTrue(reply["ok"])
+        self.payment.refresh_from_db()
+        self.assertEqual((self.payment.cheque_number, self.payment.bank_name), ("004512", "ENBD"))
+        self.assertEqual((self.payment.cheque_date, self.payment.deposited_on), (date(2026, 3, 1), date(2026, 3, 4)))
+        self.assertEqual(self.payment.notes, "Post-dated")
+
+    def test_edit_can_mark_paid_and_changes_the_schedule_total(self):
+        self.client.post(self.url("leasepayment_edit", self.payment.pk), self.form(status="paid", paid_on="2026-02-10", amount="9000"))
+        self.payment.refresh_from_db()
+        self.assertEqual((self.payment.status, self.payment.paid_on, self.payment.amount), ("paid", date(2026, 2, 10), Decimal("9000.00")))
+
+    def test_edit_refuses_bad_input(self):
+        url = self.url("leasepayment_edit", self.payment.pk)
+        for bad in (
+            {"amount": "0"}, {"amount": "abc"}, {"due_date": "nope"}, {"method": "gold"}, {"status": "lost"},
+            {"cheque_date": "2026-03-10", "deposited_on": "2026-03-05"}, {"paid_on": "31/31/2026"},
+        ):
+            response = self.client.post(url, self.form(**bad))
+            self.assertEqual(response.status_code, 400, bad)
+            self.assertFalse(response.json()["ok"], bad)
+        self.payment.refresh_from_db()
+        self.assertEqual(self.payment.amount, Decimal("10000.00"))
+
+    def test_edit_needs_permission_and_a_form_post(self):
+        self.staff("view_leasepayment")
+        url = self.url("leasepayment_edit", self.payment.pk)
+        self.assertEqual(self.client.get(url).status_code, 403)
+        self.assertEqual(self.client.post(url, self.form(amount="1")).status_code, 403)
+        self.payment.refresh_from_db()
+        self.assertEqual(self.payment.amount, Decimal("10000.00"))
+        self.client.force_login(self.boss)
+        self.assertEqual(self.client.put(url).status_code, 405)
+
+    # ---- add / remove ----------------------------------------------------------------
+    def test_add_payment_takes_the_next_number(self):
+        url = self.url("leasepayment_add_to", self.lease.pk)
+        before = self.lease.payments.count()
+        reply = self.client.post(url, {k: v for k, v in self.form(amount="500", notes="Parking").items() if k not in ("status", "paid_on")}).json()
+        self.assertTrue(reply["ok"])
+        self.assertEqual(self.lease.payments.count(), before + 1)
+        added = self.lease.payments.order_by("-part").first()
+        self.assertEqual((added.part, added.amount, added.status), (before + 1, Decimal("500.00"), "pending"))
+
+    def test_add_payment_refuses_bad_input_and_missing_permission(self):
+        url = self.url("leasepayment_add_to", self.lease.pk)
+        before = self.lease.payments.count()
+        self.assertEqual(self.client.post(url, self.form(amount="")).status_code, 400)
+        self.assertEqual(self.client.get(url).status_code, 405)
+        self.staff("view_leasepayment", "change_leasepayment")
+        self.assertEqual(self.client.post(url, self.form()).status_code, 403)
+        self.assertEqual(self.lease.payments.count(), before)
+
+    def test_remove_payment_only_when_not_received(self):
+        url = self.url("leasepayment_remove", self.payment.pk)
+        self.staff("view_leasepayment", "change_leasepayment")
+        self.assertEqual(self.client.post(url).status_code, 403)
+        self.client.force_login(self.boss)
+        self.assertEqual(self.client.get(url).status_code, 405)
+        self.assertTrue(self.client.post(url).json()["ok"])
+        self.assertFalse(LeasePayment.objects.filter(pk=self.payment.pk).exists())
+        paid = self.lease.payments.order_by("due_date").first()
+        paid.record(self.today, "cash")
+        response = self.client.post(self.url("leasepayment_remove", paid.pk))
+        self.assertEqual(response.status_code, 400)
+        self.assertTrue(LeasePayment.objects.filter(pk=paid.pk).exists())
+
+    def test_paid_payments_cannot_be_removed_through_the_edit_flag(self):
+        self.payment.record(self.today, "cash")
+        data = self.client.get(self.url("leasepayment_edit", self.payment.pk)).json()
+        self.assertFalse(data["can_remove"])
+
+
+class ScaleTools(Setup):
+    """Update 22: search pickers, rows per page, extra filters, rent roll paging, bulk actions."""
+
+    def setUp(self):
+        super().setUp()
+        self.boss = get_user_model().objects.create_superuser("scaleboss", "sb@example.com", "Pass-word1!")
+        self.client.force_login(self.boss)
+        self.today = timezone.localdate()
+
+    def url(self, name, *args):
+        return reverse(f"admin:leases_{name}", args=args)
+
+    def staff(self, *codenames):
+        from django.contrib.auth.models import Permission
+
+        self.staff_count = getattr(self, "staff_count", 0) + 1
+        user = get_user_model().objects.create_user(f"scale{self.staff_count}", password="Pass-word1!", is_staff=True)
+        user.user_permissions.add(*Permission.objects.filter(codename__in=codenames))
+        self.client.force_login(user)
+
+    # ---- pickers ---------------------------------------------------------------------
+    def test_lease_form_does_not_list_every_tenant_and_unit(self):
+        for number in range(30):
+            make_tenant(f"Crowd Tenant {number:02d}")
+            unit(self.tower, f"9{number:02d}")
+        page = self.client.get(self.url("lease_add"))
+        self.assertEqual(page.status_code, 200)
+        self.assertContains(page, 'data-erp-search="tenant"')
+        self.assertContains(page, 'data-erp-search="unit"')
+        self.assertNotContains(page, "Crowd Tenant 17")
+        self.assertNotContains(page, "LSB-917")
+
+    def test_chosen_tenant_and_unit_still_show_on_an_existing_lease(self):
+        lease = make_lease(self.tenant, self.flat)
+        page = self.client.get(self.url("lease_change", lease.pk))
+        self.assertContains(page, self.tenant.name)
+        self.assertContains(page, "LSB-101")
+
+    def test_form_still_accepts_a_chosen_option_that_was_never_listed(self):
+        from leases.admin import LeaseAdminForm
+
+        other = unit(self.tower, "555")
+        start = self.today
+        form = LeaseAdminForm(data={
+            "tenant": self.tenant.pk, "unit": other.pk, "property": "", "start_date": start, "end_date": start + timedelta(days=364),
+            "annual_rent": "48000", "installments": "4", "status": "active", "security_deposit": "0", "deposit_status": "held",
+            "commission": "0", "admin_fee": "0", "deposit_refund_amount": "0", "late_fee_per_day": "0",
+        })
+        self.assertTrue(form.is_valid(), form.errors)
+
+    def test_search_finds_tenants_units_and_properties(self):
+        make_tenant("Findable Person", phone="+971501234567")
+        url = self.url("lease_search")
+        names = [r["label"] for r in self.client.get(url, {"kind": "tenant", "q": "findable"}).json()["results"]]
+        self.assertEqual(names, ["Findable Person"])
+        self.assertTrue(self.client.get(url, {"kind": "tenant", "q": "501234"}).json()["results"])
+        units = self.client.get(url, {"kind": "unit", "q": "LSB"}).json()["results"]
+        self.assertIn("LSB-101 · ", units[0]["label"])
+        props = [r["label"] for r in self.client.get(url, {"kind": "property", "q": "LSV1"}).json()["results"]]
+        self.assertEqual(len(props), 1)
+        self.assertEqual(self.client.get(url, {"kind": "property", "q": "LSB"}).json()["results"], [])  # a building is not standalone
+
+    def test_search_hides_people_and_places_that_cannot_sign_a_lease(self):
+        make_tenant("Blocked Person", is_blacklisted=True)
+        make_tenant("Dormant Person", is_active=False)
+        url = self.url("lease_search")
+        self.assertEqual(self.client.get(url, {"kind": "tenant", "q": "Person"}).json()["results"], [])
+
+    def test_search_is_limited_refuses_bad_kinds_and_needs_permission(self):
+        for number in range(40):
+            make_tenant(f"Many Tenant {number:02d}")
+        url = self.url("lease_search")
+        self.assertEqual(len(self.client.get(url, {"kind": "tenant", "q": "Many"}).json()["results"]), 20)
+        self.assertEqual(self.client.get(url, {"kind": "owner"}).status_code, 400)
+        self.staff("view_lease")
+        self.assertEqual(self.client.get(url, {"kind": "tenant"}).status_code, 403)
+
+    # ---- rows per page and filters ---------------------------------------------------
+    def test_rows_per_page_choice(self):
+        url = self.url("leasepayment_changelist")
+        page = self.client.get(url)
+        self.assertEqual(page.context["cl"].list_per_page, 50)
+        self.assertEqual([n for n, _, _ in page.context["per_options"]], [50, 100, 200])
+        for n in (100, 200):
+            reply = self.client.get(url, {"per": n})
+            self.assertEqual(reply.status_code, 200)
+            self.assertEqual(reply.context["cl"].list_per_page, n)
+        self.assertEqual(self.client.get(url, {"per": "7"}).context["cl"].list_per_page, 50)
+        self.assertEqual(self.client.get(url, {"per": "abc"}).status_code, 200)
+        self.assertEqual(self.client.get(self.url("lease_changelist"), {"per": 100}).context["cl"].list_per_page, 100)
+
+    def test_per_page_is_kept_when_filtering(self):
+        page = self.client.get(self.url("leasepayment_changelist"), {"per": 100})
+        for filt in page.context["filter_bar"]:
+            for query, _, _ in filt["options"][1:]:
+                self.assertIn("per=100", query)
+
+    def test_building_owner_and_month_filters(self):
+        mine = make_lease(self.tenant, self.flat, start=self.today)
+        other_tenant = make_tenant("Other Tenant")
+        other = make_lease(other_tenant, self.villa, start=self.today)
+        pay_url, lease_url = self.url("leasepayment_changelist"), self.url("lease_changelist")
+        rows = self.client.get(lease_url, {"building": self.tower.pk}).context["cl"].result_list
+        self.assertEqual([l.pk for l in rows], [mine.pk])
+        rows = self.client.get(lease_url, {"owner": self.villa.owner_id}).context["cl"].result_list
+        self.assertIn(other.pk, [l.pk for l in rows])
+        rows = self.client.get(pay_url, {"building": self.villa.pk}).context["cl"].result_list
+        self.assertEqual({p.lease_id for p in rows}, {other.pk})
+        month = f"{self.today.year}-{self.today.month:02d}"
+        rows = self.client.get(pay_url, {"month": month}).context["cl"].result_list
+        self.assertTrue(rows and all((p.due_date.year, p.due_date.month) == (self.today.year, self.today.month) for p in rows))
+        ends = f"{mine.end_date.year}-{mine.end_date.month:02d}"
+        rows = self.client.get(lease_url, {"ends": ends}).context["cl"].result_list
+        self.assertIn(mine.pk, [l.pk for l in rows])
+
+    def test_odd_filter_values_are_ignored_not_crashed(self):
+        make_lease(self.tenant, self.flat)
+        on_payments = ({"building": "x"}, {"owner": "-1"}, {"month": "2026-13"}, {"month": "nonsense"})
+        on_leases = ({"building": "x"}, {"owner": "-1"}, {"ends": "99999-99"}, {"ends": "2026-13"})
+        for params in on_payments:
+            self.assertEqual(self.client.get(self.url("leasepayment_changelist"), params).status_code, 200, params)
+        for params in on_leases:
+            self.assertEqual(self.client.get(self.url("lease_changelist"), params).status_code, 200, params)
+
+    # ---- rent roll paging ------------------------------------------------------------
+    def test_rent_roll_pages_and_totals_cover_every_lease(self):
+        make_lease(self.tenant, self.flat, rent="1000")
+        for number in range(54):
+            make_lease(make_tenant(f"Roll Tenant {number:02d}"), unit(self.tower, f"8{number:02d}"), rent="1000")
+        url = self.url("lease_rentroll")
+        first = self.client.get(url)
+        self.assertEqual(len(first.context["rows"]), 50)
+        self.assertEqual(first.context["total_rows"], 55)
+        self.assertEqual(first.context["totals"]["rent"], Decimal("55000.00"))
+        second = self.client.get(url, {"page": 2})
+        self.assertEqual(len(second.context["rows"]), 5)
+        self.assertEqual(len(self.client.get(url, {"per": 100}).context["rows"]), 55)
+        self.assertEqual(self.client.get(url, {"page": "zzz"}).status_code, 200)
+
+    def test_rent_roll_search_and_export_follow_the_search(self):
+        make_lease(self.tenant, self.flat)
+        make_lease(make_tenant("Needle Person"), self.villa)
+        url = self.url("lease_rentroll")
+        found = self.client.get(url, {"q": "needle"})
+        self.assertEqual([r["tenant"] for r in found.context["rows"]], ["Needle Person"])
+        csv = self.client.get(url, {"q": "needle", "export": "csv"}).content.decode("utf-8-sig")
+        self.assertIn("Needle Person", csv)
+        self.assertNotIn(self.tenant.name, csv)
+
+    # ---- bulk ------------------------------------------------------------------------
+    def bulk(self, ids, **data):
+        return self.client.post(self.url("leasepayment_bulk"), {"ids": ",".join(str(i) for i in ids), **data})
+
+    def test_bulk_mark_paid(self):
+        lease = make_lease(self.tenant, self.flat, start=self.today - timedelta(days=100))
+        first, second, third = list(lease.payments.order_by("due_date")[:3])
+        second.record(self.today, "cash")
+        reply = self.bulk([first.pk, second.pk, third.pk], action="paid", date=self.today.isoformat(), method="transfer")
+        self.assertTrue(reply.json()["ok"])
+        for p in (first, third):
+            p.refresh_from_db()
+            self.assertEqual((p.status, p.paid_on, p.method), ("paid", self.today, "transfer"))
+        second.refresh_from_db()
+        self.assertEqual(second.method, "cash")  # already received: left alone
+
+    def test_bulk_paid_keeps_the_scheduled_method_when_none_is_chosen(self):
+        lease = make_lease(self.tenant, self.flat)
+        payment = lease.payments.order_by("due_date").first()
+        payment.method, payment.cheque_number = "cheque", "777"
+        payment.save()
+        self.bulk([payment.pk], action="paid", date=self.today.isoformat(), method="")
+        payment.refresh_from_db()
+        self.assertEqual((payment.status, payment.method, payment.cheque_number), ("paid", "cheque", "777"))
+
+    def test_bulk_deposit_only_touches_undeposited_cheques(self):
+        lease = make_lease(self.tenant, self.flat)
+        a, b, c, d = list(lease.payments.order_by("due_date"))
+        for p in (a, b, d):
+            p.method, p.cheque_number = "cheque", f"10{p.part}"
+            p.save()
+        b.deposited_on = date(2026, 1, 5)
+        b.save()
+        c.method = "cash"
+        c.save()
+        reply = self.bulk([a.pk, b.pk, c.pk, d.pk], action="deposited", date="2026-02-01")
+        self.assertTrue(reply.json()["ok"])
+        for p in (a, b, c, d):
+            p.refresh_from_db()
+        self.assertEqual((a.deposited_on, d.deposited_on), (date(2026, 2, 1), date(2026, 2, 1)))
+        self.assertEqual(b.deposited_on, date(2026, 1, 5))  # kept its own date
+        self.assertIsNone(c.deposited_on)
+
+    def test_bulk_deposit_skips_a_date_before_the_cheque_date(self):
+        lease = make_lease(self.tenant, self.flat)
+        payment = lease.payments.order_by("due_date").first()
+        payment.method, payment.cheque_date = "cheque", date(2026, 6, 1)
+        payment.save()
+        reply = self.bulk([payment.pk], action="deposited", date="2026-05-01")
+        self.assertEqual(reply.status_code, 400)
+        payment.refresh_from_db()
+        self.assertIsNone(payment.deposited_on)
+
+    def test_bulk_refuses_bad_requests(self):
+        lease = make_lease(self.tenant, self.flat)
+        pk = lease.payments.first().pk
+        good = {"action": "paid", "date": self.today.isoformat()}
+        self.assertEqual(self.bulk([], **good).status_code, 400)
+        self.assertEqual(self.bulk([pk], action="delete", date=good["date"]).status_code, 400)
+        self.assertEqual(self.bulk([pk], action="paid", date="soon").status_code, 400)
+        self.assertEqual(self.bulk([pk], method="gold", **good).status_code, 400)
+        self.assertEqual(self.bulk(range(1, 600), **good).status_code, 400)
+        self.assertEqual(self.client.get(self.url("leasepayment_bulk")).status_code, 405)
+        self.assertEqual(LeasePayment.objects.filter(status="paid").count(), 0)
+
+    def test_bulk_needs_permission(self):
+        lease = make_lease(self.tenant, self.flat)
+        pk = lease.payments.first().pk
+        self.staff("view_leasepayment")
+        self.assertEqual(self.bulk([pk], action="paid", date=self.today.isoformat()).status_code, 403)
+        self.assertEqual(LeasePayment.objects.filter(status="paid").count(), 0)
+
+    def test_bulk_buttons_only_show_for_people_who_can_change_payments(self):
+        make_lease(self.tenant, self.flat)
+        self.assertContains(self.client.get(self.url("leasepayment_changelist")), "data-erp-bulk")
+        self.staff("view_leasepayment")
+        self.assertNotContains(self.client.get(self.url("leasepayment_changelist")), "data-erp-bulk")
+
+    def test_two_people_recording_the_same_payment_do_not_double_record(self):
+        lease = make_lease(self.tenant, self.flat)
+        payment = lease.payments.order_by("due_date").first()
+        self.bulk([payment.pk], action="paid", date="2026-03-01")
+        second = self.bulk([payment.pk], action="paid", date="2026-03-09")
+        self.assertEqual(second.status_code, 400)  # nothing left to change
+        payment.refresh_from_db()
+        self.assertEqual(payment.paid_on, date(2026, 3, 1))
+
+
+class SameLookEverywhere(Setup):
+    """Update 23: filter drop-downs use the system's styled drop-down; browser suggestions are switched off."""
+
+    def setUp(self):
+        super().setUp()
+        self.client.force_login(get_user_model().objects.create_superuser("lookboss", "lb@example.com", "Pass-word1!"))
+
+    def url(self, name):
+        return reverse(f"admin:leases_{name}")
+
+    def test_filter_bar_drop_downs_are_not_marked_native(self):
+        make_lease(self.tenant, self.flat)
+        for name in ("lease_changelist", "leasepayment_changelist"):
+            html = self.client.get(self.url(name)).content.decode()
+            self.assertIn("erp-fbar", html)
+            self.assertNotIn('data-erp-native="1" data-erp-nav', html)
+
+    def test_autofill_switch_is_shipped(self):
+        from pathlib import Path
+        js = (Path(__file__).resolve().parent.parent / "core" / "static" / "core" / "erp.js").read_text(encoding="utf-8")
+        self.assertIn("function noAutofill", js)
+        self.assertIn("noAutofill();", js)

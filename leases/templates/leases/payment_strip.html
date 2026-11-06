@@ -1,9 +1,4 @@
-{% if report_links %}
-<div class="erp-reports">
-  <span>Reports</span>
-  {% for label, url in report_links %}<a href="{{ url }}">{{ label }}</a>{% endfor %}
-</div>
-{% endif %}
+{% include "leases/_bars.html" %}
 {% if pay_strip %}
 <div class="erp-strip">
   {% for card in pay_strip %}
@@ -11,5 +6,13 @@
       <span>{{ card.label }}</span><b>{{ card.amount }}</b><small>{{ card.count }} payment{{ card.count|pluralize }}</small>
     </a>
   {% endfor %}
+</div>
+{% endif %}
+{% if bulk_url %}
+<div class="erp-bulk" data-url="{{ bulk_url }}">
+  <span>With the ticked rows:</span>
+  <button type="button" class="erp-qbtn erp-qbtn-primary" data-erp-bulk="paid">Mark as paid</button>
+  <button type="button" class="erp-qbtn" data-erp-bulk="deposited">Mark cheques as deposited</button>
+  <span class="erp-bulk-count" data-erp-bulk-count></span>
 </div>
 {% endif %}

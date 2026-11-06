@@ -5,11 +5,17 @@
   <div class="erp-filterbar">
     <a class="erp-btn erp-btn-light" href="{{ list_url }}">Back to leases</a>
     {% if can_export %}
-      <a class="erp-btn erp-btn-light" href="?export=xlsx">Download Excel</a>
-      <a class="erp-btn erp-btn-light" href="?export=csv">Download CSV</a>
+      <a class="erp-btn erp-btn-light" href="?export=xlsx{% if export_query %}&{{ export_query }}{% endif %}">Download Excel</a>
+      <a class="erp-btn erp-btn-light" href="?export=csv{% if export_query %}&{{ export_query }}{% endif %}">Download CSV</a>
     {% endif %}
-    <span class="erp-dash-hello">{{ rows|length }} running lease{{ rows|length|pluralize }} on {{ today|date:"j F Y" }}</span>
+    <span class="erp-dash-hello">{{ total_rows }} running lease{{ total_rows|pluralize }} on {{ today|date:"j F Y" }}{% if search %} matching “{{ search }}”{% endif %}</span>
   </div>
+  <form method="get" class="erp-filterbar">
+    <input type="hidden" name="per" value="{{ per }}">
+    <input class="erp-search" type="search" name="q" value="{{ search }}" placeholder="Search property, unit, tenant or lease no.">
+    <button class="erp-btn" type="submit">Search</button>
+    {% if search %}<a class="erp-btn erp-btn-light" href="?per={{ per }}">Clear</a>{% endif %}
+  </form>
   <div class="erp-panel erp-scroll">
     {% if rows %}
     <table class="erp-table">
@@ -33,14 +39,23 @@
       {% endfor %}
       </tbody>
       <tfoot><tr>
-        <th colspan="5">Total (AED)</th>
+        <th colspan="5">Total (AED){% if page.paginator.num_pages > 1 %}, all pages{% endif %}</th>
         <th class="num">{{ totals.rent|floatformat:"2g" }}</th><th class="num">{{ totals.monthly|floatformat:"2g" }}</th>
         <th class="num">{{ totals.paid|floatformat:"2g" }}</th><th class="num">{{ totals.overdue|floatformat:"2g" }}</th><th></th>
       </tr></tfoot>
     </table>
     {% else %}
-    <div class="erp-empty">No lease is running today.</div>
+    <div class="erp-empty">{% if search %}No running lease matches your search.{% else %}No lease is running today.{% endif %}</div>
     {% endif %}
   </div>
+  {% if page.paginator.num_pages > 1 or total_rows > 50 %}
+  <div class="erp-filterbar erp-pager">
+    {% if prev_url %}<a class="erp-btn erp-btn-light" href="{{ prev_url }}">&larr; Previous</a>{% endif %}
+    <span class="erp-dash-hello">Page {{ page.number }} of {{ page.paginator.num_pages }}</span>
+    {% if next_url %}<a class="erp-btn erp-btn-light" href="{{ next_url }}">Next &rarr;</a>{% endif %}
+    <span class="erp-label" style="margin-left:14px;">Rows per page</span>
+    {% for n, url, selected in per_options %}<a class="erp-chip{% if selected %} is-on{% endif %}" href="{{ url }}">{{ n }}</a>{% endfor %}
+  </div>
+  {% endif %}
 </div>
 {% endblock %}

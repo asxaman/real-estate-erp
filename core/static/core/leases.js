@@ -52,7 +52,7 @@
     if (old) { old.remove(); }
     var overlay = el("div", "erp-dlg-overlay");
     overlay.id = "erp-dlg-overlay";
-    var dlg = el("div", "erp-dlg");
+    var dlg = el("div", "erp-dlg" + (cfg.wide ? " erp-dlg-wide" : ""));
     dlg.setAttribute("role", "dialog");
     dlg.setAttribute("aria-modal", "true");
     dlg.setAttribute("aria-label", cfg.title);
@@ -62,7 +62,7 @@
     var form = el("form", "erp-dlg-form");
     var inputs = {}, rows = {};
     (cfg.fields || []).forEach(function (f) {
-      var row = el("div", "erp-dlg-row");
+      var row = el("div", "erp-dlg-row" + (f.full ? " erp-dlg-full" : ""));
       var input;
       if (f.type === "select") {
         input = el("select", "erp-dlg-input");
@@ -276,6 +276,65 @@
     });
   }
 
+  var STATUSES = [["pending", "Pending"], ["paid", "Paid"], ["bounced", "Bounced"]];
+
+  function paymentFields(v, withStatus) {
+    var isCheque = function (x) { return x.method === "cheque"; };
+    var fields = [
+      { name: "due_date", label: "Due on", type: "date", value: v.due_date },
+      { name: "amount", label: "Amount (AED, before VAT)", type: "number", step: "0.01", min: "0.01", value: v.amount },
+      { name: "method", label: "Paid by", type: "select", options: METHODS, value: v.method || "cheque" },
+      { name: "cheque_number", label: "Cheque number", type: "text", value: v.cheque_number, when: isCheque },
+      { name: "bank_name", label: "Bank", type: "text", value: v.bank_name, when: isCheque },
+      { name: "cheque_date", label: "Date written on the cheque", type: "date", value: v.cheque_date, when: isCheque },
+      { name: "deposited_on", label: "Deposited in the bank on", type: "date", value: v.deposited_on, when: isCheque }
+    ];
+    if (withStatus) {
+      fields.push({ name: "status", label: "Status", type: "select", options: STATUSES, value: v.status });
+      fields.push({ name: "paid_on", label: "Date received", type: "date", value: v.paid_on,
+        when: function (x) { return x.status === "paid"; } });
+    }
+    fields.push({ name: "notes", label: "Note", type: "text", value: v.notes, placeholder: "optional", full: true });
+    return fields;
+  }
+
+  function editPaymentDialog(url) {
+    fetch(url, { credentials: "same-origin", headers: { "X-Requested-With": "XMLHttpRequest" } })
+      .then(function (r) { return r.json().catch(function () { return { ok: false, errors: ["Something went wrong."] }; }); })
+      .then(function (data) {
+        if (!data || !data.ok) {
+          openDialog({ title: "Cannot edit this payment", subtitle: ((data && data.errors) || ["Something went wrong."]).join(" "), buttons: [] });
+          return;
+        }
+        var armed = false;
+        var buttons = [{ label: "Save changes", kind: "primary", run: function (v, ui) { send(url, v, ui); } }];
+        if (data.can_remove) {
+          buttons.push({ label: "Remove payment", kind: "danger", run: function (v, ui) {
+            if (!armed) { armed = true; ui.error(["Press “Remove payment” again to confirm. This cannot be undone."]); return; }
+            send(url.replace(/edit\/$/, "remove/"), {}, ui);
+          } });
+        }
+        openDialog({
+          title: "Payment " + data.part + " of " + data.code,
+          subtitle: "Change any detail of this payment.",
+          fields: paymentFields(data.values, true),
+          wide: true,
+          buttons: buttons
+        });
+      });
+  }
+
+  function addPaymentDialog(url, info) {
+    openDialog({
+      title: "Add a payment to " + info.code,
+      subtitle: "This becomes payment " + info.number + " of the lease.",
+      fields: paymentFields({ due_date: info.today, amount: "", method: "cheque", cheque_number: "", bank_name: "",
+        cheque_date: "", deposited_on: "", status: "pending", paid_on: "", notes: "" }, false),
+      wide: true,
+      buttons: [{ label: "Add payment", kind: "primary", run: function (v, ui) { send(url, v, ui); } }]
+    });
+  }
+
   document.addEventListener("click", function (e) {
     var btn = e.target.closest ? e.target.closest("[data-erp-act]") : null;
     if (!btn) { return; }
@@ -289,7 +348,184 @@
     else if (act === "renew") { renewDialog(url, info); }
     else if (act === "terminate") { terminateDialog(url, info); }
     else if (act === "cheques") { chequesDialog(url, info); }
+    else if (act === "editpay") { editPaymentDialog(url); }
+    else if (act === "addpay") { addPaymentDialog(url, info); }
   }, true);
+
+  /* ---- bulk: mark the ticked payments as paid / their cheques as deposited ------------------ */
+  function ticked() {
+    return Array.prototype.map.call(document.querySelectorAll('input[name="_selected_action"]:checked'), function (c) { return c.value; });
+  }
+
+  function today() {
+    var d = new Date();
+    return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+  }
+
+  function bulkDialog(kind, url) {
+    var ids = ticked();
+    if (!ids.length) {
+      openDialog({ title: "Nothing is ticked", subtitle: "Tick the payments in the list first, then press the button again.", buttons: [] });
+      return;
+    }
+    var paid = kind === "paid";
+    var fields = [{ name: "date", label: paid ? "Date received" : "Date deposited in the bank", type: "date", value: today() }];
+    if (paid) {
+      fields.push({ name: "method", label: "Paid by", type: "select", value: "",
+        options: [["", "Keep each payment as scheduled"]].concat(METHODS) });
+    }
+    openDialog({
+      title: (paid ? "Mark " : "Mark cheques of ") + ids.length + " payment" + (ids.length === 1 ? "" : "s") + (paid ? " as paid" : " as deposited"),
+      subtitle: paid
+        ? "Payments that were already received are skipped."
+        : "Only cheques that are not deposited yet are changed. Other payments are skipped.",
+      fields: fields,
+      buttons: [{ label: paid ? "Mark as paid" : "Mark as deposited", kind: "primary", run: function (v, ui) {
+        send(url, { ids: ids.join(","), action: kind, date: v.date, method: v.method || "" }, ui);
+      } }]
+    });
+  }
+
+  document.addEventListener("click", function (e) {
+    var b = e.target.closest ? e.target.closest("[data-erp-bulk]") : null;
+    if (!b) { return; }
+    e.preventDefault();
+    var bar = b.closest(".erp-bulk");
+    bulkDialog(b.getAttribute("data-erp-bulk"), bar ? bar.getAttribute("data-url") : "");
+  });
+
+  document.addEventListener("change", function (e) {
+    if (!e.target || !e.target.matches || !e.target.matches('input[name="_selected_action"], #action-toggle')) { return; }
+    var label = document.querySelector("[data-erp-bulk-count]");
+    if (label) {
+      var n = ticked().length;
+      label.textContent = n ? n + " ticked" : "";
+    }
+  });
+
+  /* ---- filter drop-downs -------------------------------------------------------------------- */
+  document.addEventListener("change", function (e) {
+    var t = e.target;
+    if (t && t.matches && t.matches("select[data-erp-nav]")) {
+      window.__erpAllowLeave = true;
+      window.location.href = t.value;
+    }
+  });
+
+
+  /* ---- search-as-you-type pickers (tenant, unit, property) ---------------------------------- */
+  function pickers() {
+    var selects = document.querySelectorAll("select[data-erp-search]");
+    if (!selects.length) { return; }
+    var base = window.location.pathname.replace(/\/(add|\d+\/change)\/?$/, "/") + "search/";
+
+    Array.prototype.forEach.call(selects, function (select) {
+      var kind = select.getAttribute("data-erp-search");
+      var wrap = el("div", "erp-pick");
+      var input = el("input", "erp-pick-input");
+      input.type = "text";
+      input.autocomplete = "off";
+      input.setAttribute("role", "combobox");
+      input.setAttribute("aria-expanded", "false");
+      input.placeholder = select.getAttribute("data-placeholder") || "Type to search";
+      var clear = el("button", "erp-pick-clear", "×");
+      clear.type = "button";
+      clear.title = "Clear";
+      clear.setAttribute("aria-label", "Clear");
+      var list = el("ul", "erp-pick-list");
+      list.hidden = true;
+      list.setAttribute("role", "listbox");
+      wrap.appendChild(input);
+      wrap.appendChild(clear);
+      wrap.appendChild(list);
+      select.parentNode.insertBefore(wrap, select);
+      select.hidden = true;
+      select.style.display = "none";
+      select.removeAttribute("required");  // a hidden empty required field would block the Save button silently
+      wrap.addEventListener("mouseenter", sync);  // picks up a tenant added through the "+" pop-up
+
+      var timer = null, token = 0, active = -1, items = [];
+
+      function chosenLabel() {
+        var opt = select.options[select.selectedIndex];
+        return select.value && opt ? opt.text : "";
+      }
+      function sync() {
+        input.value = chosenLabel();
+        clear.hidden = !select.value;
+        wrap.classList.toggle("has-value", !!select.value);
+      }
+      function hide() {
+        list.hidden = true;
+        input.setAttribute("aria-expanded", "false");
+        active = -1;
+      }
+      function choose(item) {
+        var opt = null;
+        Array.prototype.forEach.call(select.options, function (o) { if (o.value === String(item.id)) { opt = o; } });
+        if (!opt) { opt = new Option(item.label, String(item.id)); select.add(opt); }
+        opt.text = item.label;
+        select.value = String(item.id);
+        select.dispatchEvent(new Event("change", { bubbles: true }));
+        sync();
+        hide();
+      }
+      function paint() {
+        list.innerHTML = "";
+        if (!items.length) {
+          var none = el("li", "erp-pick-empty", "No match");
+          list.appendChild(none);
+        }
+        items.forEach(function (item, i) {
+          var li = el("li", "erp-pick-item" + (i === active ? " is-active" : ""));
+          li.setAttribute("role", "option");
+          li.appendChild(el("span", "erp-pick-main", item.label));
+          if (item.sub) { li.appendChild(el("small", "", item.sub)); }
+          li.addEventListener("mousedown", function (e) { e.preventDefault(); choose(item); });
+          list.appendChild(li);
+        });
+        list.hidden = false;
+        input.setAttribute("aria-expanded", "true");
+      }
+      function look(text) {
+        var mine = ++token;
+        fetch(base + "?" + new URLSearchParams({ kind: kind, q: text }).toString(), {
+          credentials: "same-origin", headers: { "X-Requested-With": "XMLHttpRequest" }
+        }).then(function (r) { return r.ok ? r.json() : null; }).then(function (data) {
+          if (mine !== token || !data) { return; }
+          items = data.results || [];
+          active = items.length ? 0 : -1;
+          paint();
+        }).catch(function () { /* the list simply stays closed */ });
+      }
+
+      input.addEventListener("focus", function () { input.select(); look(select.value ? "" : input.value.trim()); });
+      input.addEventListener("input", function () {
+        window.clearTimeout(timer);
+        timer = window.setTimeout(function () { look(input.value.trim()); }, 250);
+      });
+      input.addEventListener("keydown", function (e) {
+        if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+          e.preventDefault();
+          if (list.hidden) { look(input.value.trim()); return; }
+          if (items.length) { active = (active + (e.key === "ArrowDown" ? 1 : items.length - 1)) % items.length; paint(); }
+        } else if (e.key === "Enter") {
+          if (!list.hidden && items[active]) { e.preventDefault(); choose(items[active]); }
+        } else if (e.key === "Escape") {
+          if (!list.hidden) { e.stopPropagation(); hide(); sync(); }
+        }
+      });
+      input.addEventListener("blur", function () { window.setTimeout(function () { hide(); sync(); }, 120); });
+      clear.addEventListener("click", function () {
+        select.value = "";
+        select.dispatchEvent(new Event("change", { bubbles: true }));
+        sync();
+        input.focus();
+      });
+      select.addEventListener("change", sync);
+      sync();
+    });
+  }
 
   /* ---- auto-fill on the lease form -------------------------------------------------------- */
   function leaseForm() {
@@ -354,9 +590,10 @@
     if (unit.value || prop.value) { ask(false); }
   }
 
+  function start() { pickers(); leaseForm(); }
   if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", leaseForm);
+    document.addEventListener("DOMContentLoaded", start);
   } else {
-    leaseForm();
+    start();
   }
 })();

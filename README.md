@@ -228,6 +228,11 @@ Sidebar > **Tenancy** > **Tenants** (leases are the next step of this module):
   leases, with Excel / CSV download) and the **Monthly collection** page (expected vs received per month). The lease
   header has **Tenancy summary** and **Payment statement** buttons that open a printable page (use the browser's
   Print > Save as PDF). Selected leases or payments can be exported with the list action (needs the export permission).
+* **Compact look (update 21):** the lease page shows payments as a compact table; use the row's **Edit** button (pop-up)
+  to change cheque number, bank, dates, status or note, and **Add payment** in the header for an extra payment.
+* **Big portfolios (update 22):** on the lease form, pick the tenant, unit or property by typing in the search box. The
+  lists show 50 rows by default (choose 100 or 200 above the table) and can be filtered by building, owner and month.
+  In **Rent payments**, tick rows and use **Mark as paid** / **Mark cheques as deposited** to update many at once.
 * **Rent payments** (sidebar: Tenancy > Rent payments): every instalment of every lease in one list. Filter by
   status, overdue, due this week / month or date; search by lease, tenant or cheque number; tick payments and choose
   **Mark as paid** or **Mark as bounced**.

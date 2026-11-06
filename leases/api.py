@@ -8,6 +8,8 @@ from decimal import Decimal, InvalidOperation
 from django import forms
 from django.contrib import messages
 from django.core.exceptions import ValidationError
+from django.db import transaction
+from django.db.models import Max
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404
 from django.urls import path, reverse
@@ -19,7 +21,8 @@ from core.formats import fmt_date
 from core.toasts import titled
 from properties.models import COMMERCIAL_UNIT_TYPES, Property, Unit
 
-from .models import Lease, LeasePayment, add_months
+from . import pickers
+from .models import Lease, LeasePayment, add_months, money
 
 # Standalone properties that are normally leased with VAT.
 COMMERCIAL_PROPERTY_TYPES = (
@@ -63,11 +66,21 @@ class LeaseApiMixin:
         wrap = self.admin_site.admin_view
         custom = [
             path("info/", wrap(self.info_view), name="leases_lease_info"),
+            path("search/", wrap(self.search_view), name="leases_lease_search"),
             path("<int:pk>/renew/", wrap(self.renew_view), name="leases_lease_renew"),
             path("<int:pk>/terminate/", wrap(self.terminate_view), name="leases_lease_terminate"),
             path("<int:pk>/cheques/", wrap(self.cheques_view), name="leases_lease_cheques"),
         ]
         return custom + super().get_urls()
+
+    # ---- the search-as-you-type pickers ---------------------------------------------------
+    def search_view(self, request):
+        if not (self.has_add_permission(request) or self.has_change_permission(request)):
+            return refuse()
+        kind = request.GET.get("kind", "")
+        if kind not in ("tenant", "unit", "property"):
+            return fail("Unknown list.")
+        return JsonResponse({"ok": True, "results": pickers.search(kind, request.GET.get("q", ""))})
 
     # ---- auto-fill on the lease form ------------------------------------------------
     def info_view(self, request):
@@ -200,11 +213,59 @@ class LeaseApiMixin:
         return JsonResponse({"ok": True, "redirect": ""})
 
 
+def read_optional_date(text, label):
+    return read_date(text, label) if (text or "").strip() else None
+
+
+def payment_values(payment):
+    """What the edit pop-up shows (all text, ready for the form fields)."""
+    def day(value):
+        return value.isoformat() if value else ""
+
+    return {
+        "due_date": day(payment.due_date), "amount": f"{payment.amount:.2f}", "method": payment.method,
+        "cheque_number": payment.cheque_number, "bank_name": payment.bank_name, "cheque_date": day(payment.cheque_date),
+        "deposited_on": day(payment.deposited_on), "status": payment.status, "paid_on": day(payment.paid_on),
+        "notes": payment.notes,
+    }
+
+
+def apply_payment(payment, data):
+    """Copies the pop-up's fields onto a payment, refusing anything odd. Raises ValidationError."""
+    payment.due_date = read_date(data.get("due_date"), "due date")
+    amount = read_number(data.get("amount"))
+    if amount <= 0:
+        raise ValidationError("The amount must be more than zero.")
+    payment.amount = money(amount)
+    method = data.get("method", "")
+    if method not in LeasePayment.Method.values:
+        raise ValidationError("Choose how the payment is made.")
+    payment.method = method
+    status = data.get("status", "")
+    if status not in LeasePayment.Status.values:
+        raise ValidationError("Choose the status of the payment.")
+    payment.status = status
+    payment.cheque_number = (data.get("cheque_number") or "").strip()[:30]
+    payment.bank_name = (data.get("bank_name") or "").strip()[:60]
+    payment.cheque_date = read_optional_date(data.get("cheque_date"), "date on the cheque")
+    payment.deposited_on = read_optional_date(data.get("deposited_on"), "deposit date")
+    payment.paid_on = read_optional_date(data.get("paid_on"), "date received")
+    payment.notes = (data.get("notes") or "").strip()[:200]
+    payment.full_clean(exclude=["lease", "part"])  # the model's own rules (dates in order, paid needs a date ...)
+
+
 class PaymentApiMixin:
-    """Added to LeasePaymentAdmin: the Record payment pop-up."""
+    """Added to LeasePaymentAdmin: the Record, Edit, Add and Remove payment pop-ups."""
 
     def get_urls(self):
-        custom = [path("<int:pk>/record/", self.admin_site.admin_view(self.record_view), name="leases_leasepayment_record")]
+        wrap = self.admin_site.admin_view
+        custom = [
+            path("<int:pk>/record/", wrap(self.record_view), name="leases_leasepayment_record"),
+            path("<int:pk>/edit/", wrap(self.edit_view), name="leases_leasepayment_edit"),
+            path("<int:pk>/remove/", wrap(self.remove_view), name="leases_leasepayment_remove"),
+            path("for-lease/<int:lease_pk>/add/", wrap(self.add_view_json), name="leases_leasepayment_add_to"),
+            path("bulk/", wrap(self.bulk_view), name="leases_leasepayment_bulk"),
+        ]
         return custom + super().get_urls()
 
     def record_view(self, request, pk):
@@ -233,4 +294,106 @@ class PaymentApiMixin:
                 )
         except ValidationError as exc:
             return fail(*exc.messages)
+        return JsonResponse({"ok": True, "redirect": ""})
+
+    def edit_view(self, request, pk):
+        if not self.has_change_permission(request):
+            return refuse()
+        payment = get_object_or_404(LeasePayment.objects.select_related("lease"), pk=pk)
+        if request.method == "GET":
+            return JsonResponse({
+                "ok": True, "values": payment_values(payment), "code": payment.lease.code, "part": payment.part,
+                "can_remove": payment.status != LeasePayment.Status.PAID and request.user.has_perm("leases.delete_leasepayment"),
+            })
+        if request.method != "POST":
+            return fail("This must be sent as a form.", status=405)
+        try:
+            apply_payment(payment, request.POST)
+            payment.save()
+        except ValidationError as exc:
+            return fail(*exc.messages)
+        messages.success(request, f"Payment {payment.part} of {payment.lease.code} was updated.", extra_tags=titled("Payment updated"))
+        return JsonResponse({"ok": True, "redirect": ""})
+
+    def remove_view(self, request, pk):
+        if request.method != "POST":
+            return fail("This must be sent as a form.", status=405)
+        if not request.user.has_perm("leases.delete_leasepayment"):
+            return refuse()
+        payment = get_object_or_404(LeasePayment.objects.select_related("lease"), pk=pk)
+        if payment.status == LeasePayment.Status.PAID:
+            return fail("A payment that was received cannot be removed.")
+        label = f"Payment {payment.part} of {payment.lease.code}"
+        payment.delete()
+        messages.success(request, f"{label} was removed.", extra_tags=titled("Payment removed"))
+        return JsonResponse({"ok": True, "redirect": ""})
+
+    def add_view_json(self, request, lease_pk):
+        if request.method != "POST":
+            return fail("This must be sent as a form.", status=405)
+        if not request.user.has_perm("leases.add_leasepayment"):
+            return refuse()
+        lease = get_object_or_404(Lease, pk=lease_pk)
+        payment = LeasePayment(lease=lease, part=(lease.payments.aggregate(m=Max("part"))["m"] or 0) + 1)
+        try:
+            data = request.POST.copy()
+            data.setdefault("status", LeasePayment.Status.PENDING)
+            apply_payment(payment, data)
+            payment.save()
+        except ValidationError as exc:
+            return fail(*exc.messages)
+        messages.success(request, f"Payment {payment.part} was added to {lease.code}.", extra_tags=titled("Payment added"))
+        return JsonResponse({"ok": True, "redirect": ""})
+
+    def bulk_view(self, request):
+        """Mark many ticked payments as paid, or their cheques as deposited, in one go.
+
+        Safe when several people work at once: the rows are locked while they are changed, and a payment that
+        someone else has already received is skipped instead of being recorded twice."""
+        if request.method != "POST":
+            return fail("This must be sent as a form.", status=405)
+        if not self.has_change_permission(request):
+            return refuse()
+        ids = [int(x) for x in (request.POST.get("ids") or "").split(",") if x.strip().isdigit()]
+        if not ids:
+            return fail("Tick the payments in the list first.")
+        if len(ids) > 500:
+            return fail("Tick at most 500 payments at a time.")
+        action = request.POST.get("action", "")
+        if action not in ("paid", "deposited"):
+            return fail("Choose what to do with the ticked payments.")
+        method = request.POST.get("method", "")
+        if method and method not in LeasePayment.Method.values:
+            return fail("Choose how the payments were made.")
+        try:
+            on = read_date(request.POST.get("date"), "date")
+        except ValidationError as exc:
+            return fail(*exc.messages)
+
+        done = skipped = 0
+        with transaction.atomic():
+            for payment in LeasePayment.objects.select_for_update().select_related("lease").filter(pk__in=ids).order_by("pk"):
+                try:
+                    if action == "paid":
+                        if payment.status == LeasePayment.Status.PAID:
+                            skipped += 1
+                            continue
+                        payment.record(on, method or payment.method, payment.cheque_number, payment.bank_name)
+                    else:
+                        if payment.method != LeasePayment.Method.CHEQUE or payment.deposited_on or payment.status == LeasePayment.Status.BOUNCED:
+                            skipped += 1
+                            continue
+                        payment.deposited_on = on
+                        payment.save()
+                except ValidationError:
+                    skipped += 1
+                    continue
+                done += 1
+        what = "marked as paid" if action == "paid" else "marked as deposited"
+        if not done:
+            return fail(f"Nothing was changed: {skipped} of the ticked payment(s) did not need it" + (" (already received)." if action == "paid" else " (not an undeposited cheque, or the date is before the date on the cheque)."))
+        text = f"{done} payment(s) {what} on {fmt_date(on)}."
+        if skipped:
+            text += f" {skipped} skipped."
+        messages.success(request, text, extra_tags=titled("Payments updated"))
         return JsonResponse({"ok": True, "redirect": ""})

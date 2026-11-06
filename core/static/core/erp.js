@@ -1547,7 +1547,111 @@
     window.addEventListener("load", function () { enhanceAll(document); });
   }
 
+  /* No saved-entry suggestions. Browsers (Edge / Chrome "Saved info", autofill) ignore autocomplete="off"
+     on name, email, phone and address fields, so on top of the attribute these fields are kept read-only
+     until you click into them (the browser only offers saved info to fields it can fill). The sign-in
+     page (password manager) is left alone. */
+  function noAutofill() {
+    var LIKELY = /name|mail|phone|mobile|tel|address|street|city|country|state|zip|postal|po_box|emirate|passport|card|iban|birth|company|organi[sz]ation|license|licence|trn|tax|nationality|id_number|contact/i;
+    var SKIP_TYPES = /^(password|hidden|checkbox|radio|file|submit|button|reset|image|color|range|date|datetime-local|time|month|week)$/;
+
+    function labelText(el) {
+      var text = "";
+      if (el.id) {
+        var l = document.querySelector('label[for="' + el.id.replace(/"/g, "") + '"]');
+        if (l) { text = l.textContent; }
+      }
+      return text;
+    }
+
+    function likely(el) {
+      var type = (el.getAttribute("type") || "text").toLowerCase();
+      if (type === "email" || type === "tel") { return true; }
+      return LIKELY.test([el.name, el.id, el.getAttribute("placeholder"), el.getAttribute("aria-label"), labelText(el)].join(" "));
+    }
+
+    function lockable(el) {
+      return el.matches("input, textarea") && !el.readOnly && !el.disabled && !el.hasAttribute("data-erp-search") && !el.hasAttribute("data-erp-native");
+    }
+
+    function unlockAll(form) {
+      Array.prototype.forEach.call(form.querySelectorAll("[data-erp-lock]"), function (el) {
+        el.removeAttribute("readonly");
+        el.removeAttribute("data-erp-lock");
+      });
+    }
+
+    function prepare(el) {
+      var type = (el.getAttribute("type") || "text").toLowerCase();
+      if (SKIP_TYPES.test(type) || el.dataset.erpNoFill) { return; }
+      var form = el.form;
+      if (form && form.querySelector('input[type="password"]')) { return; }
+      el.dataset.erpNoFill = "1";
+      var strong = likely(el);
+      el.setAttribute("autocomplete", strong ? "new-entry" : "off");
+      if (!strong || !el.matches("input, textarea")) { return; }
+      // type=email / tel are what the browser recognises best: show them as plain text boxes.
+      if (type === "email") { el.setAttribute("inputmode", "email"); el.setAttribute("type", "text"); }
+      if (type === "tel") { el.setAttribute("inputmode", "tel"); el.setAttribute("type", "text"); }
+      if (!lockable(el)) { return; }
+      el.setAttribute("readonly", "readonly");
+      el.setAttribute("data-erp-lock", "1");
+    }
+
+    function fix(root) {
+      var forms = root.matches && root.matches("form") ? [root] : [];
+      if (root.querySelectorAll) { forms = forms.concat(Array.prototype.slice.call(root.querySelectorAll("form"))); }
+      forms.forEach(function (form) {
+        if (!form.querySelector('input[type="password"]')) { form.setAttribute("autocomplete", "off"); }
+      });
+      var fields = root.querySelectorAll ? Array.prototype.slice.call(root.querySelectorAll("input, textarea")) : [];
+      if (root.matches && root.matches("input, textarea")) { fields.push(root); }
+      fields.forEach(prepare);
+    }
+
+    // Click or Tab into a locked box: it becomes normal a moment later (after the browser has looked).
+    document.addEventListener("focusin", function (e) {
+      var el = e.target;
+      if (!el || !el.getAttribute || el.getAttribute("data-erp-lock") !== "1") { return; }
+      setTimeout(function () {
+        el.removeAttribute("readonly");
+        if (document.activeElement === el && el.setSelectionRange && /^(text|search|url)$/i.test(el.type || "text")) {
+          var len = el.value.length;
+          try { el.setSelectionRange(len, len); } catch (err) { /* ignore */ }
+        }
+      }, 30);
+    }, true);
+    document.addEventListener("focusout", function (e) {
+      var el = e.target;
+      if (el && el.getAttribute && el.getAttribute("data-erp-lock") === "1") { el.setAttribute("readonly", "readonly"); }
+    }, true);
+    // Saving: unlock everything first so "required" checks and the saved values work normally.
+    document.addEventListener("click", function (e) {
+      var b = e.target && e.target.closest ? e.target.closest('button, input[type="submit"]') : null;
+      if (b && b.form) { unlockAll(b.form); }
+    }, true);
+    document.addEventListener("submit", function (e) { if (e.target && e.target.querySelectorAll) { unlockAll(e.target); } }, true);
+    window.addEventListener("pageshow", function () { fix(document); });
+
+    fix(document);
+    var queued = false;
+    var added = [];
+    new MutationObserver(function (records) {
+      records.forEach(function (r) {
+        Array.prototype.forEach.call(r.addedNodes, function (n) { if (n.nodeType === 1) { added.push(n); } });
+      });
+      if (queued || !added.length) { return; }
+      queued = true;
+      requestAnimationFrame(function () {
+        queued = false;
+        var nodes = added; added = [];
+        nodes.forEach(function (n) { if (n.isConnected) { fix(n); } });
+      });
+    }).observe(document.body, { childList: true, subtree: true });
+  }
+
   function init() {
+    noAutofill();
     customSelects();
     fileWidgets();
     showToasts();

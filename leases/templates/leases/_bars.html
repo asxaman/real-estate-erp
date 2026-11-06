@@ -1,0 +1,26 @@
+<div class="erp-toolbar">
+  <div class="erp-reports">
+    {% if report_links %}<span>Reports</span>{% for label, url in report_links %}<a href="{{ url }}">{{ label }}</a>{% endfor %}{% endif %}
+  </div>
+</div>
+{% if filter_bar or per_options %}
+<div class="erp-fbar" role="group" aria-label="Filters">
+  {% for f in filter_bar %}
+  <label class="erp-fsel{% if f.active %} is-on{% endif %}">
+    <span>{{ f.title }}</span>
+    <select data-erp-nav="1">
+      {% for url, display, selected in f.options %}<option value="{{ url }}"{% if selected %} selected{% endif %}>{{ display }}</option>{% endfor %}
+    </select>
+  </label>
+  {% endfor %}
+  {% if per_options %}
+  <label class="erp-fsel">
+    <span>Rows per page</span>
+    <select data-erp-nav="1">
+      {% for n, url, selected in per_options %}<option value="{{ url }}"{% if selected %} selected{% endif %}>{{ n }}</option>{% endfor %}
+    </select>
+  </label>
+  {% endif %}
+  {% if filter_bar %}<a class="erp-fclear" href="?">Clear filters</a>{% endif %}
+</div>
+{% endif %}

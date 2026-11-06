@@ -655,3 +655,51 @@ html.dark .erp-row-now td { background: #0b1d3a; }
 html.dark .erp-attn li { border-color: #1f2937; }
 .erp-attn a { font-weight: 600; text-decoration: none; color: inherit; }
 .erp-attn small { display: block; color: #6b7280; font-weight: 400; }
+
+/* ---- Update 21: leases and rent payments ---------------------------------------------- */
+.erp-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; margin: 0 0 8px; }
+.erp-toolbar .erp-reports { margin: 0; }
+
+.erp-fbar { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px 12px; margin: 0 0 12px; }
+.erp-fsel { display: flex; flex-direction: column; gap: 2px; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: #6b7280; }
+.erp-fsel select { min-width: 140px; max-width: 220px; padding: 5px 28px 5px 10px; border: 1px solid #d1d5db; border-radius: 8px; background-color: #fff; color: #111827; font-size: 13px; text-transform: none; letter-spacing: 0; }
+.erp-fsel .erp-select { width: auto; min-width: 150px; max-width: 240px; }
+.erp-fsel.is-on .erp-select-trigger { border-color: #2563eb; background-color: #eff6ff; }
+html.dark .erp-fsel.is-on .erp-select-trigger { background-color: #0b1d3a; border-color: #2563eb; }
+.erp-fsel.is-on select { border-color: #2563eb; background-color: #eff6ff; }
+html.dark .erp-fsel select { background-color: #111827; color: #f3f4f6; border-color: #374151; }
+html.dark .erp-fsel.is-on select { background-color: #0b1d3a; border-color: #2563eb; }
+.erp-fclear { font-size: 12px; font-weight: 600; color: #6b7280; padding: 6px 4px; text-decoration: none; }
+.erp-fclear:hover { text-decoration: underline; color: #dc2626; }
+
+.erp-pay, .erp-state { display: inline-flex; flex-direction: column; line-height: 1.25; }
+.erp-pay small, .erp-state small { font-size: 11px; color: #6b7280; }
+.erp-pay b { font-weight: 600; }
+.erp-rowacts { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.erp-note { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; border-radius: 50%; background: #e0e7ff; color: #3730a3; font-size: 11px; font-weight: 700; font-style: italic; cursor: help; }
+
+.erp-dlg-wide { max-width: 640px; }
+.erp-dlg-wide .erp-dlg-form { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
+.erp-dlg-wide .erp-dlg-full, .erp-dlg-wide .erp-dlg-note, .erp-dlg-wide .erp-dlg-error { grid-column: 1 / -1; }
+@media (max-width: 560px) { .erp-dlg-wide .erp-dlg-form { grid-template-columns: 1fr; } }
+
+
+/* ---- Update 22: pickers ------------------------------------------------------------------- */
+.erp-pick { position: relative; width: 100%; max-width: 460px; }
+.erp-pick-input { width: 100%; padding: 8px 32px 8px 12px; border: 1px solid #d1d5db; border-radius: 8px; background: #fff; color: #111827; font-size: 14px; }
+.erp-pick-input:focus { outline: 2px solid #93c5fd; border-color: #2563eb; }
+html.dark .erp-pick-input { background: #111827; color: #f3f4f6; border-color: #374151; }
+.erp-pick-clear { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); border: 0; background: transparent; font-size: 18px; line-height: 1; color: #6b7280; cursor: pointer; padding: 2px 6px; }
+.erp-pick-clear[hidden] { display: none; }
+.erp-pick-clear:hover { color: #dc2626; }
+.erp-pick-list { position: absolute; z-index: 60; left: 0; right: 0; top: calc(100% + 4px); margin: 0; padding: 4px; list-style: none; max-height: 280px; overflow-y: auto; background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; box-shadow: 0 10px 28px rgba(0,0,0,.18); }
+.erp-pick-list[hidden] { display: none; }
+html.dark .erp-pick-list { background: #111827; border-color: #374151; }
+.erp-pick-item { display: flex; flex-direction: column; padding: 7px 10px; border-radius: 7px; cursor: pointer; font-size: 14px; }
+.erp-pick-item small { color: #6b7280; font-size: 11px; }
+.erp-pick-item:hover, .erp-pick-item.is-active { background: #eff6ff; }
+html.dark .erp-pick-item:hover, html.dark .erp-pick-item.is-active { background: #0b1d3a; }
+.erp-pick-empty { padding: 10px; color: #6b7280; font-size: 13px; }
+.erp-bulk { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 12px; font-size: 13px; color: #6b7280; }
+.erp-bulk-count { font-weight: 700; color: #1d4ed8; }
+.erp-pager { margin-top: 12px; }

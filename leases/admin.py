@@ -1,5 +1,7 @@
 """Lease pages: summary header, timeline, tabs (Overview, Money, Fees and Ejari, Termination, Payments, Documents, Notes, Activity), list, rent payments."""
+import calendar
 import json
+import re
 from datetime import timedelta
 from decimal import Decimal
 
@@ -22,12 +24,13 @@ from core.admin_utils import ExportPermissionMixin, TooltipHelpMixin, badge, cir
 from core.formats import fmt_date
 from core.toasts import titled
 from core.widgets import use_file_widget
-from properties.models import Property, Unit
-from properties.owner_admin import ActivityInline, DocumentInline, _initials, document_alert
+from properties.models import Owner, Property, Unit
+from properties.owner_admin import ActivityInline, DocumentInline, ReadOnlyInline, _initials, document_alert
 from tenants.models import Tenant
 
 from .api import LeaseApiMixin, PaymentApiMixin
 from .reports import LEASE_HEADERS, PAYMENT_HEADERS, ReportsMixin, lease_rows, payment_rows
+from .pickers import SearchSelect, property_label, unit_label
 from .models import Lease, LeaseDeduction, LeaseDocument, LeaseNote, LeasePayment
 
 OPEN = (LeasePayment.Status.PENDING, LeasePayment.Status.BOUNCED)
@@ -116,6 +119,66 @@ def record_button(payment, label="Record payment", tone="primary"):
     return _button(label, "record", reverse("admin:leases_leasepayment_record", args=[payment.pk]), payment_info(payment), tone)
 
 
+def edit_button(payment, label="Edit"):
+    return _button(label, "editpay", reverse("admin:leases_leasepayment_edit", args=[payment.pk]), {"code": payment.lease.code, "part": payment.part})
+
+
+def due_cell(payment, today=None):
+    """The due date, coloured, with 'in 3 days' / '5 days overdue' underneath."""
+    today = today or timezone.localdate()
+    days = (payment.due_date - today).days
+    if payment.status == LeasePayment.Status.PAID:
+        tone, note = "ok", "paid"
+    elif payment.status == LeasePayment.Status.BOUNCED:
+        tone, note = "bad", "bounced"
+    elif days < 0:
+        tone, note = "bad", f"{-days} day{'s' if days != -1 else ''} overdue"
+    elif days == 0:
+        tone, note = "warn", "due today"
+    elif days <= 7:
+        tone, note = "warn", f"in {days} day{'s' if days != 1 else ''}"
+    else:
+        tone, note = "mute", f"in {days} days"
+    return format_html('<span class="erp-due erp-due-{}"><b>{}</b><small>{}</small></span>', tone, fmt_date(payment.due_date), note)
+
+
+def pay_cell(payment):
+    """How it is paid in one cell: 'Cheque · 004512 · ENBD' with the cheque and deposit dates in small text."""
+    if payment.method == LeasePayment.Method.CHEQUE:
+        main = " · ".join(part for part in ("Cheque", payment.cheque_number or "no number yet", payment.bank_name) if part)
+        small = []
+        if payment.cheque_date:
+            small.append(f"dated {fmt_date(payment.cheque_date)}")
+        if payment.deposited_on:
+            small.append(f"deposited {fmt_date(payment.deposited_on)}")
+    else:
+        main, small = payment.get_method_display(), []
+    return format_html('<span class="erp-pay"><b>{}</b><small>{}</small></span>', main, " · ".join(small))
+
+
+def state_cell(payment, today=None):
+    """Status badge with the paid date, or the days late and the late fee, underneath."""
+    today = today or timezone.localdate()
+    if payment.status == LeasePayment.Status.PAID:
+        label, tone, small = "Paid", "success", f"on {fmt_date(payment.paid_on)}" if payment.paid_on else ""
+    elif payment.status == LeasePayment.Status.BOUNCED:
+        label, tone, small = "Bounced", "danger", ""
+    elif payment.is_overdue(today):
+        days = payment.days_overdue(today)
+        fee = payment.late_fee(today)
+        label, tone = "Overdue", "danger"
+        small = f"{days} day{'s' if days != 1 else ''} late" + (f" · fee {_money(fee)}" if fee else "")
+    else:
+        label, tone, small = "Pending", "neutral", ""
+    return format_html('<span class="erp-state">{}<small>{}</small></span>', badge(label, tone), small)
+
+
+def note_mark(payment):
+    if not payment.notes:
+        return ""
+    return format_html('<span class="erp-note" title="{}">i</span>', payment.notes)
+
+
 def lease_info(lease, today=None):
     """What the Renew / Terminate / Cheques pop-ups need to know (read from data-info in the page)."""
     today = today or timezone.localdate()
@@ -134,19 +197,48 @@ def lease_info(lease, today=None):
 # ---------------------------------------------------------------------------------------
 # Tabs (inlines)
 # ---------------------------------------------------------------------------------------
-class LeasePaymentInline(TabularInline):
+class LeasePaymentInline(ReadOnlyInline):
+    """The payment schedule as a compact table. Each row has Record / Edit buttons that open a pop-up."""
+
     model = LeasePayment
     tab = True
-    extra = 0
-    fields = ("part", "due_date", "amount", "method", "cheque_number", "bank_name", "cheque_date", "deposited_on", "status", "paid_on", "notes", "quick")
-    readonly_fields = ("quick",)
+    verbose_name_plural = "Payments"
+    fields = ("no", "due", "amount_cell", "pay", "state", "actions_cell")
+    readonly_fields = fields
     ordering = ("due_date", "part")
 
+    def get_queryset(self, request):
+        return super().get_queryset(request).select_related("lease")
+
+    @admin.display(description="#")
+    def no(self, obj):
+        return obj.part
+
+    @admin.display(description="Due on")
+    def due(self, obj):
+        return due_cell(obj)
+
+    @admin.display(description="Amount")
+    def amount_cell(self, obj):
+        if obj.lease.vat_applies:
+            return format_html('<span class="erp-pay"><b>{}</b><small>{} + {} VAT</small></span>', _money(obj.total), format_amount(obj.amount), format_amount(obj.vat))
+        return _money(obj.amount)
+
+    @admin.display(description="Payment")
+    def pay(self, obj):
+        return pay_cell(obj)
+
+    @admin.display(description="Status")
+    def state(self, obj):
+        return state_cell(obj)
+
     @admin.display(description="")
-    def quick(self, obj):
+    def actions_cell(self, obj):
         if obj is None or not obj.pk:
             return ""
-        return record_button(obj, "Record", "primary")
+        return format_html(
+            '<span class="erp-rowacts">{}{}{}</span>', note_mark(obj), record_button(obj, "Record", "primary"), edit_button(obj),
+        )
 
 
 class LeaseDocumentForm(forms.ModelForm):
@@ -270,6 +362,159 @@ class PaymentOverdueFilter(admin.SimpleListFilter):
         return queryset
 
 
+def month_choices(back=6, ahead=12):
+    """('2026-11', 'November 2026') for a few months either side of today."""
+    today = timezone.localdate()
+    out = []
+    for offset in range(-back, ahead + 1):
+        year, month = divmod(today.year * 12 + today.month - 1 + offset, 12)
+        out.append((f"{year}-{month + 1:02d}", f"{calendar.month_name[month + 1]} {year}"))
+    return out
+
+
+class BuildingFilter(admin.SimpleListFilter):
+    title = "Building"
+    parameter_name = "building"
+    field = "property_id"  # where a lease or payment keeps its building
+    unit_field = "unit__property_id"
+
+    def lookups(self, request, model_admin):
+        return list(Property.objects.filter(leases__isnull=False).distinct().order_by("name").values_list("pk", "name"))
+
+    def queryset(self, request, queryset):
+        value = self.value() or ""
+        if not value.isdigit():
+            return queryset
+        return queryset.filter(Q(**{self.field: int(value)}) | Q(**{self.unit_field: int(value)}))
+
+
+class OwnerFilter(admin.SimpleListFilter):
+    title = "Owner"
+    parameter_name = "owner"
+    field = "property__owner_id"
+
+    def lookups(self, request, model_admin):
+        return list(Owner.objects.filter(properties__leases__isnull=False).distinct().order_by("name").values_list("pk", "name"))
+
+    def queryset(self, request, queryset):
+        return queryset.filter(**{self.field: int(self.value())}) if (self.value() or "").isdigit() else queryset
+
+
+class MonthFilter(admin.SimpleListFilter):
+    field = "due_date"
+
+    def lookups(self, request, model_admin):
+        return month_choices()
+
+    def queryset(self, request, queryset):
+        match = re.fullmatch(r"(\d{4})-(\d{2})", self.value() or "")
+        if not match or not 1 <= int(match.group(2)) <= 12:
+            return queryset
+        return queryset.filter(**{f"{self.field}__year": int(match.group(1)), f"{self.field}__month": int(match.group(2))})
+
+
+class LeaseBuildingFilter(BuildingFilter):
+    field = "property_id"
+
+
+class PaymentBuildingFilter(BuildingFilter):
+    field = "lease__property_id"
+    unit_field = "lease__unit__property_id"
+
+
+class LeaseOwnerFilter(OwnerFilter):
+    field = "property__owner_id"
+
+
+class PaymentOwnerFilter(OwnerFilter):
+    field = "lease__property__owner_id"
+
+
+class EndMonthFilter(MonthFilter):
+    title = "Ends in"
+    parameter_name = "ends"
+    field = "end_date"
+
+
+class DueMonthFilter(MonthFilter):
+    title = "Due in"
+    parameter_name = "month"
+    field = "due_date"
+
+
+PER_PAGE_CHOICES = (50, 100, 200)
+_PAGED = {}
+
+
+def paged(base):
+    """A change list class that honours ?per=50|100|200 (rows per page).
+
+    Django treats every unknown address parameter as a database lookup (and redirects with ?e=1), so
+    'per' is taken out of the request while the list is built and put back into every link it makes.
+    """
+    if base not in _PAGED:
+        class Paged(base):
+            def __init__(self, request, *args, **kwargs):
+                self.per = None
+                value = request.GET.get("per", "")
+                if value.isdigit() and int(value) in PER_PAGE_CHOICES:
+                    self.per = int(value)
+                original = request.GET
+                if "per" in original:
+                    clean = original.copy()
+                    clean.pop("per", None)
+                    request.GET = clean
+                try:
+                    super().__init__(request, *args, **kwargs)
+                finally:
+                    request.GET = original
+
+            def get_results(self, request):
+                if self.per:
+                    self.list_per_page = self.per
+                super().get_results(request)
+
+            def get_query_string(self, new_params=None, remove=None):
+                new_params = dict(new_params or {})
+                if self.per and "per" not in new_params and "per" not in (remove or []):
+                    new_params["per"] = self.per
+                return super().get_query_string(new_params, remove)
+
+        Paged.__name__ = Paged.__qualname__ = f"Paged{base.__name__}"
+        _PAGED[base] = Paged
+    return _PAGED[base]
+
+
+def build_filter_bar(cl):
+    """The list's filters as drop-downs for the bar above the table (read from the change list's own filters)."""
+    bar = []
+    for spec in cl.filter_specs:
+        choices = list(spec.choices(cl))
+        if len(choices) < 2:
+            continue
+        options = [(c["query_string"], c["display"], bool(c["selected"])) for c in choices]
+        bar.append({"title": spec.title, "options": options, "active": any(sel for _, _, sel in options[1:])})
+    return bar
+
+
+class FilterBarMixin:
+    """Drop-down filters above the table and a 'rows per page' choice (50 / 100 / 200)."""
+
+    list_per_page = 50
+
+    def get_changelist(self, request, **kwargs):
+        return paged(super().get_changelist(request, **kwargs))
+
+    def changelist_view(self, request, extra_context=None):
+        response = super().changelist_view(request, extra_context)
+        data = getattr(response, "context_data", None)
+        if data is not None and data.get("cl") is not None:
+            cl = data["cl"]
+            data["filter_bar"] = build_filter_bar(cl)
+            data["per_options"] = [(n, cl.get_query_string({"per": n}, ["p"]), n == cl.list_per_page) for n in PER_PAGE_CHOICES]
+        return response
+
+
 class ReceivedFilter(admin.SimpleListFilter):
     title = "Received"
     parameter_name = "received"
@@ -295,6 +540,11 @@ class LeaseAdminForm(forms.ModelForm):
     class Meta:
         model = Lease
         fields = "__all__"
+        widgets = {
+            "tenant": SearchSelect(attrs={"data-erp-native": "1", "data-erp-search": "tenant", "data-placeholder": "Type a name, phone or email"}),
+            "unit": SearchSelect(attrs={"data-erp-native": "1", "data-erp-search": "unit", "data-placeholder": "Type a unit or building"}),
+            "property": SearchSelect(attrs={"data-erp-native": "1", "data-erp-search": "property", "data-placeholder": "Type a property name or code"}),
+        }
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -308,14 +558,14 @@ class LeaseAdminForm(forms.ModelForm):
         if current.pk and current.unit_id:
             units = Unit.objects.select_related("property").filter(Q(property__is_active=True) | Q(pk=current.unit_id))
         self.fields["unit"].queryset = units.order_by("property__code", "floor_sort", "unit_number")
-        self.fields["unit"].label_from_instance = lambda u: f"{u.property.code}-{u.unit_number} · {u.property.name}"
+        self.fields["unit"].label_from_instance = unit_label
         standalone = Property.objects.exclude(property_type__in=Property.BUILDING_TYPES).filter(is_active=True)
         if current.pk and current.property_id:
             standalone = Property.objects.exclude(property_type__in=Property.BUILDING_TYPES).filter(
                 Q(is_active=True) | Q(pk=current.property_id)
             )
         self.fields["property"].queryset = standalone.order_by("code")
-        self.fields["property"].label_from_instance = lambda p: f"{p.code} · {p.name}"
+        self.fields["property"].label_from_instance = property_label
         hints = {
             "annual_rent": "e.g. 65000",
             "security_deposit": "0 if none",
@@ -330,13 +580,13 @@ class LeaseAdminForm(forms.ModelForm):
 
 
 @admin.register(Lease)
-class LeaseAdmin(LeaseApiMixin, ReportsMixin, ExportPermissionMixin, TooltipHelpMixin, ModelAdmin):
+class LeaseAdmin(LeaseApiMixin, ReportsMixin, ExportPermissionMixin, FilterBarMixin, TooltipHelpMixin, ModelAdmin):
     form = LeaseAdminForm
     compressed_fields = True
     list_display = ("code", "tenant_name", "rented", "period", "rent", "state_badge", "payments_badge", "quick")
     list_before_template = "leases/chips.html"
     list_display_links = ("code",)
-    list_filter = (StateFilter, OverdueFilter, "vat_applies", "installments")
+    list_filter = (StateFilter, OverdueFilter, LeaseBuildingFilter, LeaseOwnerFilter, EndMonthFilter, "vat_applies", "installments")
     search_fields = (
         "code", "tenant__name", "tenant__code", "tenant__email", "tenant__phone", "property__name", "property__code",
         "unit__unit_number", "ejari_number",
@@ -363,7 +613,7 @@ class LeaseAdmin(LeaseApiMixin, ReportsMixin, ExportPermissionMixin, TooltipHelp
         },
     )
     _fees = (
-        "Deposit, fees and Ejari",
+        "Deposit, Fees and Ejari",
         {
             "classes": ["tab"],
             "fields": (
@@ -622,6 +872,10 @@ class LeaseAdmin(LeaseApiMixin, ReportsMixin, ExportPermissionMixin, TooltipHelp
             next_payment.lease = obj
             actions.append(record_button(next_payment, "Record payment", "primary"))
             actions.append(_button("Cheque numbers", "cheques", reverse("admin:leases_lease_cheques", args=[obj.pk]), lease_info(obj, today)))
+        actions.append(_button(
+            "Add payment", "addpay", reverse("admin:leases_leasepayment_add_to", args=[obj.pk]),
+            {"code": obj.code, "today": today.isoformat(), "number": max((p.part for p in payments), default=0) + 1},
+        ))
         if obj.status == Lease.Status.ACTIVE:
             if not obj.renewals.exists():
                 actions.append(_button("Renew", "renew", reverse("admin:leases_lease_renew", args=[obj.pk]), lease_info(obj, today)))
@@ -718,12 +972,12 @@ class LeaseAdmin(LeaseApiMixin, ReportsMixin, ExportPermissionMixin, TooltipHelp
 # Rent payments (every instalment of every lease in one list)
 # ---------------------------------------------------------------------------------------
 @admin.register(LeasePayment)
-class LeasePaymentAdmin(PaymentApiMixin, ExportPermissionMixin, TooltipHelpMixin, ModelAdmin):
+class LeasePaymentAdmin(PaymentApiMixin, ExportPermissionMixin, FilterBarMixin, TooltipHelpMixin, ModelAdmin):
     compressed_fields = True
     list_before_template = "leases/payment_strip.html"
-    list_display = ("due", "lease_link", "tenant_name", "rented", "amount_text", "method", "cheque_number", "state_badge", "days_late", "quick")
+    list_display = ("due", "lease_link", "party", "amount_text", "pay_details", "status_cell", "quick")
     list_display_links = ("due",)
-    list_filter = ("status", PaymentOverdueFilter, ReceivedFilter, "method", ("due_date", admin.DateFieldListFilter))
+    list_filter = ("status", PaymentOverdueFilter, DueMonthFilter, PaymentBuildingFilter, PaymentOwnerFilter, ReceivedFilter, "method", ("due_date", admin.DateFieldListFilter))
     search_fields = (
         "lease__code", "lease__tenant__name", "lease__tenant__code", "cheque_number", "bank_name",
         "lease__property__name", "lease__unit__unit_number",
@@ -742,19 +996,23 @@ class LeasePaymentAdmin(PaymentApiMixin, ExportPermissionMixin, TooltipHelpMixin
 
     @admin.display(description="")
     def quick(self, obj):
-        return record_button(obj, "Record", "primary") or "-"
+        return format_html('<span class="erp-rowacts">{}{}{}</span>', note_mark(obj), record_button(obj, "Record", "primary"), edit_button(obj))
+
+    @admin.display(description="Tenant", ordering="lease__tenant__name")
+    def party(self, obj):
+        return format_html('<span class="erp-pay"><b>{}</b><small>{}</small></span>', obj.lease.tenant.name, obj.lease.item_name)
+
+    @admin.display(description="Payment")
+    def pay_details(self, obj):
+        return pay_cell(obj)
+
+    @admin.display(description="Status")
+    def status_cell(self, obj):
+        return state_cell(obj)
 
     @admin.display(description="Lease", ordering="lease__code")
     def lease_link(self, obj):
         return format_html('<a href="{}">{}</a>', reverse("admin:leases_lease_change", args=[obj.lease_id]), obj.lease.code)
-
-    @admin.display(description="Tenant")
-    def tenant_name(self, obj):
-        return obj.lease.tenant.name
-
-    @admin.display(description="Rented")
-    def rented(self, obj):
-        return obj.lease.item_name
 
     @admin.display(description="Amount", ordering="amount")
     def amount_text(self, obj):
@@ -763,38 +1021,7 @@ class LeasePaymentAdmin(PaymentApiMixin, ExportPermissionMixin, TooltipHelpMixin
 
     @admin.display(description="Due on", ordering="due_date")
     def due(self, obj):
-        today = timezone.localdate()
-        days = (obj.due_date - today).days
-        if obj.status == LeasePayment.Status.PAID:
-            tone, note = "ok", "paid"
-        elif obj.status == LeasePayment.Status.BOUNCED:
-            tone, note = "bad", "bounced"
-        elif days < 0:
-            tone, note = "bad", f"{-days} day{'s' if days != -1 else ''} overdue"
-        elif days == 0:
-            tone, note = "warn", "due today"
-        elif days <= 7:
-            tone, note = "warn", f"in {days} day{'s' if days != 1 else ''}"
-        else:
-            tone, note = "mute", f"in {days} days"
-        return format_html('<span class="erp-due erp-due-{}"><b>{}</b><small>{}</small></span>', tone, fmt_date(obj.due_date), note)
-
-    @admin.display(description="Days late")
-    def days_late(self, obj):
-        days = obj.days_overdue()
-        if not days:
-            return "-"
-        fee = obj.late_fee()
-        text = f"{days} day{'s' if days != 1 else ''}"
-        return f"{text} · fee {_money(fee)}" if fee else text
-
-    @display(description="Status", label={"Paid": "success", "Pending": "info", "Overdue": "danger", "Bounced": "danger"})
-    def state_badge(self, obj):
-        if obj.status == LeasePayment.Status.PAID:
-            return "Paid"
-        if obj.status == LeasePayment.Status.BOUNCED:
-            return "Bounced"
-        return "Overdue" if obj.is_overdue() else "Pending"
+        return due_cell(obj)
 
     @admin.action(description="Export selected payments to Excel", permissions=["export"])
     def export_excel(self, request, queryset):
@@ -807,6 +1034,8 @@ class LeasePaymentAdmin(PaymentApiMixin, ExportPermissionMixin, TooltipHelpMixin
     def changelist_view(self, request, extra_context=None):
         extra_context = dict(extra_context or {})
         extra_context["pay_strip"] = self._strip()
+        if self.has_change_permission(request):
+            extra_context["bulk_url"] = reverse("admin:leases_leasepayment_bulk")
         extra_context["report_links"] = [
             ("Monthly collection", reverse("admin:leases_lease_monthly")), ("Rent roll", reverse("admin:leases_lease_rentroll")),
         ]

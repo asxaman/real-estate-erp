@@ -308,3 +308,24 @@ Run `python manage.py makemigrations`, then `migrate`, then `test`.
 - Export to Excel / CSV for selected leases and selected payments. New permissions "Can export leases" and "Can export rent payments"; Property Manager and Accountant roles get them.
 - Printable pages from the lease header: Tenancy summary and Payment statement (browser Print / Save as PDF).
 - Dashboard: "Needs attention" list (overdue payments, bounced cheques, payments due this week, leases ending without renewal, Ejari expiring) and "Next leases to end" with a Renew button.
+
+### Update 21 - Leases and rent payments: compact look
+No migration needed. Run `python manage.py test`, then Ctrl+F5.
+- The payment schedule on the lease page is now a compact table: Due (coloured), Amount, Payment (`Cheque · 004512 · ENBD` with cheque and deposit dates in small text), Status (with the paid date or days late). Notes show as a small "i" icon.
+- Payments are edited in a pop-up (Edit button on every row): due date, amount, method, cheque number, bank, cheque date, deposited-on, status, date received, note. Unpaid payments can be removed there. "Add payment" in the lease header adds one more payment.
+- The Rent payments list has fewer, merged columns (Tenant + what is rented, Payment, Status) with Record and Edit buttons on each row.
+- Filters also appear as a row of drop-downs above the table, with "Clear filters".
+
+### Update 22 - Leases and rent payments: ready for thousands
+No migration needed. Run `python manage.py test`, then Ctrl+F5.
+- Lease form: Tenant, Unit and Property are now search-as-you-type boxes (type a name, phone, unit or building). The page no longer carries a list of every tenant and unit, so it stays fast with thousands. Blacklisted or inactive tenants and inactive buildings are not offered.
+- Rows per page (50 / 100 / 200) on the Leases and Rent payments lists; the choice is kept while filtering. The default is now 50.
+- New filters: Building, Owner and a month filter (Ends in / Due in) on both lists.
+- Rent roll: search box, paging (50 / 100 / 200 rows) and totals for all pages; Excel / CSV download follows the search.
+- Rent payments list: tick rows, then "Mark as paid" (choose the date, and optionally how it was paid) or "Mark cheques as deposited". Payments already received are skipped, so two people working at the same time cannot record the same payment twice (up to 500 at a time).
+- Removed (before testing Update 22, at the owner's request): the "Compact view" switch from Update 21 and all its styling (smaller rows, fixed heading row and columns, tighter lease header). The merged payment cells, the Edit pop-up and the drop-down filter bar stay.
+
+### Update 23 - No browser suggestions, same drop-downs everywhere
+No migration needed. Press Ctrl+F5.
+- Browser suggestions and autofill are switched off on every form (add and change pages, pop-ups, inline rows, search boxes). The sign-in page is left alone so your password manager still works.
+- The filter drop-downs above the Leases and Rent payments lists (Status, Due, Building, Owner, Rows per page ...) now use the same styled drop-down as the rest of the system.

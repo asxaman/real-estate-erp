@@ -3,10 +3,12 @@ import calendar
 from datetime import date, timedelta
 from decimal import Decimal
 
+from django.core.paginator import Paginator
 from django.http import Http404
 from django.shortcuts import get_object_or_404
 from django.template.response import TemplateResponse
 from django.urls import path, reverse
+from django.utils.http import urlencode
 from django.utils import timezone
 
 from core import exports
@@ -134,6 +136,13 @@ class ReportsMixin:
         if not self.has_view_permission(request):
             raise Http404
         rows = roll_rows()
+        search = (request.GET.get("q") or "").strip()
+        if search:
+            needle = search.lower()
+            rows = [
+                r for r in rows
+                if needle in f'{r["property"]} {r["rented"]} {r["tenant"]} {r["lease"].code}'.lower()
+            ]
         kind = request.GET.get("export", "")
         if kind in ("xlsx", "csv"):
             if not self.has_export_permission(request):
@@ -150,8 +159,18 @@ class ReportsMixin:
             "rent": sum((r["rent"] for r in rows), ZERO), "monthly": sum((r["monthly"] for r in rows), ZERO),
             "paid": sum((r["paid"] for r in rows), ZERO), "overdue": sum((r["overdue"] for r in rows), ZERO),
         }
+        per = request.GET.get("per", "")
+        per = int(per) if per.isdigit() and int(per) in (50, 100, 200) else 50
+        page = Paginator(rows, per).get_page(request.GET.get("page"))
+        base = {k: v for k, v in (("q", search), ("per", per)) if v}
+        link = lambda **extra: "?" + urlencode({**base, **extra})  # noqa: E731
         return self._page(
-            request, "leases/rent_roll.html", "Rent roll", rows=rows, totals=totals, today=timezone.localdate(),
+            request, "leases/rent_roll.html", "Rent roll", rows=page.object_list, page=page, totals=totals,
+            total_rows=len(rows), today=timezone.localdate(), search=search, per=per,
+            per_options=[(n, link(per=n, page=1), n == per) for n in (50, 100, 200)],
+            prev_url=link(page=page.previous_page_number()) if page.has_previous() else "",
+            next_url=link(page=page.next_page_number()) if page.has_next() else "",
+            export_query=urlencode({"q": search}) if search else "",
             can_export=self.has_export_permission(request),
             list_url=reverse("admin:leases_lease_changelist"),
         )
