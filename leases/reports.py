@@ -13,7 +13,7 @@ from django.utils import timezone
 
 from core import exports
 
-from .models import Lease, LeasePayment
+from .models import Lease, LeasePayment, running_q
 
 OPEN = (LeasePayment.Status.PENDING, LeasePayment.Status.BOUNCED)
 ZERO = Decimal("0.00")
@@ -46,11 +46,11 @@ def lease_rows(queryset):
         payments = list(lease.payments.all())
         payments = [p for p in payments if p.is_rent]  # rent only: the deposit and fees have their own columns
         paid = sum((p.total for p in payments if p.status == LeasePayment.Status.PAID), ZERO)
-        total = sum((p.total for p in payments), ZERO)
+        total = sum((p.total for p in payments if p.status != LeasePayment.Status.WAIVED), ZERO)  # written-off lines are not owed
         yield [
             lease.code, lease.tenant.name, lease.item_name, lease.start_date, lease.end_date, _state_text(lease, today),
             lease.annual_rent, "Yes" if lease.vat_applies else "No", lease.installments, paid, max(total - paid, ZERO),
-            sum(1 for p in payments if p.is_overdue(today)), lease.security_deposit, lease.get_deposit_status_display(),
+            sum(1 for p in payments if p.is_overdue(today)), lease.security_deposit, lease.deposit_state(),
             lease.commission, lease.admin_fee, lease.ejari_fee, lease.ejari_number, lease.ejari_expiry or "", lease.notes,
         ]
 
@@ -68,7 +68,7 @@ def roll_rows():
     """One row for every lease that is running today (the rent roll)."""
     today = timezone.localdate()
     leases = (
-        Lease.objects.filter(status=Lease.Status.ACTIVE, start_date__lte=today, end_date__gte=today)
+        Lease.objects.filter(running_q(today))
         .select_related("tenant", "unit__property", "property").prefetch_related("payments")
     )
     rows = []
@@ -79,7 +79,7 @@ def roll_rows():
         upcoming = sorted((p for p in payments if p.status == LeasePayment.Status.PENDING and p.due_date >= today), key=lambda p: p.due_date)
         rows.append({
             "lease": lease, "property": lease.property.name, "rented": lease.item_name, "tenant": lease.tenant.name,
-            "ends": lease.end_date, "rent": lease.annual_rent, "monthly": (lease.annual_rent / 12).quantize(Decimal("0.01")),
+            "ends": lease.effective_end, "rent": lease.annual_rent, "monthly": (lease.annual_rent / 12).quantize(Decimal("0.01")),
             "vat": lease.vat_applies, "paid": paid, "overdue": overdue,
             "next_due": upcoming[0].due_date if upcoming else None, "next_amount": upcoming[0].total if upcoming else None,
         })
@@ -91,6 +91,8 @@ def monthly_rows(year):
     today = timezone.localdate()
     months = {m: {"expected": ZERO, "received": ZERO, "count": 0} for m in range(1, 13)}
     for p in LeasePayment.objects.filter(due_date__year=year, kind=LeasePayment.Kind.RENT).select_related("lease"):
+        if p.status == LeasePayment.Status.WAIVED:
+            continue  # written off: nothing is expected for it
         row = months[p.due_date.month]
         row["count"] += 1
         row["expected"] += p.total

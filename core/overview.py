@@ -160,7 +160,7 @@ def _lease_panels(user, panels):
             if totals["n"]:
                 items.append({"label": label, "count": totals["n"], "detail": _money(totals["money"]), "url": url, "tone": tone})
 
-        add("Overdue payments", payments.filter(status=LeasePayment.Status.PENDING, due_date__lt=today), pay_url + "?due=overdue", "red")
+        add("Overdue payments", payments.filter(status__in=(LeasePayment.Status.PENDING, LeasePayment.Status.BOUNCED), due_date__lt=today), pay_url + "?due=overdue", "red")
         add("Bounced cheques", payments.filter(status=LeasePayment.Status.BOUNCED), pay_url + "?status__exact=bounced", "red")
         add("Payments due in the next 7 days",
             payments.filter(status=LeasePayment.Status.PENDING, due_date__gte=today, due_date__lte=today + timedelta(days=7)),
@@ -298,11 +298,11 @@ def dashboard_view(request):
                       "url": reverse("admin:tenants_tenant_changelist") + "?is_active__exact=1", "tone": "violet"})
 
     if user.has_perm("leases.view_lease"):
-        from leases.models import Lease, LeasePayment
+        from leases.models import Lease, LeasePayment, running_q
 
         today_ = timezone.localdate()
         cards.append({"label": "Active leases",
-                      "value": Lease.objects.filter(status=Lease.Status.ACTIVE, start_date__lte=today_, end_date__gte=today_).count(),
+                      "value": Lease.objects.filter(running_q(today_)).count(),
                       "url": reverse("admin:leases_lease_changelist") + "?state=active", "tone": "green"})
     if user.has_perm("leases.view_leasepayment"):
         from leases.models import LeasePayment

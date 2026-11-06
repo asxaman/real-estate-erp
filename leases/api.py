@@ -9,7 +9,7 @@ from decimal import Decimal, InvalidOperation
 from django import forms
 from django.contrib import messages
 from django.core.exceptions import ValidationError
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Max
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404
@@ -250,6 +250,13 @@ def _follow_lease_amount(payment):
         LeaseDeduction.objects.filter(pk=source.pk).update(amount=payment.amount, date=payment.due_date)
 
 
+def _is_last_rent_line(payment):
+    """True when this is the only rent payment its lease has left."""
+    return payment.kind == LeasePayment.Kind.RENT and not LeasePayment.objects.filter(
+        lease_id=payment.lease_id, kind=LeasePayment.Kind.RENT
+    ).exclude(pk=payment.pk).exists()
+
+
 def read_optional_date(text, label):
     return read_date(text, label) if (text or "").strip() else None
 
@@ -288,6 +295,14 @@ def apply_payment(payment, data):
     payment.deposited_on = read_optional_date(data.get("deposited_on"), "deposit date")
     payment.paid_on = read_optional_date(data.get("paid_on"), "date received")
     payment.notes = (data.get("notes") or "").strip()[:200]
+    if payment.kind in (LeasePayment.Kind.REFUND, LeasePayment.Kind.DEDUCTION) and payment.lease_id:
+        room = payment.lease.deposit_room(payment)
+        if payment.amount > room:
+            what = "paid back" if payment.kind == LeasePayment.Kind.REFUND else "taken from the deposit"
+            raise ValidationError(
+                f"Only AED {format_amount(room)} of the security deposit is left on {payment.lease.code}, "
+                f"so AED {format_amount(payment.amount)} cannot be {what}."
+            )
     payment.full_clean(exclude=["lease", "part"])  # the model's own rules (dates in order, paid needs a date ...)
 
 
@@ -369,11 +384,16 @@ class PaymentApiMixin:
         if request.method != "POST":
             return fail("This must be sent as a form.", status=405)
         try:
-            apply_payment(payment, request.POST)
-            payment.save()
-            _follow_lease_amount(payment)
+            with transaction.atomic():
+                Lease.objects.select_for_update().get(pk=payment.lease_id)  # one at a time per lease (deposit limit)
+                payment = LeasePayment.objects.select_related("lease").get(pk=pk)
+                apply_payment(payment, request.POST)
+                payment.save()
+                _follow_lease_amount(payment)
         except ValidationError as exc:
             return fail(*exc.messages)
+        except (IntegrityError, LeasePayment.DoesNotExist):
+            return fail("Someone else changed this payment at the same moment. Refresh the page and try again.")
         messages.success(request, f"{payment.label} of {payment.lease.code} was updated.", extra_tags=titled("Payment updated"))
         return JsonResponse({"ok": True, "redirect": ""})
 
@@ -386,6 +406,11 @@ class PaymentApiMixin:
         if payment.status in (LeasePayment.Status.PAID, LeasePayment.Status.HELD):
             return fail("A payment that was received (or whose cheque is held) cannot be removed.")
         label = f"{payment.label} of {payment.lease.code}"
+        if _is_last_rent_line(payment):
+            return fail(
+                f"This is the only rent payment of {payment.lease.code}, and a lease needs at least one. "
+                "Change its amount or date instead, or terminate the lease."
+            )
         field = dict(CHARGE_FIELDS).get(payment.kind)
         was_rent, lease = payment.kind == LeasePayment.Kind.RENT, payment.lease
         payment.delete()
@@ -407,22 +432,28 @@ class PaymentApiMixin:
             return fail("Choose the type of payment.")
         if kind == LeasePayment.Kind.DEDUCTION:
             return fail("Deductions are added on the lease's Deductions tab. Use a Fine or Other line here.")
-        if kind in dict(CHARGE_FIELDS) and lease.payments.filter(kind=kind).exists():
-            return fail(f"This lease already has a {LeasePayment.Kind(kind).label.lower()} line. Edit that line instead.")
-        payment = LeasePayment(
-            lease=lease, kind=kind, part=(lease.payments.filter(kind=kind).aggregate(m=Max("part"))["m"] or 0) + 1,
-        )
         try:
-            data = request.POST.copy()
-            if kind == LeasePayment.Kind.REFUND:  # money paid back to the tenant: done when it is entered
-                data.setdefault("status", LeasePayment.Status.PAID)
-                data.setdefault("paid_on", data.get("due_date", ""))
-            data.setdefault("status", LeasePayment.Status.PENDING)
-            apply_payment(payment, data)
-            payment.save()
-            _follow_lease_amount(payment)
+            with transaction.atomic():
+                # One person at a time per lease: the next number and the deposit limit are worked out
+                # while the lease is locked, so two people adding at once cannot collide.
+                lease = Lease.objects.select_for_update().get(pk=lease_pk)
+                if kind in dict(CHARGE_FIELDS) and lease.payments.filter(kind=kind).exists():
+                    raise ValidationError(f"This lease already has a {LeasePayment.Kind(kind).label.lower()} line. Edit that line instead.")
+                payment = LeasePayment(
+                    lease=lease, kind=kind, part=(lease.payments.filter(kind=kind).aggregate(m=Max("part"))["m"] or 0) + 1,
+                )
+                data = request.POST.copy()
+                if kind == LeasePayment.Kind.REFUND:  # money paid back to the tenant: done when it is entered
+                    data.setdefault("status", LeasePayment.Status.PAID)
+                    data.setdefault("paid_on", data.get("due_date", ""))
+                data.setdefault("status", LeasePayment.Status.PENDING)
+                apply_payment(payment, data)
+                payment.save()
+                _follow_lease_amount(payment)
         except ValidationError as exc:
             return fail(*exc.messages)
+        except IntegrityError:
+            return fail("Someone else changed this lease's payments at the same moment. Please try again.")
         messages.success(request, f"{payment.label} was added to {lease.code}.", extra_tags=titled("Payment added"))
         return JsonResponse({"ok": True, "redirect": ""})
 
@@ -433,7 +464,7 @@ class PaymentApiMixin:
         removed = kept = 0
         with transaction.atomic():
             for payment in LeasePayment.objects.select_for_update().filter(pk__in=ids).order_by("pk"):
-                if payment.status in (LeasePayment.Status.PAID, LeasePayment.Status.HELD):
+                if payment.status in (LeasePayment.Status.PAID, LeasePayment.Status.HELD) or _is_last_rent_line(payment):
                     kept += 1
                     continue
                 field = dict(CHARGE_FIELDS).get(payment.kind)
@@ -446,10 +477,13 @@ class PaymentApiMixin:
                     Lease.objects.get(pk=lease_id).sync_rent_total()
                 removed += 1
         if not removed:
-            return fail(f"Nothing was removed: the {kept} ticked payment(s) were already received or hold a cheque.")
+            return fail(
+                f"Nothing was removed: the {kept} ticked payment(s) were already received, hold a cheque, "
+                "or are the only rent payment of their lease."
+            )
         text = f"{removed} payment(s) removed."
         if kept:
-            text += f" {kept} kept (received, or the cheque is held)."
+            text += f" {kept} kept (received, a held cheque, or the last rent payment of a lease)."
         messages.success(request, text, extra_tags=titled("Payments removed"))
         return JsonResponse({"ok": True, "redirect": ""})
 

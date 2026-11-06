@@ -36,7 +36,7 @@ from tenants.models import Tenant
 from .api import LeaseApiMixin, PaymentApiMixin
 from .reports import LEASE_HEADERS, PAYMENT_HEADERS, ReportsMixin, lease_rows, payment_rows
 from .pickers import SearchSelect, property_label, unit_label
-from .models import Lease, LeaseDeduction, LeaseDocument, LeaseNote, LeasePayment
+from .models import Lease, LeaseDeduction, LeaseDocument, LeaseNote, LeasePayment, running_q
 
 OPEN = (LeasePayment.Status.PENDING, LeasePayment.Status.BOUNCED)
 SETTLED = (LeasePayment.Status.PAID, LeasePayment.Status.HELD, LeasePayment.Status.WAIVED)
@@ -357,7 +357,7 @@ class StateFilter(admin.SimpleListFilter):
         today = timezone.localdate()
         running = Q(status=Lease.Status.ACTIVE, start_date__lte=today, end_date__gte=today)
         return {
-            "active": lambda: queryset.filter(running),
+            "active": lambda: queryset.filter(running_q(today)),
             "soon": lambda: queryset.filter(running, end_date__lte=today + timedelta(days=sysconf.expiry_days())),
             "upcoming": lambda: queryset.filter(status=Lease.Status.ACTIVE, start_date__gt=today),
             "expired": lambda: queryset.filter(status=Lease.Status.ACTIVE, end_date__lt=today),
@@ -846,7 +846,7 @@ class LeaseAdmin(LeaseApiMixin, ReportsMixin, ExportPermissionMixin, FilterBarMi
         running = Q(status=Lease.Status.ACTIVE, start_date__lte=today, end_date__gte=today)
         counts = Lease.objects.aggregate(
             all=Count("pk"),
-            active=Count("pk", filter=running),
+            active=Count("pk", filter=running_q(today)),
             soon=Count("pk", filter=running & Q(end_date__lte=today + timedelta(days=sysconf.expiry_days()))),
             upcoming=Count("pk", filter=Q(status=Lease.Status.ACTIVE, start_date__gt=today)),
             expired=Count("pk", filter=Q(status=Lease.Status.ACTIVE, end_date__lt=today)),

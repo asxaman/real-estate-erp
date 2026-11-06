@@ -1,5 +1,15 @@
 # Changelog
 
+## Update 33 - Fixes from the full logic review
+No migration needed. Run `python manage.py test`.
+- A deposit refund, or a deposit deduction line, can no longer be larger than the security deposit still left (adding or editing).
+- Waived rent is left out of "still to receive" in the lease export and the Monthly collection report; the Payments tab cards leave it out of the total too and show exact amounts (fils) instead of rounding to whole AED.
+- The last rent payment of a lease cannot be removed (single or bulk), so a lease never has a rent but no payments.
+- A lease terminated with a future date still counts as running until that date: it stays in the rent roll (showing the real end date), the dashboard "Active leases" and the Active filter, and its tenant and property cannot be made inactive.
+- The dashboard "Overdue payments" panel now counts bounced cheques, the same as the red card.
+- Two people adding the same kind of payment (or deduction) to one lease at the same moment no longer collide: the second waits its turn instead of getting an error page.
+- "Deposit is" in the lease export is worked out from the real refund and deduction lines (Held, Partly settled, Refunded, Deducted (kept)).
+
 ## Update 32 - Lease dates, termination, renewal deposit, switching off, waived payments
 Run `python manage.py makemigrations`, `migrate` and `test` (the new "Waived" payment status needs a small migration).
 - Lease dates: while nothing has been received, you can change the start date and the pending payments move with it. Once a payment is received or a cheque is held, the dates are fixed (renew the lease for a new period).

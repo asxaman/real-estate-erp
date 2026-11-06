@@ -207,7 +207,10 @@ class Tenant(models.Model):
         if self.is_active:
             self.inactive_reason = ""  # a reason only makes sense while the tenant is inactive
         elif self.pk:
-            running = self.leases.filter(status="active", end_date__gte=timezone.localdate()).count()
+            today = timezone.localdate()
+            running = self.leases.filter(
+                Q(status="active", end_date__gte=today) | Q(status="terminated", terminated_on__gte=today)
+            ).count()
             if running:
                 errors["is_active"] = (
                     f"This tenant has {running} running or upcoming lease{'' if running == 1 else 's'}. "

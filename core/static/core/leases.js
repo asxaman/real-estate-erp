@@ -563,13 +563,15 @@
     }
 
     function money(v) {
-      return "AED " + Math.round(v).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+      var text = (Math.round(v * 100) / 100).toFixed(2);
+      if (/\.00$/.test(text)) { text = text.slice(0, -3); }
+      return "AED " + text.replace(/\B(?=(\d{3})+(?!\d)(?:\.|$))/g, ",");
     }
     function niceDate(iso) {
       var p = iso.split("-");
       return p[2] + "-" + p[1] + "-" + p[0];
     }
-    var counted = rows.filter(function (r) { return !r.refund && !r.fromDeposit; });
+    var counted = rows.filter(function (r) { return !r.refund && !r.fromDeposit && r.status !== "waived"; });
     function sum(list) { return list.reduce(function (a, r) { return a + r.total; }, 0); }
     var total = sum(counted);
     var received = sum(counted.filter(function (r) { return r.status === "paid"; }));

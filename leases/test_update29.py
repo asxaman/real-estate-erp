@@ -300,7 +300,7 @@ class Update32(Setup):
 
     def test_a_tenant_without_a_running_lease_can_be_made_inactive(self):
         lease = full_lease(self)
-        lease.terminate(lease.start_date + timedelta(days=100), "Left")
+        lease.terminate(lease.start_date + timedelta(days=5), "Left")  # ended 5 days after it started: already over
         self.tenant.is_active = False
         self.tenant.inactive_reason = "Moved away"
         self.tenant.clean()
@@ -399,3 +399,128 @@ class Update32(Setup):
         with self.assertRaises(ValidationError) as caught:
             self.villa.clean()
         self.assertIn("property_type", caught.exception.message_dict)
+
+
+class Update33(Setup):
+    def setUp(self):
+        super().setUp()
+        self.boss = get_user_model().objects.create_superuser("u33", "u33@example.com", "Pass-word1!")
+        self.client.force_login(self.boss)
+
+    def post(self, name, pk, data):
+        return self.client.post(reverse(name, args=[pk]), data)
+
+    def line_values(self, payment, **change):
+        values = {
+            "due_date": payment.due_date.isoformat(), "amount": str(payment.amount), "method": payment.method,
+            "status": payment.status, "cheque_number": "", "bank_name": "", "cheque_date": "", "deposited_on": "",
+            "paid_on": payment.paid_on.isoformat() if payment.paid_on else "", "notes": "",
+        }
+        values.update(change)
+        return values
+
+    # deposit limits
+    def test_a_refund_cannot_be_more_than_the_deposit_left(self):
+        lease = full_lease(self)  # deposit 5000
+        add = reverse("admin:leases_leasepayment_add_to", args=[lease.pk])
+        values = {"kind": "refund", "due_date": timezone.localdate().isoformat(), "amount": "5001", "method": "transfer"}
+        self.assertFalse(self.client.post(add, values).json()["ok"])
+        values["amount"] = "5000"
+        self.assertTrue(self.client.post(add, values).json()["ok"])
+        values["amount"] = "1"
+        self.assertFalse(self.client.post(add, values).json()["ok"])  # nothing is left
+
+    def test_editing_a_deduction_line_cannot_go_over_the_deposit(self):
+        from .models import LeaseDeduction
+
+        lease = full_lease(self)
+        deduction = LeaseDeduction(lease=lease, kind="deposit", date=timezone.localdate(), reason="Damage", amount=Decimal("2000"))
+        deduction.full_clean()
+        deduction.save()
+        line = lease.payments.get(kind="deduction")
+        reply = self.post("admin:leases_leasepayment_edit", line.pk, self.line_values(line, amount="6000"))
+        self.assertFalse(reply.json()["ok"])
+        reply = self.post("admin:leases_leasepayment_edit", line.pk, self.line_values(line, amount="4000"))
+        self.assertTrue(reply.json()["ok"], reply.json())
+
+    def test_the_deposit_is_described_from_the_money_lines(self):
+        lease = full_lease(self)
+        self.assertEqual(lease.deposit_state(), "Held")
+        add = reverse("admin:leases_leasepayment_add_to", args=[lease.pk])
+        self.client.post(add, {"kind": "refund", "due_date": timezone.localdate().isoformat(), "amount": "5000", "method": "cash"})
+        lease.refresh_from_db()
+        self.assertEqual(lease.deposit_state(), "Refunded")
+
+    # the last rent line
+    def test_the_last_rent_payment_cannot_be_removed(self):
+        lease = full_lease_single(self)
+        only = lease.payments.get(kind="rent")
+        self.assertFalse(self.post("admin:leases_leasepayment_remove", only.pk, {}).json()["ok"])
+        self.assertTrue(lease.payments.filter(kind="rent").exists())
+
+    def test_removing_all_rent_lines_in_bulk_keeps_one(self):
+        lease = full_lease(self)
+        ids = list(lease.payments.filter(kind="rent").values_list("pk", flat=True))
+        self.client.post(reverse("admin:leases_leasepayment_bulk"), {"action": "delete", "ids": ",".join(str(i) for i in ids)})
+        self.assertEqual(lease.payments.filter(kind="rent").count(), 1)
+
+    # a lease that is ending still counts until the end date
+    def test_a_lease_ending_in_the_future_is_still_listed_as_running(self):
+        from .models import Lease, running_q
+
+        lease = full_lease(self)
+        lease.terminate(timezone.localdate() + timedelta(days=20), "Moving out")
+        self.assertTrue(Lease.objects.filter(running_q(timezone.localdate()), pk=lease.pk).exists())
+        roll = self.client.get(reverse("admin:leases_lease_changelist") + "?state=active")
+        self.assertContains(roll, lease.code)
+        cards = {c["label"]: c["value"] for c in self.client.get("/admin/").context["cards"]}
+        self.assertEqual(cards["Active leases"], 1)
+
+    def test_a_tenant_and_a_property_with_a_lease_ending_in_the_future_cannot_be_switched_off(self):
+        lease = full_lease(self)
+        lease.terminate(timezone.localdate() + timedelta(days=20), "Moving out")
+        self.tenant.is_active = False
+        with self.assertRaises(ValidationError):
+            self.tenant.clean()
+        self.tower.is_active = False
+        with self.assertRaises(ValidationError):
+            self.tower.clean()
+
+    # waived money is not "still to receive" anywhere
+    def test_waived_rent_is_left_out_of_exports_and_the_monthly_report(self):
+        from . import reports
+
+        lease = full_lease(self)
+        first = lease.payments.filter(kind="rent").order_by("part").first()
+        first.waive()
+        row = next(reports.lease_rows(type(lease).objects.filter(pk=lease.pk)))
+        self.assertEqual(row[reports.LEASE_HEADERS.index("Still to receive (AED, with VAT)")], Decimal("13500.00"))
+        year = first.due_date.year
+        months = reports.monthly_rows(year) + reports.monthly_rows(year + 1)
+        self.assertEqual(sum(m["expected"] for m in months), Decimal("13500.00"))
+
+    def test_the_overdue_numbers_on_the_dashboard_agree(self):
+        lease = full_lease(self)
+        first = lease.payments.filter(kind="rent").order_by("part").first()
+        first.bounce()
+        response = self.client.get("/admin/")
+        cards = {c["label"]: c["value"] for c in response.context["cards"]}
+        panel = {i["label"]: i["count"] for i in response.context["panels"]["attention"]}
+        self.assertEqual(cards["Overdue payments"], panel["Overdue payments"])
+
+    def test_adding_the_same_kind_of_line_twice_gives_each_its_own_number(self):
+        lease = full_lease(self)
+        add = reverse("admin:leases_leasepayment_add_to", args=[lease.pk])
+        values = {"kind": "fine", "due_date": timezone.localdate().isoformat(), "amount": "100", "method": "cash"}
+        self.assertTrue(self.client.post(add, values).json()["ok"])
+        self.assertTrue(self.client.post(add, values).json()["ok"])
+        self.assertEqual(sorted(lease.payments.filter(kind="fine").values_list("part", flat=True)), [1, 2])
+
+
+def full_lease_single(test):
+    from .models import Lease
+
+    lease = full_lease(test)
+    lease.payments.filter(kind="rent").exclude(part=1).delete()
+    lease.sync_rent_total()
+    return Lease.objects.get(pk=lease.pk)

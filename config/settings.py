@@ -281,7 +281,7 @@ UNFOLD = {
     "STYLES": [lambda request: static("core/erp.css") + "?v=36"],
     "SCRIPTS": [
         lambda request: static("core/erp.js") + "?v=31",
-        lambda request: static("core/leases.js") + "?v=12",
+        lambda request: static("core/leases.js") + "?v=13",
         lambda request: static("core/lists.js") + "?v=1",
     ],
     "SIDEBAR": {

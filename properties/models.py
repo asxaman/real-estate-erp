@@ -13,6 +13,7 @@ from django.core.validators import (
     RegexValidator,
 )
 from django.db import IntegrityError, models, transaction
+from django.db.models import Q
 from django.db.models.functions import Lower
 from django.db.models.signals import post_delete
 from django.dispatch import receiver
@@ -645,7 +646,10 @@ class Property(models.Model):
         if self.is_active:
             self.inactive_reason = ""
         elif self.pk:
-            running = self.leases.filter(status="active", end_date__gte=timezone.localdate()).count()
+            today = timezone.localdate()
+            running = self.leases.filter(
+                Q(status="active", end_date__gte=today) | Q(status="terminated", terminated_on__gte=today)
+            ).count()
             if running:
                 errors["is_active"] = (
                     f"This property has {running} running or upcoming lease{'' if running == 1 else 's'}. "

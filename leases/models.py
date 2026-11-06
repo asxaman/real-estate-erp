@@ -8,7 +8,8 @@ from pathlib import Path
 
 from django.core.exceptions import NON_FIELD_ERRORS, ValidationError
 from django.core.validators import FileExtensionValidator, MinValueValidator
-from django.db import models
+from django.db import models, transaction
+from django.db.models import Q
 from django.db.models.signals import post_delete, post_save
 from django.dispatch import receiver
 from django.utils import timezone
@@ -56,6 +57,16 @@ def add_months(start, months):
 
 def money(value):
     return Decimal(value).quantize(CENT, rounding=ROUND_HALF_UP)
+
+
+def running_q(today):
+    """
+    Leases that still cover `today`: started, and either active until its end date or terminated early
+    with a termination date that has not come yet (the tenant is still in the place until then).
+    """
+    return Q(start_date__lte=today) & (
+        Q(status="active", end_date__gte=today) | Q(status="terminated", terminated_on__gte=today)
+    )
 
 
 class Lease(models.Model):
@@ -218,6 +229,33 @@ class Lease(models.Model):
             Decimal("0.00"),
         )
         return lines + (self.deposit_refund_amount or 0)
+
+    def deposit_room(self, payment=None):
+        """What can still be paid back or kept from the deposit. `payment` is a line being edited (left out)."""
+        deducted = sum(
+            (d.amount for d in self.deductions.filter(kind=LeaseDeduction.Kind.DEPOSIT)
+             if not (payment is not None and payment.pk and d.payment_id == payment.pk)),
+            Decimal("0.00"),
+        )
+        refunds = self.payments.filter(kind=LeasePayment.Kind.REFUND, status=LeasePayment.Status.PAID)
+        if payment is not None and payment.pk:
+            refunds = refunds.exclude(pk=payment.pk)
+        refunded = sum((p.amount for p in refunds), Decimal("0.00")) + (self.deposit_refund_amount or 0)
+        return max(money((self.security_deposit or 0) - deducted - refunded), Decimal("0.00"))
+
+    def deposit_state(self):
+        """What the deposit is, worked out from the real money lines (not from the typed 'Deposit is' field)."""
+        deposit = money(self.security_deposit or 0)
+        if deposit <= 0:
+            return "No deposit"
+        deducted, refunded, left = self.deposit_deducted(), self.deposit_refunded(), self.deposit_balance()
+        if left >= deposit:
+            return "Held"
+        if left > 0:
+            return "Partly settled"
+        if deducted and refunded:
+            return "Refunded and deducted"
+        return "Deducted (kept)" if deducted else "Refunded"
 
     def deposit_balance(self):
         """Deposit still held: deposit - deductions - what was refunded (never below zero)."""
@@ -753,6 +791,11 @@ class LeaseDeduction(models.Model):
         return LeasePayment.Kind.OTHER, LeasePayment.Status.PENDING, LeasePayment.Method.CASH
 
     def sync_payment(self):
+        with transaction.atomic():
+            Lease.objects.select_for_update().filter(pk=self.lease_id).first()  # numbers are handed out one at a time
+            self._sync_payment()
+
+    def _sync_payment(self):
         kind, status, method = self._line_values()
         text = (self.reason + (f" - {self.note}" if self.note else ""))[:200]
         line = self.payment
