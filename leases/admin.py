@@ -1,5 +1,6 @@
 """Lease pages: summary header, timeline, tabs (Overview, Money, Fees and Ejari, Termination, Payments, Documents, Notes, Activity), list, rent payments."""
 import calendar
+import contextvars
 import json
 import re
 from datetime import timedelta
@@ -10,8 +11,10 @@ from django.contrib import admin, messages
 from django.core.exceptions import ValidationError
 from django.db.models import Count, DecimalField, Exists, OuterRef, Q, Sum, Value
 from django.db.models.functions import Coalesce, Concat
-from django.shortcuts import redirect
-from django.urls import reverse
+from django.core.exceptions import PermissionDenied
+from django.shortcuts import get_object_or_404, redirect
+from django.template.response import TemplateResponse
+from django.urls import path, reverse
 from django.utils import timezone
 from django.utils.html import format_html, format_html_join
 from unfold.admin import ModelAdmin, TabularInline
@@ -35,6 +38,7 @@ from .pickers import SearchSelect, property_label, unit_label
 from .models import Lease, LeaseDeduction, LeaseDocument, LeaseNote, LeasePayment
 
 OPEN = (LeasePayment.Status.PENDING, LeasePayment.Status.BOUNCED)
+_last_lease = contextvars.ContextVar("erp_last_lease", default=None)  # the lease of the row drawn just before
 ZERO = Value(Decimal("0"), output_field=DecimalField(max_digits=14, decimal_places=2))
 
 
@@ -76,6 +80,8 @@ def timeline(lease, today=None):
     start, end = lease.start_date, lease.end_date
     marks = []
     for p in lease.payments.all():
+        if not p.is_rent:
+            continue  # the strip shows the rent; the deposit and fees are listed under Payments
         if p.status == LeasePayment.Status.PAID:
             kind, word = "ok", "paid"
         elif p.status == LeasePayment.Status.BOUNCED:
@@ -84,7 +90,7 @@ def timeline(lease, today=None):
             kind, word = "bad", "overdue"
         else:
             kind, word = "wait", "pending"
-        marks.append((_pos(p.due_date, start, end), kind, f"Payment {p.part}: {fmt_date(p.due_date)} · {_money(p.total)} · {word}"))
+        marks.append((_pos(p.due_date, start, end), kind, f"{p.label}: {fmt_date(p.due_date)} · {_money(p.total)} · {word}"))
     if lease.ejari_expiry and start <= lease.ejari_expiry <= end:
         marks.append((_pos(lease.ejari_expiry, start, end), "ejari", f"Ejari expires {fmt_date(lease.ejari_expiry)}"))
     if lease.status == Lease.Status.TERMINATED and lease.terminated_on:
@@ -108,7 +114,8 @@ def timeline(lease, today=None):
 def payment_info(payment, today=None):
     today = today or timezone.localdate()
     return {
-        "code": payment.lease.code, "part": payment.part, "amount": _money(payment.total), "due": fmt_date(payment.due_date),
+        "code": payment.lease.code, "part": payment.part, "label": payment.label, "held": payment.status == LeasePayment.Status.HELD,
+        "amount": _money(payment.total), "due": fmt_date(payment.due_date),
         "method": payment.method, "cheque": payment.cheque_number, "bank": payment.bank_name,
         "overdue": payment.is_overdue(today), "today": today.isoformat(),
     }
@@ -117,11 +124,13 @@ def payment_info(payment, today=None):
 def record_button(payment, label="Record payment", tone="primary"):
     if payment is None or payment.status == LeasePayment.Status.PAID:
         return ""
+    if payment.status == LeasePayment.Status.HELD:
+        label = "Cash cheque"
     return _button(label, "record", reverse("admin:leases_leasepayment_record", args=[payment.pk]), payment_info(payment), tone)
 
 
 def edit_button(payment, label="Edit"):
-    return _button(label, "editpay", reverse("admin:leases_leasepayment_edit", args=[payment.pk]), {"code": payment.lease.code, "part": payment.part})
+    return _button(label, "editpay", reverse("admin:leases_leasepayment_edit", args=[payment.pk]), {"code": payment.lease.code, "part": payment.part, "label": payment.label})
 
 
 def due_cell(payment, today=None):
@@ -132,6 +141,8 @@ def due_cell(payment, today=None):
         tone, note = "ok", "paid"
     elif payment.status == LeasePayment.Status.BOUNCED:
         tone, note = "bad", "bounced"
+    elif payment.status == LeasePayment.Status.HELD:
+        tone, note = "mute", "cheque held"
     elif days < 0:
         tone, note = "bad", f"{-days} day{'s' if days != -1 else ''} overdue"
     elif days == 0:
@@ -164,6 +175,8 @@ def state_cell(payment, today=None):
         label, tone, small = "Paid", "success", f"on {fmt_date(payment.paid_on)}" if payment.paid_on else ""
     elif payment.status == LeasePayment.Status.BOUNCED:
         label, tone, small = "Bounced", "danger", ""
+    elif payment.status == LeasePayment.Status.HELD:
+        label, tone, small = "Cheque held", "warning", f"since {fmt_date(payment.paid_on)}" if payment.paid_on else "not cashed"
     elif payment.is_overdue(today):
         days = payment.days_overdue(today)
         fee = payment.late_fee(today)
@@ -190,8 +203,8 @@ def lease_info(lease, today=None):
         "code": lease.code, "tenant": lease.tenant.name, "rent": str(lease.annual_rent),
         "start": lease.start_date.isoformat(), "end": lease.end_date.isoformat(), "today": today.isoformat(),
         "new_start_text": fmt_date(new_start), "new_end_text": fmt_date(new_start + timedelta(days=length)),
-        "deposit": lease.deposit_status, "unpaid": sum(1 for p in payments if p.status != LeasePayment.Status.PAID),
-        "pending_later": sum(1 for p in payments if p.status == LeasePayment.Status.PENDING and p.due_date > today),
+        "deposit": lease.deposit_status, "unpaid": sum(1 for p in payments if p.is_rent and p.status not in (LeasePayment.Status.PAID, LeasePayment.Status.HELD)),
+        "pending_later": sum(1 for p in payments if p.is_rent and p.status == LeasePayment.Status.PENDING and p.due_date > today),
     }
 
 
@@ -213,7 +226,7 @@ class LeasePaymentInline(ReadOnlyInline):
 
     @admin.display(description="#")
     def no(self, obj):
-        return obj.part
+        return obj.part if obj.is_rent else obj.get_kind_display()
 
     @admin.display(description="Due on")
     def due(self, obj):
@@ -262,11 +275,13 @@ class LeaseActivityInline(ActivityInline):
 
 
 class DeductionInline(TabularInline):
+    """Fines, money kept from the deposit and other charges. Each one also appears in Tenant Payments."""
+
     model = LeaseDeduction
     tab = True
     extra = 0
-    fields = ("date", "reason", "amount")
-    verbose_name_plural = "Deposit deductions"
+    fields = ("date", "kind", "reason", "note", "amount")
+    verbose_name_plural = "Deductions"
 
 
 class NoteForm(forms.ModelForm):
@@ -520,6 +535,7 @@ class LeaseAdminForm(forms.ModelForm):
         hints = {
             "annual_rent": "e.g. 65000",
             "security_deposit": "0 if none",
+            "ejari_fee": "0 if none",
             "ejari_number": "e.g. 10-1234-5678",
             "termination_reason": "Why the lease ended early",
         }
@@ -577,13 +593,15 @@ class LeaseAdmin(LeaseApiMixin, ReportsMixin, ExportPermissionMixin, FilterBarMi
         "Deposit, fees and Ejari",
         {
             "classes": ["tab"],
+            "description": "The deposit and the fees become payment lines (see the Payments tab). Record when and how they "
+            "are received there or in Tenant Payments: cash, cheque cashed, or a cheque held and not cashed. "
+            "Fines, deductions and refunds are added on the Payments and Deductions tabs.",
             "fields": (
-                ("security_deposit", "deposit_status"),
-                ("deposit_refund_date", "deposit_refund_amount"),
-                "deposit_summary",
+                "security_deposit",
                 ("commission", "admin_fee"),
-                "late_fee_per_day",
+                "ejari_fee",
                 ("ejari_number", "ejari_expiry"),
+                "deposit_summary",
             ),
         },
     )
@@ -605,6 +623,64 @@ class LeaseAdmin(LeaseApiMixin, ReportsMixin, ExportPermissionMixin, FilterBarMi
     def get_readonly_fields(self, request, obj=None):
         return ("code", "summary_header", "timeline_strip", "money_summary", "deposit_summary")
 
+    # ---- one lease's payments on a page of their own ------------------------------------
+    def get_urls(self):
+        mine = [path("<int:pk>/payments/", self.admin_site.admin_view(self.payments_view), name="leases_lease_payments")]
+        return mine + super().get_urls()
+
+    def payments_view(self, request, pk):
+        """Every payment line of one lease (rent, deposit, fees) with totals, and the buttons to receive them."""
+        lease = get_object_or_404(Lease.objects.select_related("tenant", "unit__property", "property"), pk=pk)
+        if not (self.has_view_permission(request, lease) and request.user.has_perm("leases.view_leasepayment")):
+            raise PermissionDenied
+        today = timezone.localdate()
+        can_change = self.has_change_permission(request, lease)
+        payments = list(lease.payments.all())
+        done = (LeasePayment.Status.PAID,)
+        rows = []
+        for p in payments:
+            p.lease = lease  # (already loaded: no extra query)
+            buttons = ""
+            if can_change:
+                buttons = format_html("{}{}", record_button(p, "Receive", "primary"), edit_button(p))
+            rows.append({
+                "kind": p.get_kind_display(), "no": p.part if p.is_rent else "", "due": due_cell(p, today),
+                "amount": format_html("<b>{}</b>", _money(p.total)), "vat": p.vat, "pay": pay_cell(p),
+                "state": state_cell(p, today), "buttons": buttons, "note": note_mark(p), "rent": p.is_rent,
+            })
+
+        def total(items):
+            return sum((p.total for p in items), Decimal("0"))
+
+        rent = [p for p in payments if p.is_rent]
+        other = [  # money asked of the tenant: not a refund (it goes out) and not money kept from the deposit
+            p for p in payments
+            if not p.is_rent and p.kind != LeasePayment.Kind.REFUND and p.method != LeasePayment.Method.FROM_DEPOSIT
+        ]
+        cards = []
+        for title, items in (("Rent", rent), ("Deposit and Fees", other)):
+            got = total(p for p in items if p.status in done)
+            held = total(p for p in items if p.status == LeasePayment.Status.HELD)
+            cards.append({
+                "title": title, "due": _money(total(items)), "got": _money(got), "held": _money(held) if held else "",
+                "left": _money(max(total(items) - got - held, Decimal("0"))), "any": bool(items),
+            })
+        add_button = ""
+        if request.user.has_perm("leases.add_leasepayment"):
+            add_button = _button(
+                "Add Payment", "addpay", reverse("admin:leases_leasepayment_add_to", args=[lease.pk]),
+                {"code": lease.code, "today": today.isoformat()},
+            )
+        context = {
+            **self.admin_site.each_context(request),
+            "title": f"{lease.code} Payments", "lease": lease, "rows": rows, "cards": cards, "add_button": add_button,
+            "lease_url": reverse("admin:leases_lease_change", args=[lease.pk]),
+            "list_url": reverse("admin:leases_leasepayment_changelist"),
+            "tenant_url": reverse("admin:tenants_tenant_change", args=[lease.tenant_id]),
+            "period": f"{fmt_date(lease.start_date)} → {fmt_date(lease.end_date)}",
+        }
+        return TemplateResponse(request, "leases/lease_payments.html", context)
+
     def get_inline_instances(self, request, obj=None):
         instances = super().get_inline_instances(request, obj)
         if obj is None:  # the schedule is created when the lease is first saved
@@ -614,7 +690,7 @@ class LeaseAdmin(LeaseApiMixin, ReportsMixin, ExportPermissionMixin, FilterBarMi
     def get_queryset(self, request):
         today = timezone.localdate()
         return super().get_queryset(request).prefetch_related("payments", "renewals").annotate(
-            _paid=Coalesce(Sum("payments__amount", filter=Q(payments__status=LeasePayment.Status.PAID)), ZERO),
+            _paid=Coalesce(Sum("payments__amount", filter=Q(payments__status=LeasePayment.Status.PAID, payments__kind=LeasePayment.Kind.RENT)), ZERO),
             _overdue=Count("payments", filter=Q(payments__status__in=OPEN, payments__due_date__lt=today), distinct=True),
         )
 
@@ -674,7 +750,8 @@ class LeaseAdmin(LeaseApiMixin, ReportsMixin, ExportPermissionMixin, FilterBarMi
         today = timezone.localdate()
         buttons = []
         unpaid = sorted(
-            (p for p in obj.payments.all() if p.status != LeasePayment.Status.PAID), key=lambda p: (p.due_date, p.part)
+            (p for p in obj.payments.all() if p.status not in (LeasePayment.Status.PAID, LeasePayment.Status.HELD)),
+            key=lambda p: (p.due_date, p.part),
         )
         if unpaid:
             first = unpaid[0]
@@ -734,19 +811,20 @@ class LeaseAdmin(LeaseApiMixin, ReportsMixin, ExportPermissionMixin, FilterBarMi
             return ""
         today = timezone.localdate()
         payments = list(obj.payments.all())
-        paid = sum((p.total for p in payments if p.status == LeasePayment.Status.PAID), Decimal("0"))
-        scheduled = sum((p.total for p in payments), Decimal("0"))
-        scheduled_rent = sum((p.amount for p in payments), Decimal("0"))
+        rent_lines = [p for p in payments if p.is_rent]
+        paid = sum((p.total for p in rent_lines if p.status == LeasePayment.Status.PAID), Decimal("0"))
+        scheduled = sum((p.total for p in rent_lines), Decimal("0"))
+        scheduled_rent = sum((p.amount for p in rent_lines), Decimal("0"))
         rows = [
             ("Annual rent", _money(obj.annual_rent), ""),
             ("VAT (5%)" if obj.vat_applies else "VAT (not applied)", _money(obj.vat_amount), ""),
             ("Rent with VAT", _money(obj.total_with_vat), "strong"),
-            ("Security deposit", _money(obj.security_deposit), ""),
-            ("Agency commission", _money(obj.commission), ""),
-            ("Admin / contract fee", _money(obj.admin_fee), ""),
-            ("Received so far", _money(paid), "good"),
-            ("Still to receive", _money(max(scheduled - paid, Decimal("0"))), "strong"),
+            ("Rent received so far", _money(paid), "good"),
+            ("Rent still to receive", _money(max(scheduled - paid, Decimal("0"))), "strong"),
         ]
+        for line in obj.charge_lines():
+            word = {"paid": "received", "held": "cheque held", "pending": "not received yet", "bounced": "bounced"}[line.status]
+            rows.append((line.get_kind_display(), f"{_money(line.amount)} · {word}", "good" if line.status == LeasePayment.Status.PAID else ""))
         late = obj.late_fees(today)
         if late:
             rows.append(("Late fees built up", _money(late), "bad"))
@@ -768,10 +846,13 @@ class LeaseAdmin(LeaseApiMixin, ReportsMixin, ExportPermissionMixin, FilterBarMi
         if obj is None or not obj.pk or not obj.security_deposit:
             return "-"
         deducted = obj.deposit_deducted()
+        line = next((p for p in obj.payments.all() if p.kind == LeasePayment.Kind.DEPOSIT), None)
+        received = {"paid": "Received", "held": "Cheque held, not cashed", "pending": "Not received yet", "bounced": "Cheque bounced"}
         rows = [
             ("Security deposit", _money(obj.security_deposit)),
-            ("Deducted (see the Deposit deductions tab)", _money(deducted)),
-            ("Refunded", _money(obj.deposit_refund_amount) + (f" on {fmt_date(obj.deposit_refund_date)}" if obj.deposit_refund_date else "")),
+            ("Received?", received.get(line.status, "-") if line else "No payment line"),
+            ("Kept from it (see the Deductions tab)", _money(deducted)),
+            ("Refunded (Deposit Refund payments)", _money(obj.deposit_refunded())),
             ("Still held", _money(obj.deposit_balance())),
         ]
         table = format_html(
@@ -779,7 +860,7 @@ class LeaseAdmin(LeaseApiMixin, ReportsMixin, ExportPermissionMixin, FilterBarMi
             format_html_join("", "<tr><th>{}</th><td>{}</td></tr>", rows),
         )
         warn = ""
-        if deducted + (obj.deposit_refund_amount or 0) > obj.security_deposit:
+        if deducted + obj.deposit_refunded() > obj.security_deposit:
             warn = format_html('<div class="erp-sum-warn">Deductions and the refund together are more than the deposit.</div>')
         return format_html("{}{}", table, warn)
 
@@ -790,8 +871,8 @@ class LeaseAdmin(LeaseApiMixin, ReportsMixin, ExportPermissionMixin, FilterBarMi
             return ""
         today = timezone.localdate()
         payments = list(obj.payments.all())
-        paid = sum((p.amount for p in payments if p.status == LeasePayment.Status.PAID), Decimal("0"))
-        scheduled = sum((p.amount for p in payments), Decimal("0"))
+        paid = sum((p.amount for p in payments if p.is_rent and p.status == LeasePayment.Status.PAID), Decimal("0"))
+        scheduled = sum((p.amount for p in payments if p.is_rent), Decimal("0"))
         overdue = [p for p in payments if p.is_overdue(today)]
         upcoming = [p for p in payments if p.status == LeasePayment.Status.PENDING and p.due_date >= today]
 
@@ -827,7 +908,8 @@ class LeaseAdmin(LeaseApiMixin, ReportsMixin, ExportPermissionMixin, FilterBarMi
         bar = progress_bar(paid, scheduled, len(overdue))
         actions = []
         next_payment = next(iter(sorted(
-            (p for p in payments if p.status != LeasePayment.Status.PAID), key=lambda p: (p.due_date, p.part)
+            (p for p in payments if p.status not in (LeasePayment.Status.PAID, LeasePayment.Status.HELD)),
+            key=lambda p: (p.due_date, p.part),
         )), None)
         if next_payment is not None:
             next_payment.lease = obj
@@ -835,7 +917,7 @@ class LeaseAdmin(LeaseApiMixin, ReportsMixin, ExportPermissionMixin, FilterBarMi
             actions.append(_button("Cheque numbers", "cheques", reverse("admin:leases_lease_cheques", args=[obj.pk]), lease_info(obj, today)))
         actions.append(_button(
             "Add payment", "addpay", reverse("admin:leases_leasepayment_add_to", args=[obj.pk]),
-            {"code": obj.code, "today": today.isoformat(), "number": max((p.part for p in payments), default=0) + 1},
+            {"code": obj.code, "today": today.isoformat()},
         ))
         if obj.status == Lease.Status.ACTIVE:
             if not obj.renewals.exists():
@@ -930,15 +1012,15 @@ class LeaseAdmin(LeaseApiMixin, ReportsMixin, ExportPermissionMixin, FilterBarMi
 
 
 # ---------------------------------------------------------------------------------------
-# Rent payments (every instalment of every lease in one list)
+# Tenant payments (every payment line of every lease in one list)
 # ---------------------------------------------------------------------------------------
 @admin.register(LeasePayment)
 class LeasePaymentAdmin(PaymentApiMixin, ExportPermissionMixin, FilterBarMixin, TooltipHelpMixin, ModelAdmin):
     compressed_fields = True
     list_before_template = "leases/payment_strip.html"
-    list_display = ("due", "lease_link", "party", "amount_text", "pay_details", "status_cell", "quick")
+    list_display = ("due", "lease_link", "kind_cell", "party", "amount_text", "pay_details", "status_cell", "quick")
     list_display_links = ("due",)
-    list_filter = ("status", PaymentOverdueFilter, DueMonthFilter, PaymentBuildingFilter, PaymentOwnerFilter, ReceivedFilter, "method", ("due_date", admin.DateFieldListFilter))
+    list_filter = ("kind", "status", PaymentOverdueFilter, DueMonthFilter, PaymentBuildingFilter, PaymentOwnerFilter, ReceivedFilter, "method", ("due_date", admin.DateFieldListFilter))
     search_fields = (
         "lease__code", "lease__tenant__name", "lease__tenant__code", "cheque_number", "bank_name",
         "lease__property__name", "lease__unit__unit_number",
@@ -954,10 +1036,11 @@ class LeasePaymentAdmin(PaymentApiMixin, ExportPermissionMixin, FilterBarMixin, 
     search_codes = (("lease__code", "LSE", 4),)
     search_fuzzy = ("lease__tenant__name",)
     search_hint = "lease number (LSE-12), tenant name or phone, cheque number, bank, unit (RMT-101), building"
-    actions = ["mark_paid", "mark_bounced", "export_excel", "export_csv"]
-    fields = ("lease", "part", "due_date", "amount", "method", "cheque_number", "bank_name", "cheque_date", "deposited_on", "status", "paid_on", "notes")
-    readonly_fields = ("lease", "part")
-    ordering = ("due_date", "id")
+    actions = ["mark_paid", "mark_bounced", "bulk_edit_selected", "bulk_delete_selected", "export_excel", "export_csv"]
+    fields = ("lease", "kind", "part", "due_date", "amount", "method", "cheque_number", "bank_name", "cheque_date", "deposited_on", "status", "paid_on", "notes")
+    readonly_fields = ("lease", "kind", "part")
+    # Payments of one lease sit together (by lease number); click "Due on" to see everything by date instead.
+    ordering = ("lease__code", "due_date", "part", "id")
 
     def has_add_permission(self, request):
         return False  # payments come from the lease's schedule (add more on the lease page)
@@ -983,12 +1066,26 @@ class LeasePaymentAdmin(PaymentApiMixin, ExportPermissionMixin, FilterBarMixin, 
 
     @admin.display(description="Lease", ordering="lease__code")
     def lease_link(self, obj):
-        return format_html('<a href="{}">{}</a>', reverse("admin:leases_lease_change", args=[obj.lease_id]), obj.lease.code)
+        """The first row of a lease shows its number (a link to its own payments page); the rest only a dash."""
+        same = _last_lease.get() == obj.lease_id
+        _last_lease.set(obj.lease_id)
+        if same:
+            return format_html('<span class="erp-lease-more" title="{}">&#8627;</span>', obj.lease.code)
+        return format_html(
+            '<a class="erp-lease-first" href="{}" title="All payments of this lease">{}</a>',
+            reverse("admin:leases_lease_payments", args=[obj.lease_id]), obj.lease.code,
+        )
+
+    @admin.display(description="Type", ordering="kind")
+    def kind_cell(self, obj):
+        if obj.is_rent:
+            return format_html('<span class="erp-pay"><b>Rent</b><small>payment {}</small></span>', obj.part)
+        return format_html('<span class="erp-pay"><b>{}</b><small>not rent</small></span>', obj.get_kind_display())
 
     @admin.display(description="Amount", ordering="amount")
     def amount_text(self, obj):
         text = _money(obj.amount)
-        return f"{text} + VAT" if obj.lease.vat_applies else text
+        return f"{text} + VAT" if obj.vat else text
 
     @admin.display(description="Due on", ordering="due_date")
     def due(self, obj):
@@ -996,17 +1093,19 @@ class LeasePaymentAdmin(PaymentApiMixin, ExportPermissionMixin, FilterBarMixin, 
 
     @admin.action(description="Export selected payments to Excel", permissions=["export"])
     def export_excel(self, request, queryset):
-        return exports.excel_response("Rent payments", PAYMENT_HEADERS, payment_rows(queryset), "rent-payments")
+        return exports.excel_response("Tenant payments", PAYMENT_HEADERS, payment_rows(queryset), "tenant-payments")
 
     @admin.action(description="Export selected payments to CSV", permissions=["export"])
     def export_csv(self, request, queryset):
-        return exports.csv_response(PAYMENT_HEADERS, payment_rows(queryset), "rent-payments")
+        return exports.csv_response(PAYMENT_HEADERS, payment_rows(queryset), "tenant-payments")
 
     def changelist_view(self, request, extra_context=None):
+        _last_lease.set(None)  # the grouping of rows by lease starts again for every page
         extra_context = dict(extra_context or {})
         extra_context["pay_strip"] = self._strip()
         if self.has_change_permission(request):
             extra_context["bulk_url"] = reverse("admin:leases_leasepayment_bulk")
+            extra_context["bulk_remove"] = request.user.has_perm("leases.delete_leasepayment")
         extra_context["report_links"] = [
             ("Monthly collection", reverse("admin:leases_lease_monthly")), ("Rent roll", reverse("admin:leases_lease_rentroll")),
         ]
@@ -1023,7 +1122,10 @@ class LeasePaymentAdmin(PaymentApiMixin, ExportPermissionMixin, FilterBarMixin, 
 
         week = total(base.filter(status=LeasePayment.Status.PENDING, due_date__gte=today, due_date__lte=today + timedelta(days=7)))
         late = total(base.filter(status__in=OPEN, due_date__lt=today))
-        got = total(base.filter(status=LeasePayment.Status.PAID, paid_on__year=today.year, paid_on__month=today.month))
+        got = total(
+            base.filter(status=LeasePayment.Status.PAID, paid_on__year=today.year, paid_on__month=today.month)
+            .exclude(method=LeasePayment.Method.FROM_DEPOSIT).exclude(kind=LeasePayment.Kind.REFUND)  # cash actually received
+        )
         bounced = total(base.filter(status=LeasePayment.Status.BOUNCED))
         url = reverse("admin:leases_leasepayment_changelist")
         return [
@@ -1042,6 +1144,18 @@ class LeasePaymentAdmin(PaymentApiMixin, ExportPermissionMixin, FilterBarMixin, 
             payment.save()
             count += 1
         self.message_user(request, f"{count} payment(s) marked as paid (today's date).", messages.SUCCESS)
+
+    @admin.action(description="Edit the selected payments (dates, amount, cheque numbers ...)", permissions=["change"])
+    def bulk_edit_selected(self, request, queryset):
+        # The list page opens a pop-up for this choice (leases.js); this only runs when scripts are switched off.
+        self.message_user(request, "Use the “Edit ticked” button above the list.", messages.INFO)
+
+    @admin.action(description="Remove the selected payments", permissions=["bulk_remove"])
+    def bulk_delete_selected(self, request, queryset):
+        self.message_user(request, "Use the “Remove ticked” button above the list.", messages.INFO)
+
+    def has_bulk_remove_permission(self, request):
+        return request.user.has_perm("leases.delete_leasepayment")
 
     @admin.action(description="Mark the selected payments as bounced", permissions=["change"])
     def mark_bounced(self, request, queryset):

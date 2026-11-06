@@ -92,7 +92,7 @@ def seed_bulk_tenants() -> str:
     ], batch_size=1000)
     documents = []
     for i, t in enumerate(tenants):
-        expiry = lambda shift=0: today + timedelta(days=EXPIRY_OFFSETS[(i + shift) % len(EXPIRY_OFFSETS)])  # noqa: E731
+        expiry = lambda shift=0, i=i: today + timedelta(days=EXPIRY_OFFSETS[(i + shift) % len(EXPIRY_OFFSETS)])  # noqa: E731
         if t.tenant_type == T.COMPANY:
             documents.append(TenantDocument(tenant=t, doc_type=D.TRADE_LICENCE, number=f"TL-{500000 + i}", expiry_date=expiry()))
             documents.append(TenantDocument(tenant=t, doc_type=D.VAT_CERTIFICATE, number=f"VAT-{100200300 + i}", expiry_date=expiry(3)))

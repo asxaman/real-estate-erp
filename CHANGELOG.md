@@ -1,5 +1,24 @@
 # Changelog
 
+## Update 27 - Simpler lease form, Deductions, fines, refunds, bulk edit and remove, new module name
+Run `python manage.py makemigrations`, then `migrate` and `test`.
+- The lease form no longer asks for "Deposit is", "Deposit refunded on", "Amount refunded" or "Late fee per day". The deposit, commission, admin fee and Ejari fee stay; what actually happens is recorded as payment lines.
+- "Deposit deductions" is now "Deductions": date, type (taken from the deposit / fine / other charge), reason, note and amount. Each one also becomes a line in Tenant Payments against its lease. Earlier deductions get their line when you run `migrate`.
+- New payment types: Fine, Deduction and Deposit Refund (money paid back, which reduces the deposit still held). Money kept from the deposit is not counted as cash collected.
+- "Rent payments" is now "Tenant Payments" (menu, page titles, export names).
+- Tenant Payments: "Edit ticked" (dates, amount, method, bank, cheque numbers in order, notes) and "Remove ticked", as buttons above the list and in the Action drop-down. Received payments keep their date and amount and are never removed.
+- The Terminate pop-up no longer asks about the deposit status.
+
+## Update 26 (part B) - Deposit and fees as payment lines, a page for each lease's payments, database safety rules
+Run `python manage.py check_lease_data`, then `makemigrations`, `migrate` and `test`.
+- A lease now creates a payment line for each of: security deposit, office fee, agency fee and Ejari fee (new field on the lease), next to the rent instalments. They are received from the Rent Payments module like rent. Existing leases get their lines once, automatically, when you run `migrate`.
+- New payment Type (Rent, Security deposit, Office fee, Agency fee, Ejari fee, Other) and new status "Cheque held": a cheque that is received but not cashed (blank or post-dated). It is not money in the bank until "Cash cheque" is clicked.
+- VAT is added to rent only. Rent totals, rent roll and monthly collection count rent only; the deposit and fees are shown on their own.
+- The Rent Payments list keeps the payments of one lease together; the lease number opens that lease's own payments page (all its lines, totals, Receive buttons).
+- Editing the deposit or a fee on the lease updates its pending line; once received, change it on the payment line.
+- Database rules: end date after start date, rent above zero, payment amount above zero, no duplicate payment number on a lease; indexes on the busy filters.
+- New command `check_lease_data` looks for old data the new rules would refuse.
+
 ## Update 26 (part A) - Audit fixes, no database change
 Just extract and run `python manage.py test`. No `makemigrations` / `migrate` needed.
 - The sample-data and erase-everything tools now work only on your own PC (or when `DJANGO_ALLOW_DEV_TOOLS=1` is set on purpose). A live server refuses them whatever the System settings say.
@@ -357,3 +376,8 @@ No migration needed. Run `python manage.py test`, press Ctrl+F5 twice, then try 
 - A summary line above every list: "Showing 37 of 2,018" with a tag for each active filter, chip and search (click a tag to remove it) and "Clear all".
 - Ctrl+K (the search box in the sidebar) now finds records: tenants, units, properties, owners, leases and rent payments, only those you may view (`core/global_search.py`).
 - Not done yet (waiting for decisions): searchable and multi-select filter drop-downs and the new filters (suggestion 5).
+
+
+## Update 27c
+- New command `python manage.py system_report`: checks code, templates, migrations, static files and data logic; writes system-report.txt (read-only).
+- Fixed an old test that used "delete" as an invalid bulk action.

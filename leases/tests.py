@@ -212,7 +212,8 @@ class RenewalsAndStatus(Setup):
         self.assertEqual(new.start_date, old.end_date + timedelta(days=1))
         self.assertEqual(new.end_date - new.start_date, old.end_date - old.start_date)
         self.assertEqual((new.annual_rent, new.renewed_from_id, new.security_deposit), (old.annual_rent, old.pk, old.security_deposit))
-        self.assertEqual(new.payments.count(), 4)
+        self.assertEqual(new.payments.filter(kind="rent").count(), 4)
+        self.assertEqual(new.payments.filter(kind="deposit").count(), 1)  # the deposit is asked for again
 
     def test_a_lease_can_only_be_renewed_once_and_not_after_termination(self):
         old = make_lease(self.tenant, self.flat)
@@ -323,7 +324,7 @@ class LeasePages(Setup):
         response = self.client.post(reverse("admin:leases_lease_add"), {
             "tenant": self.tenant.pk, "unit": other.pk, "property": "", "start_date": start.isoformat(),
             "end_date": (start + timedelta(days=364)).isoformat(), "annual_rent": "48000", "installments": "4",
-            "status": "active", "security_deposit": "0", "deposit_status": "held", "commission": "0", "admin_fee": "0",
+            "status": "active", "security_deposit": "0", "deposit_status": "held", "commission": "0", "admin_fee": "0", "ejari_fee": "0",
             "deposit_refund_date": "", "deposit_refund_amount": "0", "late_fee_per_day": "0", "ejari_number": "", "ejari_expiry": "", "terminated_on": "", "termination_reason": "", "notes": "",
             "documents-TOTAL_FORMS": "0", "documents-INITIAL_FORMS": "0", "documents-MIN_NUM_FORMS": "0",
             "documents-MAX_NUM_FORMS": "1000",
@@ -413,7 +414,7 @@ class RenewTerminateAndCheques(Setup):
     def test_terminate_can_keep_the_payments_and_set_the_deposit(self):
         lease = make_lease(self.tenant, self.flat, security_deposit=Decimal("2000"))
         self.assertEqual(lease.terminate(lease.start_date + timedelta(days=60), "Left", cancel_unpaid=False, deposit_status="refunded"), 0)
-        self.assertEqual(lease.payments.count(), 4)
+        self.assertEqual(lease.payments.filter(kind="rent").count(), 4)
         self.assertEqual(lease.deposit_status, "refunded")
 
     def test_terminate_needs_a_reason_a_valid_date_and_works_only_once(self):
@@ -586,12 +587,12 @@ class MoreDetail(Setup):
         )
 
     def test_days_overdue_and_late_fee(self):
-        first = self.lease.payments.order_by("due_date").first()
+        first = self.lease.payments.filter(kind="rent").order_by("due_date").first()
         self.assertEqual(first.days_overdue(), 100)
         self.assertEqual(first.late_fee(), Decimal("5000.00"))
         first.record(self.today, "cash")
         self.assertEqual((first.days_overdue(), first.late_fee()), (0, Decimal("0.00")))
-        second = self.lease.payments.order_by("due_date")[1]  # also past due, so it keeps adding up
+        second = self.lease.payments.filter(kind="rent").order_by("due_date")[1]  # also past due, so it keeps adding up
         self.assertGreater(second.late_fee(), 0)
         self.assertEqual(self.lease.late_fees(), second.late_fee())
 
@@ -602,7 +603,7 @@ class MoreDetail(Setup):
         self.assertEqual(lease.payments.order_by("due_date").first().late_fee(), Decimal("0.00"))
 
     def test_cheque_dates_are_checked_and_cleared_for_other_methods(self):
-        payment = self.lease.payments.order_by("due_date").first()
+        payment = self.lease.payments.filter(kind="rent").order_by("due_date").first()
         payment.method, payment.cheque_date, payment.deposited_on = "cheque", date(2026, 3, 10), date(2026, 3, 5)
         with self.assertRaises(ValidationError):
             payment.save()
@@ -740,7 +741,7 @@ class ReportsAndLook(Setup):
         overdue = next(c for c in late if c["label"] == "Overdue")
         self.assertEqual(overdue["count"], 2)  # the payments due 100 and about 9 days ago
         self.assertEqual(overdue["amount"], "AED 20,000")
-        first = self.lease.payments.order_by("due_date").first()
+        first = self.lease.payments.filter(kind="rent").order_by("due_date").first()
         first.record(self.today, "cash")
         strip = self.client.get(reverse("admin:leases_leasepayment_changelist")).context["pay_strip"]
         self.assertEqual(next(c for c in strip if c["label"] == "Collected this month")["amount"], "AED 10,000")
@@ -1093,7 +1094,7 @@ class ScaleTools(Setup):
         form = LeaseAdminForm(data={
             "tenant": self.tenant.pk, "unit": other.pk, "property": "", "start_date": start, "end_date": start + timedelta(days=364),
             "annual_rent": "48000", "installments": "4", "status": "active", "security_deposit": "0", "deposit_status": "held",
-            "commission": "0", "admin_fee": "0", "deposit_refund_amount": "0", "late_fee_per_day": "0",
+            "commission": "0", "admin_fee": "0", "ejari_fee": "0", "deposit_refund_amount": "0", "late_fee_per_day": "0",
         })
         self.assertTrue(form.is_valid(), form.errors)
 
@@ -1255,7 +1256,7 @@ class ScaleTools(Setup):
         pk = lease.payments.first().pk
         good = {"action": "paid", "date": self.today.isoformat()}
         self.assertEqual(self.bulk([], **good).status_code, 400)
-        self.assertEqual(self.bulk([pk], action="delete", date=good["date"]).status_code, 400)
+        self.assertEqual(self.bulk([pk], action="frobnicate", date=good["date"]).status_code, 400)
         self.assertEqual(self.bulk([pk], action="paid", date="soon").status_code, 400)
         self.assertEqual(self.bulk([pk], method="gold", **good).status_code, 400)
         self.assertEqual(self.bulk(range(1, 600), **good).status_code, 400)
@@ -1348,7 +1349,7 @@ class LargeTestData(TestCase):
         self.assertEqual(Lease.objects.filter(unit__isnull=False).values("unit").distinct().count(),
                          Lease.objects.filter(unit__isnull=False).count())
         for lease in Lease.objects.filter(ejari_number__startswith="BULK-", status=Lease.Status.ACTIVE)[:40]:
-            self.assertEqual(sum(p.amount for p in lease.payments.all()), lease.annual_rent)
+            self.assertEqual(sum(p.amount for p in lease.payments.filter(kind="rent")), lease.annual_rent)
         self.assertEqual(occupancy.refresh_all(), 0)
         self.assertTrue(LeasePayment.objects.filter(status=LeasePayment.Status.PENDING, due_date__lt=timezone.localdate()).exists())
         self.assertTrue(Unit.objects.filter(status=Unit.Status.OCCUPIED).exists())

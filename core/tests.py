@@ -506,3 +506,17 @@ class PasswordRule(TestCase):
         page = self.client.get(reverse("admin:auth_user_password_change", args=[user.pk]))
         self.assertEqual(page.status_code, 200)
         self.assertNotIn("usable_password", page.content.decode())
+
+
+class SystemReportCommand(TestCase):
+    def test_report_runs_and_writes_a_file(self):
+        import io
+        from pathlib import Path
+
+        from django.conf import settings
+        from django.core.management import call_command
+
+        out = io.StringIO()
+        call_command("system_report", stdout=out)
+        self.assertIn("SUMMARY", out.getvalue())
+        self.assertTrue((Path(settings.BASE_DIR) / "system-report.txt").exists())

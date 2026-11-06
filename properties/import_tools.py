@@ -42,7 +42,7 @@ def _number(text, field, integer=False):
     try:
         value = Decimal(cleaned)
     except InvalidOperation:
-        raise RowError(f'{field} "{text}" is not a number.')
+        raise RowError(f'{field} "{text}" is not a number.') from None
     if integer:
         if value != value.to_integral_value():
             raise RowError(f'{field} "{text}" must be a whole number.')

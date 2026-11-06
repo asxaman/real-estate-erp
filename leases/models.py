@@ -21,6 +21,13 @@ from tenants.models import Tenant
 VAT_RATE = Decimal("5")  # UAE VAT, in percent
 MAX_YEARS = 10
 CENT = Decimal("0.01")
+# Money other than rent that is asked of the tenant: (payment type, the lease field that holds the amount).
+CHARGE_FIELDS = (
+    ("deposit", "security_deposit"),
+    ("office", "admin_fee"),
+    ("agency", "commission"),
+    ("ejari", "ejari_fee"),
+)
 _property = property  # the Lease model has a field called "property", which hides the built-in name
 
 
@@ -98,6 +105,10 @@ class Lease(models.Model):
     admin_fee = models.DecimalField(
         "Admin / contract fee (AED)", max_digits=12, decimal_places=2, default=0, validators=[MinValueValidator(0)],
     )
+    ejari_fee = models.DecimalField(
+        "Ejari fee (AED)", max_digits=12, decimal_places=2, default=0, validators=[MinValueValidator(0)],
+        help_text="Collected from the tenant. Becomes its own payment line.",
+    )
     deposit_refund_date = models.DateField("Deposit refunded on", null=True, blank=True)
     deposit_refund_amount = models.DecimalField(
         "Amount refunded (AED)", max_digits=12, decimal_places=2, default=0, validators=[MinValueValidator(0)],
@@ -121,6 +132,14 @@ class Lease(models.Model):
     class Meta:
         ordering = ["-start_date", "-id"]
         permissions = [("export_lease", "Can export leases to Excel / CSV")]
+        constraints = [
+            models.CheckConstraint(condition=models.Q(end_date__gt=models.F("start_date")), name="lease_end_after_start"),
+            models.CheckConstraint(condition=models.Q(annual_rent__gt=0), name="lease_rent_positive"),
+        ]
+        indexes = [
+            models.Index(fields=["status", "end_date"], name="lease_status_end_idx"),
+            models.Index(fields=["unit", "start_date"], name="lease_unit_start_idx"),
+        ]
 
     def __str__(self):
         return self.code or "New lease"
@@ -168,23 +187,38 @@ class Lease(models.Model):
         return money(self.annual_rent or 0) + self.vat_amount
 
     def paid_total(self):
-        """Rent received so far, VAT included."""
-        return sum((p.total for p in self.payments.all() if p.status == LeasePayment.Status.PAID), Decimal("0.00"))
+        """Rent received so far, VAT included (deposit and fees are not rent)."""
+        return sum((p.total for p in self.payments.all() if p.is_rent and p.status == LeasePayment.Status.PAID), Decimal("0.00"))
 
     def scheduled_total(self):
-        """Everything the schedule asks for, VAT included."""
-        return sum((p.total for p in self.payments.all()), Decimal("0.00"))
+        """All the rent the schedule asks for, VAT included (deposit and fees are not rent)."""
+        return sum((p.total for p in self.payments.all() if p.is_rent), Decimal("0.00"))
+
+    def charge_lines(self):
+        """The deposit and fee lines (everything that is not rent), in a fixed order."""
+        order = {kind: n for n, (kind, _field) in enumerate(CHARGE_FIELDS)}
+        lines = [p for p in self.payments.all() if not p.is_rent]
+        return sorted(lines, key=lambda p: (order.get(p.kind, 99), p.due_date, p.part))
 
     def late_fees(self, today=None):
-        """Late fees that have built up on overdue payments (0 when no daily fee is set)."""
-        return sum((p.late_fee(today) for p in self.payments.all()), Decimal("0.00"))
+        """Late fees that have built up on overdue rent (0 when no daily fee is set)."""
+        return sum((p.late_fee(today) for p in self.payments.all() if p.is_rent), Decimal("0.00"))
 
     def deposit_deducted(self):
-        return sum((d.amount for d in self.deductions.all()), Decimal("0.00"))
+        """Money kept from the deposit (fines and other charges are not taken from it)."""
+        return sum((d.amount for d in self.deductions.all() if d.kind == LeaseDeduction.Kind.DEPOSIT), Decimal("0.00"))
+
+    def deposit_refunded(self):
+        """What was paid back: the refund payment lines (and the old 'refunded' amount of earlier leases)."""
+        lines = sum(
+            (p.amount for p in self.payments.all() if p.kind == LeasePayment.Kind.REFUND and p.status == LeasePayment.Status.PAID),
+            Decimal("0.00"),
+        )
+        return lines + (self.deposit_refund_amount or 0)
 
     def deposit_balance(self):
         """Deposit still held: deposit - deductions - what was refunded (never below zero)."""
-        left = (self.security_deposit or 0) - self.deposit_deducted() - (self.deposit_refund_amount or 0)
+        left = (self.security_deposit or 0) - self.deposit_deducted() - self.deposit_refunded()
         return max(money(left), Decimal("0.00"))
 
     # ---- rules ----------------------------------------------------------------------
@@ -219,6 +253,16 @@ class Lease(models.Model):
             errors["deposit_refund_date"] = "Enter the date the deposit was paid back."
         if self.deposit_refund_date and self.start_date and self.deposit_refund_date < self.start_date:
             errors["deposit_refund_date"] = "The refund cannot be before the lease starts."
+
+        # A deposit or fee that was already received is changed on its payment line, not here.
+        if self.pk:
+            for kind, field in CHARGE_FIELDS:
+                line = self.payments.filter(kind=kind).first()
+                if line is not None and line.status in (LeasePayment.Status.PAID, LeasePayment.Status.HELD):
+                    if money(getattr(self, field) or 0) != line.amount:
+                        errors[field] = (
+                            f"AED {line.amount:,.2f} was already received. Change the amount on its payment line instead."
+                        )
 
         # Early termination needs a date and a reason; an active lease keeps neither.
         if self.status == self.Status.TERMINATED:
@@ -274,10 +318,13 @@ class Lease(models.Model):
     def save(self, *args, **kwargs):
         if self.unit_id and not self.property_id:
             self.property = self.unit.property
+        existed = self.pk is not None
         if self.code:
             super().save(*args, **kwargs)
         else:
             save_with_unique_code(self, lambda: next_lease_code(), lambda: super(Lease, self).save(*args, **kwargs))
+        if existed:
+            self.sync_charges()
 
     # ---- payment schedule -----------------------------------------------------------
     def schedule_rows(self):
@@ -300,7 +347,28 @@ class Lease(models.Model):
             LeasePayment(lease=self, part=number, due_date=due, amount=amount)
             for number, due, amount in self.schedule_rows()
         ])
+        self.sync_charges()
         return self.installments or 1
+
+    def sync_charges(self):
+        """
+        Keep one payment line for each of the deposit and fees typed on the lease (security deposit,
+        office fee, agency commission, Ejari fee). A line that was already received is never touched;
+        one that is still pending follows the amount on the lease.
+        """
+        lines = {p.kind: p for p in self.payments.filter(kind__in=[kind for kind, _field in CHARGE_FIELDS])}
+        for kind, field in CHARGE_FIELDS:
+            amount = money(getattr(self, field) or 0)
+            line = lines.get(kind)
+            if line is None:
+                if amount > 0:
+                    LeasePayment.objects.create(lease=self, kind=kind, part=1, due_date=self.start_date, amount=amount)
+            elif line.status == LeasePayment.Status.PENDING:
+                if amount <= 0:
+                    line.delete()
+                elif line.amount != amount:
+                    line.amount = amount
+                    line.save()
 
     def renew(self, new_rent=None):
         """
@@ -320,6 +388,7 @@ class Lease(models.Model):
             tenant=self.tenant, unit=self.unit, property=self.property, start_date=start, end_date=start + length,
             annual_rent=rent, installments=self.installments, vat_applies=self.vat_applies,
             security_deposit=self.security_deposit, deposit_status=self.deposit_status, late_fee_per_day=self.late_fee_per_day,
+            admin_fee=self.admin_fee, ejari_fee=self.ejari_fee,
             renewed_from=self,
         )
         new.clean()
@@ -341,7 +410,9 @@ class Lease(models.Model):
         self.clean()
         self.save()
         if cancel_unpaid:
-            return self.payments.filter(status=LeasePayment.Status.PENDING, due_date__gt=on).delete()[0]
+            return self.payments.filter(
+                kind=LeasePayment.Kind.RENT, status=LeasePayment.Status.PENDING, due_date__gt=on,
+            ).delete()[0]
         return 0
 
     def assign_cheques(self, first, bank=""):
@@ -352,7 +423,10 @@ class Lease(models.Model):
         prefix, digits = match.groups()
         width, number = len(digits), int(digits)
         count = 0
-        for payment in self.payments.exclude(status=LeasePayment.Status.PAID).order_by("due_date", "part"):
+        unpaid = self.payments.filter(kind=LeasePayment.Kind.RENT).exclude(
+            status__in=(LeasePayment.Status.PAID, LeasePayment.Status.HELD),
+        )
+        for payment in unpaid.order_by("due_date", "part"):
             payment.method = LeasePayment.Method.CHEQUE
             payment.cheque_number = f"{prefix}{number:0{width}d}"[:30]
             if bank:
@@ -377,14 +451,28 @@ class LeasePayment(models.Model):
         TRANSFER = "transfer", "Bank transfer"
         CASH = "cash", "Cash"
         CARD = "card", "Card"
+        FROM_DEPOSIT = "deposit", "Kept from the deposit"
         OTHER = "other", "Other"
 
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"
         PAID = "paid", "Paid"
         BOUNCED = "bounced", "Bounced"
+        HELD = "held", "Held (cheque not cashed)"
+
+    class Kind(models.TextChoices):
+        RENT = "rent", "Rent"
+        DEPOSIT = "deposit", "Security deposit"
+        OFFICE = "office", "Office fee"
+        AGENCY = "agency", "Agency fee"
+        EJARI = "ejari", "Ejari fee"
+        FINE = "fine", "Fine"
+        DEDUCTION = "deduction", "Deduction"
+        REFUND = "refund", "Deposit refund"
+        OTHER = "other", "Other"
 
     lease = models.ForeignKey(Lease, on_delete=models.CASCADE, related_name="payments")
+    kind = models.CharField("Type", max_length=10, choices=Kind.choices, default=Kind.RENT)
     part = models.PositiveSmallIntegerField("No.", default=1)
     due_date = models.DateField("Due on")
     amount = models.DecimalField("Amount (AED)", max_digits=12, decimal_places=2, validators=[MinValueValidator(Decimal("0.01"))])
@@ -398,24 +486,48 @@ class LeasePayment(models.Model):
     notes = models.CharField(max_length=200, blank=True)
 
     class Meta:
-        ordering = ["due_date", "part"]
+        ordering = ["due_date", "part", "id"]
         verbose_name = "payment"
-        verbose_name_plural = "Payments"
-        permissions = [("export_leasepayment", "Can export rent payments to Excel / CSV")]
+        verbose_name_plural = "Tenant payments"
+        permissions = [("export_leasepayment", "Can export tenant payments to Excel / CSV")]
+        constraints = [
+            models.UniqueConstraint(fields=["lease", "kind", "part"], name="payment_unique_part"),
+            models.CheckConstraint(condition=models.Q(amount__gt=0), name="payment_amount_positive"),
+        ]
+        indexes = [
+            models.Index(fields=["status", "due_date"], name="payment_status_due_idx"),
+            models.Index(fields=["due_date"], name="payment_due_idx"),
+            models.Index(fields=["kind", "status"], name="payment_kind_status_idx"),
+        ]
 
     def __str__(self):
-        return f"{self.lease.code} payment {self.part}"
+        return f"{self.lease.code} {self.label.lower()}"
+
+    @property
+    def is_rent(self):
+        return self.kind == self.Kind.RENT
+
+    @property
+    def label(self):
+        """'Payment 2' for rent, otherwise the type: 'Security deposit'."""
+        return f"Payment {self.part}" if self.is_rent else self.get_kind_display() + (f" {self.part}" if self.part > 1 else "")
 
     @property
     def vat(self):
-        return money(self.amount * VAT_RATE / 100) if self.lease.vat_applies else Decimal("0.00")
+        """5% VAT is added to the rent of commercial leases only (not to a deposit or a fee)."""
+        if self.is_rent and self.lease.vat_applies:
+            return money(self.amount * VAT_RATE / 100)
+        return Decimal("0.00")
 
     @property
     def total(self):
         return money(self.amount) + self.vat
 
     def is_overdue(self, today=None):
-        return self.status != self.Status.PAID and self.due_date < (today or timezone.localdate())
+        """Late: not received, no cheque in hand, and the due date has passed."""
+        if self.kind == self.Kind.REFUND:
+            return False
+        return self.status not in (self.Status.PAID, self.Status.HELD) and self.due_date < (today or timezone.localdate())
 
     def days_overdue(self, today=None):
         """How many days late (0 when paid or not yet due)."""
@@ -424,7 +536,7 @@ class LeasePayment(models.Model):
 
     def late_fee(self, today=None):
         rate = self.lease.late_fee_per_day or 0
-        return money(rate * self.days_overdue(today)) if rate else Decimal("0.00")
+        return money(rate * self.days_overdue(today)) if rate and self.is_rent else Decimal("0.00")
 
     def record(self, on, method, cheque_number="", bank_name=""):
         """The money has arrived."""
@@ -437,13 +549,22 @@ class LeasePayment(models.Model):
         self.bank_name = (bank_name or "").strip()[:60]
         self.save()
 
+    def hold(self, on, cheque_number="", bank_name=""):
+        """A cheque was received but is kept, not cashed (a blank or post-dated cheque)."""
+        self.status = self.Status.HELD
+        self.paid_on = on
+        self.method = self.Method.CHEQUE
+        self.cheque_number = (cheque_number or "").strip()[:30]
+        self.bank_name = (bank_name or "").strip()[:60]
+        self.save()
+
     def bounce(self):
         """The cheque came back unpaid."""
         self.status = self.Status.BOUNCED
         self.save()
 
     def clean(self):
-        if self.status == self.Status.PAID:
+        if self.status in (self.Status.PAID, self.Status.HELD):
             if not self.paid_on:
                 self.paid_on = timezone.localdate()
         else:
@@ -509,27 +630,79 @@ def remove_lease_document_file(sender, instance, **kwargs):
 
 
 class LeaseDeduction(models.Model):
-    """Money kept from the security deposit (repairs, unpaid bills ...) with the reason."""
+    """
+    Money kept from the tenant, with the date and the reason: taken from the security deposit, a fine, or
+    another charge. Saving one also puts a line in the Payments module against this lease.
+    """
+
+    class Kind(models.TextChoices):
+        DEPOSIT = "deposit", "Taken from the deposit"
+        FINE = "fine", "Fine"
+        OTHER = "other", "Other charge"
 
     lease = models.ForeignKey(Lease, on_delete=models.CASCADE, related_name="deductions")
+    kind = models.CharField("Type", max_length=10, choices=Kind.choices, default=Kind.DEPOSIT)
     date = models.DateField("Date", default=timezone.localdate)
     reason = models.CharField("Reason", max_length=200)
+    note = models.CharField("Note", max_length=200, blank=True)
     amount = models.DecimalField("Amount (AED)", max_digits=12, decimal_places=2, validators=[MinValueValidator(Decimal("0.01"))])
+    payment = models.OneToOneField(
+        "LeasePayment", on_delete=models.CASCADE, null=True, blank=True, editable=False, related_name="deduction",
+    )
 
     class Meta:
         ordering = ["date", "id"]
         verbose_name = "deduction"
-        verbose_name_plural = "Deposit deductions"
+        verbose_name_plural = "Deductions"
 
     def __str__(self):
         return f"{self.reason} ({self.amount})"
 
     def clean(self):
         lease = self.lease if self.lease_id else None
-        if lease is not None and self.amount:
-            others = sum((d.amount for d in lease.deductions.exclude(pk=self.pk)), Decimal("0"))
+        if lease is not None and self.amount and self.kind == self.Kind.DEPOSIT:
+            others = sum((d.amount for d in lease.deductions.exclude(pk=self.pk) if d.kind == self.Kind.DEPOSIT), Decimal("0"))
             if others + self.amount > (lease.security_deposit or 0):
                 raise ValidationError({"amount": "The deductions cannot be more than the security deposit."})
+
+    # ---- the matching line in the Payments module ---------------------------------------------
+    def _line_values(self):
+        """(payment type, status, method) of the payment line this deduction makes."""
+        if self.kind == self.Kind.DEPOSIT:
+            return LeasePayment.Kind.DEDUCTION, LeasePayment.Status.PAID, LeasePayment.Method.FROM_DEPOSIT
+        if self.kind == self.Kind.FINE:
+            return LeasePayment.Kind.FINE, LeasePayment.Status.PENDING, LeasePayment.Method.CASH
+        return LeasePayment.Kind.OTHER, LeasePayment.Status.PENDING, LeasePayment.Method.CASH
+
+    def sync_payment(self):
+        kind, status, method = self._line_values()
+        text = (self.reason + (f" - {self.note}" if self.note else ""))[:200]
+        line = self.payment
+        if line is None:
+            part = (self.lease.payments.filter(kind=kind).aggregate(m=models.Max("part"))["m"] or 0) + 1
+            line = LeasePayment(lease=self.lease, kind=kind, part=part, status=status, method=method)
+        elif line.kind != kind:  # the type was changed: start the line over as the new type
+            line.kind = kind
+            line.part = (self.lease.payments.filter(kind=kind).exclude(pk=line.pk).aggregate(m=models.Max("part"))["m"] or 0) + 1
+            line.status, line.method = status, method
+        line.amount, line.due_date, line.notes = self.amount, self.date, text
+        if line.status == LeasePayment.Status.PAID and kind == LeasePayment.Kind.DEDUCTION:
+            line.paid_on = self.date
+        line.save()
+        if self.payment_id != line.pk:
+            self.payment = line
+            LeaseDeduction.objects.filter(pk=self.pk).update(payment=line)
+
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        self.sync_payment()
+
+    def delete(self, *args, **kwargs):
+        line = self.payment
+        result = super().delete(*args, **kwargs)
+        if line is not None and line.pk:
+            line.delete()
+        return result
 
 
 class LeaseNote(models.Model):

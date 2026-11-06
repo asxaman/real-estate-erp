@@ -21,10 +21,10 @@ ZERO = Decimal("0.00")
 LEASE_HEADERS = [
     "Lease no.", "Tenant", "Rented", "Starts", "Ends", "State", "Annual rent (AED)", "VAT", "Payments per year",
     "Received (AED, with VAT)", "Still to receive (AED, with VAT)", "Overdue payments", "Security deposit (AED)",
-    "Deposit is", "Commission (AED)", "Admin fee (AED)", "Ejari number", "Ejari expires", "Notes",
+    "Deposit is", "Commission (AED)", "Admin fee (AED)", "Ejari fee (AED)", "Ejari number", "Ejari expires", "Notes",
 ]
 PAYMENT_HEADERS = [
-    "Lease no.", "Tenant", "Rented", "Payment no.", "Due on", "Amount (AED)", "VAT (AED)", "Total (AED)", "Method",
+    "Lease no.", "Tenant", "Rented", "Type", "Payment no.", "Due on", "Amount (AED)", "VAT (AED)", "Total (AED)", "Method",
     "Cheque no.", "Bank", "Date on cheque", "Deposited on", "Status", "Paid on", "Days late", "Late fee (AED)", "Notes",
 ]
 ROLL_HEADERS = [
@@ -44,20 +44,21 @@ def lease_rows(queryset):
     today = timezone.localdate()
     for lease in queryset.select_related("tenant", "unit__property", "property").prefetch_related("payments"):
         payments = list(lease.payments.all())
+        payments = [p for p in payments if p.is_rent]  # rent only: the deposit and fees have their own columns
         paid = sum((p.total for p in payments if p.status == LeasePayment.Status.PAID), ZERO)
         total = sum((p.total for p in payments), ZERO)
         yield [
             lease.code, lease.tenant.name, lease.item_name, lease.start_date, lease.end_date, _state_text(lease, today),
             lease.annual_rent, "Yes" if lease.vat_applies else "No", lease.installments, paid, max(total - paid, ZERO),
             sum(1 for p in payments if p.is_overdue(today)), lease.security_deposit, lease.get_deposit_status_display(),
-            lease.commission, lease.admin_fee, lease.ejari_number, lease.ejari_expiry or "", lease.notes,
+            lease.commission, lease.admin_fee, lease.ejari_fee, lease.ejari_number, lease.ejari_expiry or "", lease.notes,
         ]
 
 
 def payment_rows(queryset):
     for p in queryset.select_related("lease__tenant", "lease__unit__property", "lease__property"):
         yield [
-            p.lease.code, p.lease.tenant.name, p.lease.item_name, p.part, p.due_date, p.amount, p.vat, p.total,
+            p.lease.code, p.lease.tenant.name, p.lease.item_name, p.get_kind_display(), p.part, p.due_date, p.amount, p.vat, p.total,
             p.get_method_display(), p.cheque_number, p.bank_name, p.cheque_date or "", p.deposited_on or "",
             p.get_status_display(), p.paid_on or "", p.days_overdue() or "", p.late_fee() or "", p.notes,
         ]
@@ -72,7 +73,7 @@ def roll_rows():
     )
     rows = []
     for lease in sorted(leases, key=lambda l: (l.property.code, l.unit.unit_number if l.unit_id else "", l.code)):
-        payments = list(lease.payments.all())
+        payments = [p for p in lease.payments.all() if p.is_rent]  # the rent roll is about rent
         paid = sum((p.total for p in payments if p.status == LeasePayment.Status.PAID), ZERO)
         overdue = sum((p.total for p in payments if p.is_overdue(today)), ZERO)
         upcoming = sorted((p for p in payments if p.status == LeasePayment.Status.PENDING and p.due_date >= today), key=lambda p: p.due_date)
@@ -89,7 +90,7 @@ def monthly_rows(year):
     """Expected, received and still-open money for each month of a year, by payment due date."""
     today = timezone.localdate()
     months = {m: {"expected": ZERO, "received": ZERO, "count": 0} for m in range(1, 13)}
-    for p in LeasePayment.objects.filter(due_date__year=year).select_related("lease"):
+    for p in LeasePayment.objects.filter(due_date__year=year, kind=LeasePayment.Kind.RENT).select_related("lease"):
         row = months[p.due_date.month]
         row["count"] += 1
         row["expected"] += p.total
@@ -207,6 +208,7 @@ class ReportsMixin:
             rows.append({
                 "p": p, "late": p.days_overdue(today), "state": (
                     "Paid" if p.status == LeasePayment.Status.PAID else "Bounced" if p.status == LeasePayment.Status.BOUNCED
+                    else "Cheque held" if p.status == LeasePayment.Status.HELD
                     else "Overdue" if p.is_overdue(today) else "Pending"
                 ),
                 "received_so_far": balance if p.status == LeasePayment.Status.PAID else None,

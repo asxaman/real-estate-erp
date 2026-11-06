@@ -13,6 +13,8 @@
   <span>With the ticked rows:</span>
   <button type="button" class="erp-qbtn erp-qbtn-primary" data-erp-bulk="paid">Mark as paid</button>
   <button type="button" class="erp-qbtn" data-erp-bulk="deposited">Mark cheques as deposited</button>
+  <button type="button" class="erp-qbtn" data-erp-bulk="edit">Edit ticked</button>
+  {% if bulk_remove %}<button type="button" class="erp-qbtn erp-qbtn-danger" data-erp-bulk="delete">Remove ticked</button>{% endif %}
   <span class="erp-bulk-count" data-erp-bulk-count></span>
 </div>
 {% endif %}

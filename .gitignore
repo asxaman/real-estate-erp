@@ -31,3 +31,4 @@ logs/
 
 # machine check reports
 health-report.txt
+system-report.txt

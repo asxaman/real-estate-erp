@@ -11,7 +11,7 @@ from core.data_registry import register_eraser, register_seeder, sample_count
 from properties.models import Property, Unit
 from tenants.models import Tenant
 
-from .models import Lease, LeaseNote, LeasePayment
+from .models import CHARGE_FIELDS, Lease, LeaseNote, LeasePayment
 
 MODELS = ("lease", "leasepayment", "leasedocument", "leasenote", "leasededuction")
 ACTIONS = ("add", "change", "delete", "view")
@@ -95,6 +95,12 @@ def _settle(lease, today, keep_last_overdue):
         if payment.status == LeasePayment.Status.PAID:
             payment.deposited_on = payment.due_date
         payment.save()
+    # Some deposits come as a cheque that is held, not cashed (shows the "Cheque held" state).
+    deposit = lease.payments.filter(kind=LeasePayment.Kind.DEPOSIT).first()
+    if deposit is not None and lease.pk % 3 == 0 and deposit.status == LeasePayment.Status.PAID:
+        deposit.status = LeasePayment.Status.HELD
+        deposit.deposited_on = None
+        deposit.save()
     if keep_last_overdue:
         lease.late_fee_per_day = Decimal("50")
         lease.save(update_fields=["late_fee_per_day"])
@@ -208,6 +214,24 @@ def seed_bulk_leases() -> str:
             if paid:
                 payment.paid_on = min(today, due + timedelta(days=k % 3))
             payments.append(payment)
+        # The deposit and fees typed on the lease become their own payment lines, received on the start date.
+        for line_kind, field in CHARGE_FIELDS:
+            amount = getattr(lease, field)
+            if not amount:
+                continue
+            received = lease.start_date < today
+            held = line_kind == "deposit" and received and k % 4 == 0  # a cheque kept, not cashed
+            line = P(
+                lease=lease, kind=line_kind, part=1, due_date=lease.start_date, amount=amount,
+                method=P.Method.CHEQUE if (held or k % 5 == 0) else P.Method.CASH,
+                status=P.Status.HELD if held else (P.Status.PAID if received else P.Status.PENDING),
+            )
+            if received:
+                line.paid_on = lease.start_date
+            if line.method == P.Method.CHEQUE:
+                line.cheque_number = f"{900000 + k * 4 + len(payments) % 4}"
+                line.bank_name = bank
+            payments.append(line)
         if stuck:
             notes.append(LeaseNote(lease=lease, author="Sample data", text="Tenant promised to settle the late payment this week."))
     LeasePayment.objects.bulk_create(payments, batch_size=1000)

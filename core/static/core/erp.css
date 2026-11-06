@@ -364,7 +364,7 @@ html.dark .erp-select-trigger:hover:not(:disabled) { border-color: #6b7280; }
 .erp-select-trigger.is-open .erp-select-chevron { transform: rotate(180deg); color: #8b5cf6; }
 
 .erp-select-panel {
-  position: fixed; z-index: 100002; box-sizing: border-box; padding: 6px;
+  position: fixed; z-index: 100010; box-sizing: border-box; padding: 6px;
   background: #fff; color: #111827; border: 1px solid #e5e7eb; border-radius: 12px;
   box-shadow: 0 12px 32px rgba(17, 24, 39, 0.16), 0 2px 6px rgba(17, 24, 39, 0.06);
   opacity: 0; transform: translateY(-6px) scale(0.98); transform-origin: top center;
@@ -720,3 +720,18 @@ html.dark .erp-snote { background: #3a2a0b; color: #fcd34d; }
 mark.erp-hl { background: #fde68a; color: inherit; border-radius: 3px; padding: 0 1px; }
 html.dark mark.erp-hl { background: #854d0e; color: #fef3c7; }
 .erp-loading { opacity: .55; transition: opacity .15s ease; pointer-events: none; }
+
+/* Payments grouped by lease, and the deposit / fee lines */
+.erp-lease-first { font-weight: 700; }
+.erp-lease-more { color: #9ca3af; padding-left: 6px; }
+tr:has(.erp-lease-first) td { border-top: 2px solid #cbd5e1; }
+html.dark tr:has(.erp-lease-first) td { border-top-color: #374151; }
+.erp-row-charge td { background: rgba(37, 99, 235, .04); }
+.erp-paytable td { padding: 7px 10px; }
+.erp-paytable small { color: #6b7280; }
+
+/* A drop-down inside a pop-up window: same look as everywhere else */
+.erp-dlg .erp-select { width: 100% !important; max-width: 100%; }
+.erp-dlg .erp-select-trigger { min-height: 44px; }
+
+.erp-addpay-bar { display: flex; justify-content: flex-end; margin: 0 0 10px; }

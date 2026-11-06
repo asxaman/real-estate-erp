@@ -1,0 +1,45 @@
+{% extends "admin/base_site.html" %}
+
+{% block content %}
+<div class="erp-dash">
+  <div class="erp-filterbar">
+    <a class="erp-btn erp-btn-light" href="{{ list_url }}">Back to Tenant Payments</a>
+    <a class="erp-btn erp-btn-light" href="{{ lease_url }}">Open the Lease</a>
+    <span class="erp-dash-hello">
+      <b>{{ lease.code }}</b> · <a href="{{ tenant_url }}">{{ lease.tenant.name }}</a> · {{ lease.item_name }} · {{ period }}
+    </span>
+    <span style="margin-left:auto;">{{ add_button }}</span>
+  </div>
+
+  <div class="erp-strip">
+    {% for c in cards %}{% if c.any %}
+    <div class="erp-strip-card erp-strip-{% if c.title == 'Rent' %}warning{% else %}neutral{% endif %}">
+      <span>{{ c.title }}</span>
+      <b>{{ c.left }}</b><small>still to receive · due {{ c.due }} · received {{ c.got }}{% if c.held %} · cheque held {{ c.held }}{% endif %}</small>
+    </div>
+    {% endif %}{% endfor %}
+  </div>
+
+  <div class="erp-panel erp-scroll">
+    <table class="erp-table erp-paytable">
+      <thead><tr>
+        <th>Type</th><th>Due On</th><th class="num">Amount</th><th>Payment</th><th>Status</th><th></th>
+      </tr></thead>
+      <tbody>
+      {% for r in rows %}
+        <tr{% if not r.rent %} class="erp-row-charge"{% endif %}>
+          <td><b>{{ r.kind }}</b>{% if r.no %}<small> {{ r.no }}</small>{% endif %}</td>
+          <td>{{ r.due }}</td>
+          <td class="num">{{ r.amount }}{% if r.vat %}<br><small>incl. {{ r.vat|floatformat:"2g" }} VAT</small>{% endif %}</td>
+          <td>{{ r.pay }}</td>
+          <td>{{ r.state }}</td>
+          <td><span class="erp-rowacts">{{ r.note }}{{ r.buttons }}</span></td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="6">This lease has no payments yet.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

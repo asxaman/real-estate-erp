@@ -73,7 +73,7 @@
     <tbody>
     {% for r in rows %}
       <tr>
-        <td>{{ r.p.part }}</td><td>{{ r.p.due_date|date:"j M Y" }}</td>
+        <td>{% if r.p.is_rent %}{{ r.p.part }}{% else %}{{ r.p.get_kind_display }}{% endif %}</td><td>{{ r.p.due_date|date:"j M Y" }}</td>
         <td class="num">{{ r.p.amount|floatformat:"2g" }}</td>
         {% if lease.vat_applies %}<td class="num">{{ r.p.vat|floatformat:"2g" }}</td>{% endif %}
         <td class="num">{{ r.p.total|floatformat:"2g" }}</td>

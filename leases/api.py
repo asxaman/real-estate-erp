@@ -2,6 +2,7 @@
 Small JSON endpoints used by the pop-ups and the auto-fill on the lease pages (the browser side is
 core/static/core/leases.js). Each one answers {"ok": true, ...} or {"ok": false, "errors": [...]}.
 """
+import re
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 
@@ -22,7 +23,7 @@ from core.toasts import titled
 from properties.models import COMMERCIAL_UNIT_TYPES, Property, Unit
 
 from . import pickers
-from .models import Lease, LeasePayment, add_months, money
+from .models import CHARGE_FIELDS, Lease, LeaseDeduction, LeasePayment, add_months, money
 
 # Standalone properties that are normally leased with VAT.
 COMMERCIAL_PROPERTY_TYPES = (
@@ -42,14 +43,14 @@ def read_date(text, label="date"):
     try:
         return date.fromisoformat((text or "").strip())
     except ValueError:
-        raise ValidationError(f"Enter a valid {label}.")
+        raise ValidationError(f"Enter a valid {label}.") from None
 
 
 def read_number(text):
     try:
         value = Decimal((text or "").replace(",", "").strip())
     except InvalidOperation:
-        raise ValidationError("Enter a valid number.")
+        raise ValidationError("Enter a valid number.") from None
     if not value.is_finite():
         raise ValidationError("Enter a valid number.")
     return value
@@ -215,6 +216,16 @@ class LeaseApiMixin:
         return JsonResponse({"ok": True, "redirect": ""})
 
 
+def _follow_lease_amount(payment):
+    """A deposit / fee line and the amount typed on the lease are the same money: keep them equal."""
+    field = dict(CHARGE_FIELDS).get(payment.kind)
+    if field and getattr(payment.lease, field) != payment.amount:
+        Lease.objects.filter(pk=payment.lease_id).update(**{field: payment.amount})
+    source = LeaseDeduction.objects.filter(payment_id=payment.pk).first()  # a line made from the Deductions tab
+    if source is not None and (source.amount != payment.amount or source.date != payment.due_date):
+        LeaseDeduction.objects.filter(pk=source.pk).update(amount=payment.amount, date=payment.due_date)
+
+
 def read_optional_date(text, label):
     return read_date(text, label) if (text or "").strip() else None
 
@@ -228,7 +239,7 @@ def payment_values(payment):
         "due_date": day(payment.due_date), "amount": f"{payment.amount:.2f}", "method": payment.method,
         "cheque_number": payment.cheque_number, "bank_name": payment.bank_name, "cheque_date": day(payment.cheque_date),
         "deposited_on": day(payment.deposited_on), "status": payment.status, "paid_on": day(payment.paid_on),
-        "notes": payment.notes,
+        "notes": payment.notes, "kind": payment.kind,
     }
 
 
@@ -282,13 +293,23 @@ class PaymentApiMixin:
                 payment = get_object_or_404(LeasePayment.objects.select_for_update().select_related("lease"), pk=pk)
                 if action != "bounced" and payment.status == LeasePayment.Status.PAID:
                     raise ValidationError(
-                        f"Payment {payment.part} of {payment.lease.code} is already recorded as paid"
+                        f"{payment.label} of {payment.lease.code} is already recorded as paid"
                         f"{' on ' + fmt_date(payment.paid_on) if payment.paid_on else ''}. Refresh the page."
                     )
-                if action == "bounced":
+                if action == "held" and payment.status == LeasePayment.Status.HELD:
+                    raise ValidationError(f"The cheque for {payment.label.lower()} of {payment.lease.code} is already held. Refresh the page.")
+                if action == "held":
+                    on = read_date(request.POST.get("date"), "date received")
+                    payment.hold(on, request.POST.get("cheque_number", ""), request.POST.get("bank_name", ""))
+                    messages.success(
+                        request,
+                        f"{payment.label} of {payment.lease.code}: the cheque is held, not cashed (AED {format_amount(payment.total)}).",
+                        extra_tags=titled("Cheque held"),
+                    )
+                elif action == "bounced":
                     payment.bounce()
                     messages.warning(
-                        request, f"Payment {payment.part} of {payment.lease.code} was marked as bounced.",
+                        request, f"{payment.label} of {payment.lease.code} was marked as bounced.",
                         extra_tags=titled("Cheque bounced"),
                     )
                 else:
@@ -298,7 +319,7 @@ class PaymentApiMixin:
                     )
                     messages.success(
                         request,
-                        f"Payment {payment.part} of {payment.lease.code} (AED {format_amount(payment.total)}) was recorded as paid on {fmt_date(on)}.",
+                        f"{payment.label} of {payment.lease.code} (AED {format_amount(payment.total)}) was received on {fmt_date(on)}.",
                         extra_tags=titled("Payment recorded"),
                     )
         except ValidationError as exc:
@@ -311,17 +332,19 @@ class PaymentApiMixin:
         payment = get_object_or_404(LeasePayment.objects.select_related("lease"), pk=pk)
         if request.method == "GET":
             return JsonResponse({
-                "ok": True, "values": payment_values(payment), "code": payment.lease.code, "part": payment.part,
-                "can_remove": payment.status != LeasePayment.Status.PAID and request.user.has_perm("leases.delete_leasepayment"),
+                "ok": True, "values": payment_values(payment), "code": payment.lease.code, "part": payment.part, "label": payment.label,
+                "can_remove": payment.status not in (LeasePayment.Status.PAID, LeasePayment.Status.HELD)
+                and request.user.has_perm("leases.delete_leasepayment"),
             })
         if request.method != "POST":
             return fail("This must be sent as a form.", status=405)
         try:
             apply_payment(payment, request.POST)
             payment.save()
+            _follow_lease_amount(payment)
         except ValidationError as exc:
             return fail(*exc.messages)
-        messages.success(request, f"Payment {payment.part} of {payment.lease.code} was updated.", extra_tags=titled("Payment updated"))
+        messages.success(request, f"{payment.label} of {payment.lease.code} was updated.", extra_tags=titled("Payment updated"))
         return JsonResponse({"ok": True, "redirect": ""})
 
     def remove_view(self, request, pk):
@@ -330,10 +353,13 @@ class PaymentApiMixin:
         if not request.user.has_perm("leases.delete_leasepayment"):
             return refuse()
         payment = get_object_or_404(LeasePayment.objects.select_related("lease"), pk=pk)
-        if payment.status == LeasePayment.Status.PAID:
-            return fail("A payment that was received cannot be removed.")
-        label = f"Payment {payment.part} of {payment.lease.code}"
+        if payment.status in (LeasePayment.Status.PAID, LeasePayment.Status.HELD):
+            return fail("A payment that was received (or whose cheque is held) cannot be removed.")
+        label = f"{payment.label} of {payment.lease.code}"
+        field = dict(CHARGE_FIELDS).get(payment.kind)
         payment.delete()
+        if field:  # a removed deposit / fee line means none is asked for any more
+            Lease.objects.filter(pk=payment.lease_id).update(**{field: 0})
         messages.success(request, f"{label} was removed.", extra_tags=titled("Payment removed"))
         return JsonResponse({"ok": True, "redirect": ""})
 
@@ -343,15 +369,123 @@ class PaymentApiMixin:
         if not request.user.has_perm("leases.add_leasepayment"):
             return refuse()
         lease = get_object_or_404(Lease, pk=lease_pk)
-        payment = LeasePayment(lease=lease, part=(lease.payments.aggregate(m=Max("part"))["m"] or 0) + 1)
+        kind = request.POST.get("kind") or LeasePayment.Kind.RENT
+        if kind not in LeasePayment.Kind.values:
+            return fail("Choose the type of payment.")
+        if kind == LeasePayment.Kind.DEDUCTION:
+            return fail("Deductions are added on the lease's Deductions tab. Use a Fine or Other line here.")
+        if kind in dict(CHARGE_FIELDS) and lease.payments.filter(kind=kind).exists():
+            return fail(f"This lease already has a {LeasePayment.Kind(kind).label.lower()} line. Edit that line instead.")
+        payment = LeasePayment(
+            lease=lease, kind=kind, part=(lease.payments.filter(kind=kind).aggregate(m=Max("part"))["m"] or 0) + 1,
+        )
         try:
             data = request.POST.copy()
+            if kind == LeasePayment.Kind.REFUND:  # money paid back to the tenant: done when it is entered
+                data.setdefault("status", LeasePayment.Status.PAID)
+                data.setdefault("paid_on", data.get("due_date", ""))
             data.setdefault("status", LeasePayment.Status.PENDING)
             apply_payment(payment, data)
             payment.save()
+            _follow_lease_amount(payment)
         except ValidationError as exc:
             return fail(*exc.messages)
-        messages.success(request, f"Payment {payment.part} was added to {lease.code}.", extra_tags=titled("Payment added"))
+        messages.success(request, f"{payment.label} was added to {lease.code}.", extra_tags=titled("Payment added"))
+        return JsonResponse({"ok": True, "redirect": ""})
+
+    def _bulk_delete(self, request, ids):
+        """Remove the ticked payments that were not received. Received ones (and held cheques) stay."""
+        if not request.user.has_perm("leases.delete_leasepayment"):
+            return refuse()
+        removed = kept = 0
+        with transaction.atomic():
+            for payment in LeasePayment.objects.select_for_update().filter(pk__in=ids).order_by("pk"):
+                if payment.status in (LeasePayment.Status.PAID, LeasePayment.Status.HELD):
+                    kept += 1
+                    continue
+                field = dict(CHARGE_FIELDS).get(payment.kind)
+                lease_id = payment.lease_id
+                payment.delete()
+                if field:  # a removed deposit / fee line means none is asked for any more
+                    Lease.objects.filter(pk=lease_id).update(**{field: 0})
+                removed += 1
+        if not removed:
+            return fail(f"Nothing was removed: the {kept} ticked payment(s) were already received or hold a cheque.")
+        text = f"{removed} payment(s) removed."
+        if kept:
+            text += f" {kept} kept (received, or the cheque is held)."
+        messages.success(request, text, extra_tags=titled("Payments removed"))
+        return JsonResponse({"ok": True, "redirect": ""})
+
+    def _bulk_edit(self, request, ids):
+        """Change the same detail on all ticked payments. A field left empty is not touched."""
+        if not self.has_change_permission(request):
+            return refuse()
+        post = request.POST
+        try:
+            due = read_optional_date(post.get("due_date"), "due date")
+            cheque_date = read_optional_date(post.get("cheque_date"), "date on the cheque")
+            deposited = read_optional_date(post.get("deposited_on"), "deposit date")
+            amount = read_number(post.get("amount")) if (post.get("amount") or "").strip() else None
+            if amount is not None and amount <= 0:
+                raise ValidationError("The amount must be more than zero.")
+        except ValidationError as exc:
+            return fail(*exc.messages)
+        method = post.get("method", "")
+        if method and method not in LeasePayment.Method.values:
+            return fail("Choose how the payments are made.")
+        bank = (post.get("bank_name") or "").strip()[:60]
+        note = (post.get("notes") or "").strip()[:200]
+        first = (post.get("cheque_first") or "").strip()
+        match = re.fullmatch(r"(\D*)(\d+)", first) if first else None
+        if first and not match:
+            return fail("The first cheque number must end in digits, for example 000123 or CQ-0042.")
+        if not any([due, cheque_date, deposited, amount is not None, method, bank, note, first]):
+            return fail("Fill in at least one detail to change.")
+
+        changed = skipped = 0
+        counter = int(match.group(2)) if match else 0
+        try:
+            with transaction.atomic():
+                payments = list(
+                    LeasePayment.objects.select_for_update().select_related("lease").filter(pk__in=ids).order_by("due_date", "part", "pk")
+                )
+                for payment in payments:
+                    received = payment.status in (LeasePayment.Status.PAID, LeasePayment.Status.HELD)
+                    touched = False
+                    if (due or amount is not None) and received:
+                        skipped += 1  # the date and amount of received money are not changed in bulk
+                    else:
+                        if due:
+                            payment.due_date, touched = due, True
+                        if amount is not None:
+                            payment.amount, touched = money(amount), True
+                    if method:
+                        payment.method, touched = method, True
+                    if bank:
+                        payment.bank_name, touched = bank, True
+                    if cheque_date:
+                        payment.cheque_date, touched = cheque_date, True
+                    if deposited:
+                        payment.deposited_on, touched = deposited, True
+                    if note:
+                        payment.notes, touched = note, True
+                    if match and payment.method == LeasePayment.Method.CHEQUE and payment.status != LeasePayment.Status.PAID:
+                        payment.cheque_number = f"{match.group(1)}{counter:0{len(match.group(2))}d}"[:30]
+                        counter += 1
+                        touched = True
+                    if touched:
+                        payment.save()
+                        _follow_lease_amount(payment)
+                        changed += 1
+        except ValidationError as exc:
+            return fail(*exc.messages)
+        if not changed:
+            return fail("Nothing was changed: the ticked payments were already received.")
+        text = f"{changed} payment(s) updated."
+        if skipped:
+            text += f" The date or amount of {skipped} received payment(s) was left alone."
+        messages.success(request, text, extra_tags=titled("Payments updated"))
         return JsonResponse({"ok": True, "redirect": ""})
 
     def bulk_view(self, request):
@@ -369,6 +503,10 @@ class PaymentApiMixin:
         if len(ids) > 500:
             return fail("Tick at most 500 payments at a time.")
         action = request.POST.get("action", "")
+        if action == "delete":
+            return self._bulk_delete(request, ids)
+        if action == "edit":
+            return self._bulk_edit(request, ids)
         if action not in ("paid", "deposited"):
             return fail("Choose what to do with the ticked payments.")
         method = request.POST.get("method", "")

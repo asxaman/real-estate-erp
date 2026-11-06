@@ -41,7 +41,7 @@ def media_view(request, path):
     try:
         full = safe_join(settings.MEDIA_ROOT, path)
     except Exception:
-        raise Http404
+        raise Http404 from None
     if settings.MEDIA_ACCEL_REDIRECT:
         response = HttpResponse()
         response["X-Accel-Redirect"] = settings.MEDIA_ACCEL_REDIRECT.rstrip("/") + "/" + path
@@ -50,7 +50,7 @@ def media_view(request, path):
         try:
             response = FileResponse(open(full, "rb"), content_type=mimetypes.guess_type(path)[0] or "application/octet-stream")
         except (FileNotFoundError, IsADirectoryError, PermissionError):
-            raise Http404
+            raise Http404 from None
     response["X-Content-Type-Options"] = "nosniff"
     response["Cache-Control"] = "private, no-store"
     response["Content-Disposition"] = "inline"

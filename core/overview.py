@@ -148,7 +148,7 @@ def _lease_panels(user, panels):
         payments = LeasePayment.objects.all()
         # amount + VAT, worked out by the database (VAT rounded per payment, the same as LeasePayment.total)
         vat = Case(
-            When(lease__vat_applies=True, then=Round(F("amount") * Value(VAT_RATE) / 100, 2)),
+            When(lease__vat_applies=True, kind=LeasePayment.Kind.RENT, then=Round(F("amount") * Value(VAT_RATE) / 100, 2)),
             default=Value(0), output_field=DecimalField(max_digits=14, decimal_places=2),
         )
 
