@@ -30,6 +30,17 @@ def data_tools_view(request):
             except Exception as exc:  # show the problem instead of a crash page
                 messages.error(request, f"Seeding failed and was rolled back: {exc}")
 
+        elif action == "seed_small":
+            try:
+                from .mini_seed import seed_small
+
+                lines = seed_small()
+                log_tool(request.user, "Seed small sample set", lines)
+                for line in lines:
+                    messages.success(request, line)
+            except Exception as exc:
+                messages.error(request, f"Seeding failed and was rolled back: {exc}")
+
         elif action == "erase":
             typed = request.POST.get("confirm_text", "").strip()
             if typed != ERASE_CONFIRMATION_WORD:

@@ -395,6 +395,19 @@ class DevelopmentMode(TestCase):
         self.client.post(reverse("data_tools"), {"action": "seed"})
         self.assertGreater(Property.objects.count(), 0)
 
+    def test_small_set_adds_two_of_each_and_no_leases(self):
+        from leases.models import Lease, LeasePayment
+        from tenants.models import Tenant
+
+        for _ in range(2):  # twice: nothing is repeated
+            self.client.post(reverse("data_tools"), {"action": "seed_small"})
+        self.assertEqual(Owner.objects.filter(name__startswith="Small Set").count(), 2)
+        self.assertEqual(Property.objects.filter(code__startswith="SMALL").count(), 2)
+        self.assertEqual(Unit.objects.count(), 2)
+        self.assertEqual(Tenant.objects.count(), 2)
+        self.assertEqual(Lease.objects.count(), 0)
+        self.assertEqual(LeasePayment.objects.count(), 0)
+
     def test_tools_are_refused_when_off(self):
         self.switch(False)
         self.client.post(reverse("data_tools"), {"action": "seed"})

@@ -381,3 +381,8 @@ No migration needed. Run `python manage.py test`, press Ctrl+F5 twice, then try 
 ## Update 27c
 - New command `python manage.py system_report`: checks code, templates, migrations, static files and data logic; writes system-report.txt (read-only).
 - Fixed an old test that used "delete" as an invalid bulk action.
+
+
+## Update 27e
+- Data tools: new button "Seed small sample set" (2 owners, 2 properties, 2 units, 2 tenants; no leases or payments).
+- Fixes from system_report: `raise ... from None` in 4 places, loop-variable binding in tenants/seed.py.
