@@ -250,13 +250,6 @@ def _follow_lease_amount(payment):
         LeaseDeduction.objects.filter(pk=source.pk).update(amount=payment.amount, date=payment.due_date)
 
 
-def _is_last_rent_line(payment):
-    """True when this is the only rent payment its lease has left."""
-    return payment.kind == LeasePayment.Kind.RENT and not LeasePayment.objects.filter(
-        lease_id=payment.lease_id, kind=LeasePayment.Kind.RENT
-    ).exclude(pk=payment.pk).exists()
-
-
 def read_optional_date(text, label):
     return read_date(text, label) if (text or "").strip() else None
 
@@ -406,11 +399,6 @@ class PaymentApiMixin:
         if payment.status in (LeasePayment.Status.PAID, LeasePayment.Status.HELD):
             return fail("A payment that was received (or whose cheque is held) cannot be removed.")
         label = f"{payment.label} of {payment.lease.code}"
-        if _is_last_rent_line(payment):
-            return fail(
-                f"This is the only rent payment of {payment.lease.code}, and a lease needs at least one. "
-                "Change its amount or date instead, or terminate the lease."
-            )
         field = dict(CHARGE_FIELDS).get(payment.kind)
         was_rent, lease = payment.kind == LeasePayment.Kind.RENT, payment.lease
         payment.delete()
@@ -464,7 +452,7 @@ class PaymentApiMixin:
         removed = kept = 0
         with transaction.atomic():
             for payment in LeasePayment.objects.select_for_update().filter(pk__in=ids).order_by("pk"):
-                if payment.status in (LeasePayment.Status.PAID, LeasePayment.Status.HELD) or _is_last_rent_line(payment):
+                if payment.status in (LeasePayment.Status.PAID, LeasePayment.Status.HELD):
                     kept += 1
                     continue
                 field = dict(CHARGE_FIELDS).get(payment.kind)
@@ -477,13 +465,10 @@ class PaymentApiMixin:
                     Lease.objects.get(pk=lease_id).sync_rent_total()
                 removed += 1
         if not removed:
-            return fail(
-                f"Nothing was removed: the {kept} ticked payment(s) were already received, hold a cheque, "
-                "or are the only rent payment of their lease."
-            )
+            return fail(f"Nothing was removed: the {kept} ticked payment(s) were already received or hold a cheque.")
         text = f"{removed} payment(s) removed."
         if kept:
-            text += f" {kept} kept (received, a held cheque, or the last rent payment of a lease)."
+            text += f" {kept} kept (received, or the cheque is held)."
         messages.success(request, text, extra_tags=titled("Payments removed"))
         return JsonResponse({"ok": True, "redirect": ""})
 

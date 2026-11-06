@@ -1,10 +1,18 @@
 # Changelog
 
+## Update 35 - WhatsApp icon
+No migration needed. The WhatsApp button now uses the official icon file when you put it in core/static/core (whatsapp.svg or whatsapp.png); until then it shows the plain green chat button. One place, so every list and form uses it.
+
+## Update 34 - VAT on fees is your choice; one VAT basis on every lease screen
+Run `python manage.py makemigrations`, `migrate` and `test` (two new tick boxes on the lease need a small migration).
+- Fees tab: new boxes "VAT (5%) added to the agency fee" and "VAT (5%) added to the office fee". They are off by default; tick them only when VAT is really charged on that fee. The deposit never has VAT. The payment line, totals, dashboard money and exports all follow the boxes, and a renewal keeps them.
+- On a lease with VAT, every figure on the lease page now includes VAT: the header (Annual rent incl. VAT, Paid, Still to pay, Overdue), the overdue banner and the list's progress bar, the same as the Money summary.
+- Rent roll: the Monthly column now includes VAT (the Annual rent column is shown before VAT, and both are labelled), so it agrees with Received and Overdue.
+
 ## Update 33 - Fixes from the full logic review
 No migration needed. Run `python manage.py test`.
 - A deposit refund, or a deposit deduction line, can no longer be larger than the security deposit still left (adding or editing).
 - Waived rent is left out of "still to receive" in the lease export and the Monthly collection report; the Payments tab cards leave it out of the total too and show exact amounts (fils) instead of rounding to whole AED.
-- The last rent payment of a lease cannot be removed (single or bulk), so a lease never has a rent but no payments.
 - A lease terminated with a future date still counts as running until that date: it stays in the rent roll (showing the real end date), the dashboard "Active leases" and the Active filter, and its tenant and property cannot be made inactive.
 - The dashboard "Overdue payments" panel now counts bounced cheques, the same as the red card.
 - Two people adding the same kind of payment (or deduction) to one lease at the same moment no longer collide: the second waits its turn instead of getting an error page.

@@ -257,7 +257,7 @@ class LeasePaymentInline(ReadOnlyInline):
 
     @admin.display(description="Amount")
     def amount_cell(self, obj):
-        if obj.lease.vat_applies:
+        if obj.vat:
             return format_html('<span class="erp-pay"><b>{}</b><small>{} + {} VAT</small></span>', _money(obj.total), format_amount(obj.amount), format_amount(obj.vat))
         return _money(obj.amount)
 
@@ -621,7 +621,8 @@ class LeaseAdmin(LeaseApiMixin, ReportsMixin, ExportPermissionMixin, FilterBarMi
             "Fines, deductions and refunds are added on the Payments and Deductions tabs.",
             "fields": (
                 "security_deposit",
-                ("commission", "admin_fee"),
+                ("commission", "commission_vat"),
+                ("admin_fee", "admin_fee_vat"),
                 "ejari_fee",
                 ("ejari_number", "ejari_expiry"),
                 "deposit_summary",
@@ -811,7 +812,10 @@ class LeaseAdmin(LeaseApiMixin, ReportsMixin, ExportPermissionMixin, FilterBarMi
 
     @admin.display(description="Payments")
     def payments_badge(self, obj):
-        bar = progress_bar(obj._paid, obj.annual_rent, obj._overdue)
+        rent = [p for p in obj.payments.all() if p.is_rent]
+        paid = sum((p.total for p in rent if p.status == LeasePayment.Status.PAID), Decimal("0"))
+        scheduled = sum((p.total for p in rent if p.status != LeasePayment.Status.WAIVED), Decimal("0"))
+        bar = progress_bar(paid, scheduled, obj._overdue)
         if obj._overdue:
             return format_html("{}{}", bar, badge(f"{obj._overdue} overdue", "danger"))
         return bar
@@ -942,8 +946,8 @@ class LeaseAdmin(LeaseApiMixin, ReportsMixin, ExportPermissionMixin, FilterBarMi
             return ""
         today = timezone.localdate()
         payments = list(obj.payments.all())
-        paid = sum((p.amount for p in payments if p.is_rent and p.status == LeasePayment.Status.PAID), Decimal("0"))
-        scheduled = sum((p.amount for p in payments if p.is_rent and p.status != LeasePayment.Status.WAIVED), Decimal("0"))
+        paid = sum((p.total for p in payments if p.is_rent and p.status == LeasePayment.Status.PAID), Decimal("0"))
+        scheduled = sum((p.total for p in payments if p.is_rent and p.status != LeasePayment.Status.WAIVED), Decimal("0"))
         overdue = [p for p in payments if p.is_overdue(today)]
         upcoming = [p for p in payments if p.status == LeasePayment.Status.PENDING and p.due_date >= today]
 
@@ -1004,10 +1008,10 @@ class LeaseAdmin(LeaseApiMixin, ReportsMixin, ExportPermissionMixin, FilterBarMi
             ))
         buttons = format_html('<div class="erp-oh-actions">{}</div>', format_html_join(" ", "{}", ((a,) for a in actions)))
         stats = [
-            (_money(obj.annual_rent), "Annual rent"),
+            (_money(obj.total_with_vat), "Annual rent incl. VAT" if obj.vat_applies else "Annual rent"),
             (_money(paid), "Paid"),
             (_money(max(scheduled - paid, Decimal("0"))), "Still to pay"),
-            (_money(sum((p.amount for p in overdue), Decimal("0"))), "Overdue"),
+            (_money(sum((p.total for p in overdue), Decimal("0"))), "Overdue"),
         ]
         avatar = circle_avatar(obj.tenant.photo.url if obj.tenant.photo else "", _initials(obj.tenant.name), 64)
         return format_html(
@@ -1029,10 +1033,11 @@ class LeaseAdmin(LeaseApiMixin, ReportsMixin, ExportPermissionMixin, FilterBarMi
                 request,
                 LeaseDocument.objects.filter(lease_id=object_id, expiry_date__lte=limit).order_by("expiry_date"),
             )
-            overdue = LeasePayment.objects.filter(lease_id=object_id, status__in=OPEN, due_date__lt=today)
-            count = overdue.count()
+            overdue = list(LeasePayment.objects.select_related("lease").filter(
+                lease_id=object_id, status__in=OPEN, due_date__lt=today))
+            count = len(overdue)
             if count:
-                total = overdue.aggregate(t=Sum("amount"))["t"] or 0
+                total = sum((p.total for p in overdue), Decimal("0"))
                 messages.error(
                     request, f"{count} payment(s) overdue, {_money(total)} in total.", extra_tags=titled("Payments overdue")
                 )

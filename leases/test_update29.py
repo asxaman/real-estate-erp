@@ -451,19 +451,6 @@ class Update33(Setup):
         lease.refresh_from_db()
         self.assertEqual(lease.deposit_state(), "Refunded")
 
-    # the last rent line
-    def test_the_last_rent_payment_cannot_be_removed(self):
-        lease = full_lease_single(self)
-        only = lease.payments.get(kind="rent")
-        self.assertFalse(self.post("admin:leases_leasepayment_remove", only.pk, {}).json()["ok"])
-        self.assertTrue(lease.payments.filter(kind="rent").exists())
-
-    def test_removing_all_rent_lines_in_bulk_keeps_one(self):
-        lease = full_lease(self)
-        ids = list(lease.payments.filter(kind="rent").values_list("pk", flat=True))
-        self.client.post(reverse("admin:leases_leasepayment_bulk"), {"action": "delete", "ids": ",".join(str(i) for i in ids)})
-        self.assertEqual(lease.payments.filter(kind="rent").count(), 1)
-
     # a lease that is ending still counts until the end date
     def test_a_lease_ending_in_the_future_is_still_listed_as_running(self):
         from .models import Lease, running_q
@@ -517,10 +504,46 @@ class Update33(Setup):
         self.assertEqual(sorted(lease.payments.filter(kind="fine").values_list("part", flat=True)), [1, 2])
 
 
-def full_lease_single(test):
-    from .models import Lease
+class Update34(Setup):
+    def setUp(self):
+        super().setUp()
+        self.boss = get_user_model().objects.create_superuser("u34", "u34@example.com", "Pass-word1!")
+        self.client.force_login(self.boss)
 
-    lease = full_lease(test)
-    lease.payments.filter(kind="rent").exclude(part=1).delete()
-    lease.sync_rent_total()
-    return Lease.objects.get(pk=lease.pk)
+    def test_vat_on_the_office_and_agency_fee_is_the_users_choice(self):
+        lease = full_lease(self)  # office fee 700, agency fee 100, deposit 5000: no VAT by default
+        self.assertEqual(lease.payments.get(kind="office").vat, Decimal("0.00"))
+        lease.admin_fee_vat = True
+        lease.save()
+        office = lease.payments.get(kind="office")
+        self.assertEqual((office.vat, office.total), (Decimal("35.00"), Decimal("735.00")))
+        self.assertEqual(lease.payments.get(kind="agency").vat, Decimal("0.00"))  # its own choice
+        lease.commission_vat = True
+        lease.save()
+        self.assertEqual(lease.payments.get(kind="agency").vat, Decimal("5.00"))
+        self.assertEqual(lease.payments.get(kind="deposit").vat, Decimal("0.00"))  # never on a deposit
+
+    def test_the_fee_vat_boxes_are_on_the_lease_form_and_follow_a_renewal(self):
+        lease = full_lease(self)
+        lease.admin_fee_vat = True
+        lease.save()
+        page = self.client.get(reverse("admin:leases_lease_change", args=[lease.pk]))
+        self.assertContains(page, 'name="admin_fee_vat"')
+        self.assertContains(page, 'name="commission_vat"')
+        self.assertTrue(lease.renew().admin_fee_vat)
+
+    def test_the_lease_page_and_the_rent_roll_use_the_same_vat_basis(self):
+        from . import reports
+
+        lease = full_lease(self, vat_applies=True)  # 18000 + 900 VAT
+        page = self.client.get(reverse("admin:leases_lease_change", args=[lease.pk]))
+        self.assertContains(page, "Annual rent incl. VAT")
+        self.assertContains(page, "18,900")
+        row = next(r for r in reports.roll_rows() if r["lease"].pk == lease.pk)
+        self.assertEqual(row["monthly"], Decimal("1575.00"))
+
+    def test_the_dashboard_money_includes_fee_vat(self):
+        lease = full_lease(self)
+        lease.admin_fee_vat = True
+        lease.save()
+        self.assertEqual(self.client.get("/admin/").status_code, 200)

@@ -116,7 +116,9 @@ def badge(text, tone="neutral"):
 
 
 # ---- WhatsApp button ------------------------------------------------------------------------
-# A green round button with a chat bubble (our own drawing). It opens a WhatsApp chat with the number.
+# It opens a WhatsApp chat with the number. When the official WhatsApp icon file is in core/static/core
+# (whatsapp.svg, or whatsapp.png) the button shows that; until then it shows a plain green chat button.
+_OFFICIAL_ICON_FILES = ("core/whatsapp.svg", "core/whatsapp.png")
 _WHATSAPP_ICON = mark_safe(
     '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false">'
     '<circle cx="12" cy="12" r="12" fill="#22c55e"/>'
@@ -161,6 +163,16 @@ def whatsapp_link(phone):
     number = whatsapp_number(phone)
     if not number:
         return ""
+    from django.contrib.staticfiles import finders
+    from django.templatetags.static import static
+
+    for name in _OFFICIAL_ICON_FILES:
+        if finders.find(name):
+            return format_html(
+                '<a class="erp-wa erp-wa-official" href="https://wa.me/{}" target="_blank" rel="noopener" '
+                'title="Chat on WhatsApp" aria-label="Chat on WhatsApp"><img src="{}" alt="WhatsApp" width="24" height="24"></a>',
+                number, static(name),
+            )
     return format_html(
         '<a class="erp-wa" href="https://wa.me/{}" target="_blank" rel="noopener" '
         'title="Chat on WhatsApp" aria-label="Chat on WhatsApp">{}</a>',

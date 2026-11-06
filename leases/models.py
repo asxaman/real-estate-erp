@@ -107,6 +107,14 @@ class Lease(models.Model):
         "VAT (5%) added to the rent", default=False,
         help_text="Commercial leases (offices, shops, warehouses ...) usually add 5% VAT to every payment.",
     )
+    admin_fee_vat = models.BooleanField(
+        "VAT (5%) added to the office fee", default=False,
+        help_text="Tick it when the office / contract fee is charged with 5% VAT. Leave it off when it is not.",
+    )
+    commission_vat = models.BooleanField(
+        "VAT (5%) added to the agency fee", default=False,
+        help_text="Tick it when the agency commission is charged with 5% VAT. Leave it off when it is not.",
+    )
     security_deposit = models.DecimalField(
         "Security deposit (AED)", max_digits=12, decimal_places=2, default=0, validators=[MinValueValidator(0)],
     )
@@ -489,6 +497,7 @@ class Lease(models.Model):
         new = Lease(
             tenant=self.tenant, unit=self.unit, property=self.property, start_date=start, end_date=start + length,
             annual_rent=rent, installments=self.installments, vat_applies=self.vat_applies,
+            admin_fee_vat=self.admin_fee_vat, commission_vat=self.commission_vat,
             security_deposit=0 if deposit_held else self.security_deposit, deposit_status=self.deposit_status,
             late_fee_per_day=self.late_fee_per_day,
             admin_fee=self.admin_fee, ejari_fee=self.ejari_fee,
@@ -620,10 +629,14 @@ class LeasePayment(models.Model):
 
     @property
     def vat(self):
-        """5% VAT is added to the rent of commercial leases only (not to a deposit or a fee)."""
-        if self.is_rent and self.lease.vat_applies:
-            return money(self.amount * VAT_RATE / 100)
-        return Decimal("0.00")
+        """5% VAT: on the rent when the lease says so, and on the office / agency fee when ticked. Never on a deposit."""
+        lease = self.lease
+        charged = (
+            (self.is_rent and lease.vat_applies)
+            or (self.kind == self.Kind.OFFICE and lease.admin_fee_vat)
+            or (self.kind == self.Kind.AGENCY and lease.commission_vat)
+        )
+        return money(self.amount * VAT_RATE / 100) if charged else Decimal("0.00")
 
     @property
     def total(self):

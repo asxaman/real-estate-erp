@@ -28,7 +28,7 @@ PAYMENT_HEADERS = [
     "Cheque no.", "Bank", "Date on cheque", "Deposited on", "Status", "Paid on", "Days late", "Late fee (AED)", "Notes",
 ]
 ROLL_HEADERS = [
-    "Property", "Rented", "Tenant", "Lease no.", "Ends", "Annual rent (AED)", "Monthly rent (AED)", "VAT",
+    "Property", "Rented", "Tenant", "Lease no.", "Ends", "Annual rent (AED, before VAT)", "Monthly rent (AED, with VAT)", "VAT",
     "Received (AED)", "Overdue (AED)", "Next payment due", "Next payment (AED)",
 ]
 
@@ -79,7 +79,7 @@ def roll_rows():
         upcoming = sorted((p for p in payments if p.status == LeasePayment.Status.PENDING and p.due_date >= today), key=lambda p: p.due_date)
         rows.append({
             "lease": lease, "property": lease.property.name, "rented": lease.item_name, "tenant": lease.tenant.name,
-            "ends": lease.effective_end, "rent": lease.annual_rent, "monthly": (lease.annual_rent / 12).quantize(Decimal("0.01")),
+            "ends": lease.effective_end, "rent": lease.annual_rent, "monthly": (lease.total_with_vat / 12).quantize(Decimal("0.01")),
             "vat": lease.vat_applies, "paid": paid, "overdue": overdue,
             "next_due": upcoming[0].due_date if upcoming else None, "next_amount": upcoming[0].total if upcoming else None,
         })

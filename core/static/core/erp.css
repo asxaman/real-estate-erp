@@ -424,6 +424,9 @@ html.dark .erp-opt.is-selected.is-active { background: rgba(124, 58, 237, 0.25);
   transform: scale(1.14);
   box-shadow: 0 3px 8px rgba(34, 197, 94, .45);
 }
+.erp-wa-official { border-radius: 0; box-shadow: none; }
+.erp-wa-official img { display: block; width: 18px; height: 18px; }
+.erp-wa-official:hover { box-shadow: none; }
 .erp-phone-line {
   display: inline-flex;
   align-items: center;

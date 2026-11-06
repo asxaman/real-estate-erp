@@ -394,7 +394,18 @@ class WhatsAppButton(TestCase):
         self.assertEqual(whatsapp_link(""), "")
         html = str(whatsapp_link("050 123 4567"))
         self.assertIn('href="https://wa.me/971501234567"', html)
-        self.assertIn("<svg", html)
+        self.assertTrue("<svg" in html or "<img" in html)  # our own button, or the official icon file when it is there
+
+    def test_the_whatsapp_button_uses_the_official_icon_file_when_it_exists(self):
+        from unittest import mock
+
+        from core.admin_utils import whatsapp_link
+
+        with mock.patch("django.contrib.staticfiles.finders.find", return_value="/somewhere/whatsapp.svg"):
+            html = str(whatsapp_link("050 123 4567"))
+        self.assertIn("<img", html)
+        self.assertIn("whatsapp.svg", html)
+        self.assertIn('href="https://wa.me/971501234567"', html)
 
 
 class TenantUpdateImportAndBulk(TestCase):
