@@ -23,12 +23,14 @@ from .models import (
     Owner,
     Property,
     PropertyDocument,
+    PropertyPhoto,
     Unit,
     UnitDocument,
     UnitPhoto,
     expiry_counts,
 )
 from .models_constants import normalise_unit_number
+from .photo_upload import PhotoUploadMixin
 
 
 class UnitBaseForm(forms.ModelForm):
@@ -145,6 +147,22 @@ class UnitPhotoInline(TabularInline):
         )
 
 
+class PropertyPhotoForm(forms.ModelForm):
+    class Meta:
+        model = PropertyPhoto
+        fields = "__all__"
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        use_file_widget(self, "image", compact=True, accept="image/png,image/jpeg,image/webp")
+        self.fields["caption"].widget.attrs["placeholder"] = "e.g. Front of the villa"
+
+
+class PropertyPhotoInline(UnitPhotoInline):
+    model = PropertyPhoto
+    form = PropertyPhotoForm
+
+
 def _expiry_pills(documents):
     expired, soon = expiry_counts(documents)
     pills = []
@@ -223,7 +241,9 @@ class PropertyAdminForm(forms.ModelForm):
 
 
 @admin.register(Property)
-class PropertyAdmin(ImportMixin, ExportPermissionMixin, SmartSearchMixin, RowsPerPageMixin, TooltipHelpMixin, ModelAdmin):
+class PropertyAdmin(PhotoUploadMixin, ImportMixin, ExportPermissionMixin, SmartSearchMixin, RowsPerPageMixin, TooltipHelpMixin, ModelAdmin):
+    photo_model = PropertyPhoto
+    photo_fk = "property"
     form = PropertyAdminForm
     make_active, make_inactive = bulk.make_actions("properties")
     actions = ["export_excel", "export_csv", "make_active", "make_inactive", "change_owner"]
@@ -302,7 +322,7 @@ class PropertyAdmin(ImportMixin, ExportPermissionMixin, SmartSearchMixin, RowsPe
             ("inactive", "Inactive", "neutral", Q(is_active=False)),
         ]
 
-    inlines = [UnitInline, PropertyDocumentInline, PropertyLeasesInline, PropertyActivityInline]
+    inlines = [UnitInline, PropertyPhotoInline, PropertyDocumentInline, PropertyLeasesInline, PropertyActivityInline]
 
     def get_changeform_initial_data(self, request):
         # A new property starts with "Company Owned" selected (change it if someone else owns it).
@@ -433,6 +453,8 @@ class PropertyAdmin(ImportMixin, ExportPermissionMixin, SmartSearchMixin, RowsPe
         for inline in instances:
             if isinstance(inline, UnitInline) and (obj is None or not obj.has_units):
                 continue
+            if isinstance(inline, PropertyPhotoInline) and (obj is None or obj.has_units):
+                continue  # photos here are for villas and other stand-alone properties; units have their own
             if isinstance(inline, (PropertyActivityInline, PropertyLeasesInline)) and obj is None:
                 continue
             keep.append(inline)
@@ -499,7 +521,9 @@ class BuildingFilter(admin.RelatedFieldListFilter):
 
 
 @admin.register(Unit)
-class UnitAdmin(ImportMixin, ExportPermissionMixin, SmartSearchMixin, RowsPerPageMixin, TooltipHelpMixin, ModelAdmin):
+class UnitAdmin(PhotoUploadMixin, ImportMixin, ExportPermissionMixin, SmartSearchMixin, RowsPerPageMixin, TooltipHelpMixin, ModelAdmin):
+    photo_model = UnitPhoto
+    photo_fk = "unit"
     actions = ["export_excel", "export_csv"]
     actions_list = ["import_button"]
     import_noun = "units"

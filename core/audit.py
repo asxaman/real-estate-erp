@@ -26,6 +26,7 @@ AUDITED_MODELS = (
     "properties.PropertyDocument",
     "properties.UnitDocument",
     "properties.UnitPhoto",
+    "properties.PropertyPhoto",
     "tenants.Tenant",
     "tenants.TenantContact",
     "tenants.TenantDocument",
@@ -170,7 +171,7 @@ def related_owner_id(instance):
             return instance.property.owner_id
         if label in OWNER_CHILD_LABELS:
             return instance.owner_id
-        if label in ("properties.PropertyDocument",):
+        if label in ("properties.PropertyDocument", "properties.PropertyPhoto"):
             return instance.property.owner_id
         if label in ("properties.UnitDocument", "properties.UnitPhoto"):
             return instance.unit.property.owner_id
@@ -189,7 +190,7 @@ def related_property_id(instance):
     try:
         if label == "properties.Property":
             return instance.pk
-        if label in ("properties.Unit", "properties.PropertyDocument"):
+        if label in ("properties.Unit", "properties.PropertyDocument", "properties.PropertyPhoto"):
             return instance.property_id
         if label in ("properties.UnitDocument", "properties.UnitPhoto"):
             return instance.unit.property_id

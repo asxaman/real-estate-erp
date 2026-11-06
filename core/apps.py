@@ -60,6 +60,11 @@ class CoreConfig(AppConfig):
 
         user_logged_in.connect(audit_log.log_login, dispatch_uid="audit-login")
 
+        # The list of banks starts with the UAE banks.
+        from . import banks
+
+        post_migrate.connect(banks.seed_banks, sender=self, dispatch_uid="seed-banks")
+
         # Unfold shows `user.avatar_url` in the sidebar's account block. Django's built-in User
         # has no such attribute, so add one that returns the profile picture (when there is one).
         from django.contrib.auth import get_user_model

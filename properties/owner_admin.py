@@ -191,10 +191,34 @@ class DocumentInline(TabularInline):
         return badge(label, tone)
 
 
+class BankAccountForm(forms.ModelForm):
+    """The bank is chosen from the list in System settings (an older name that is not in it stays selectable)."""
+
+    class Meta:
+        model = OwnerBankAccount
+        fields = "__all__"
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        from core import banks
+
+        try:
+            from unfold.widgets import UnfoldAdminSelectWidget as SelectWidget
+        except ImportError:  # pragma: no cover
+            SelectWidget = forms.Select
+        current = self.instance.bank_name if self.instance is not None and self.instance.pk else ""
+        label = self.fields["bank_name"].label
+        self.fields["bank_name"] = forms.ChoiceField(
+            label=label, widget=SelectWidget(),
+            choices=[("", "Select a bank")] + [(name, name) for name in banks.names(current)],
+        )
+
+
 class BankInline(TabularInline):
     """The 'Financials' tab. Only roles with bank-account permissions can see it."""
 
     model = OwnerBankAccount
+    form = BankAccountForm
     formset = BankFormSet
     tab = True
     extra = 0

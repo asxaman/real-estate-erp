@@ -31,7 +31,7 @@
   <div class="bar">
     <div>
       <h1>{% if kind == "summary" %}Tenancy summary{% else %}Rent payment statement{% endif %}</h1>
-      <div class="muted">{{ lease.code }} · printed {{ today|date:"j F Y" }}</div>
+      <div class="muted">{{ lease.code }} · printed {{ today|date:"DATE_FORMAT" }}</div>
     </div>
     <div class="muted" style="text-align:right;">Status: <b>{{ state }}</b></div>
   </div>
@@ -40,12 +40,12 @@
   <div class="grid">
     <div><span>Tenant</span><b>{{ lease.tenant.name }}</b></div>
     <div><span>Rented</span><b>{{ lease.item_name }}</b></div>
-    <div><span>Starts</span><b>{{ lease.start_date|date:"j F Y" }}</b></div>
-    <div><span>Ends</span><b>{{ lease.end_date|date:"j F Y" }}</b></div>
-    {% if lease.status == "terminated" %}<div><span>Terminated on</span><b>{{ lease.terminated_on|date:"j F Y" }}</b></div><div><span>Reason</span><b>{{ lease.termination_reason }}</b></div>{% endif %}
+    <div><span>Starts</span><b>{{ lease.start_date|date:"DATE_FORMAT" }}</b></div>
+    <div><span>Ends</span><b>{{ lease.end_date|date:"DATE_FORMAT" }}</b></div>
+    {% if lease.status == "terminated" %}<div><span>Terminated on</span><b>{{ lease.terminated_on|date:"DATE_FORMAT" }}</b></div><div><span>Reason</span><b>{{ lease.termination_reason }}</b></div>{% endif %}
     <div><span>Annual rent</span><b>AED {{ lease.annual_rent|floatformat:"2g" }}</b></div>
     <div><span>VAT (5%)</span><b>{% if lease.vat_applies %}AED {{ lease.vat_amount|floatformat:"2g" }}{% else %}Not applied{% endif %}</b></div>
-    {% if lease.ejari_number %}<div><span>Ejari number</span><b>{{ lease.ejari_number }}</b></div><div><span>Ejari expires</span><b>{{ lease.ejari_expiry|date:"j F Y" }}</b></div>{% endif %}
+    {% if lease.ejari_number %}<div><span>Ejari number</span><b>{{ lease.ejari_number }}</b></div><div><span>Ejari expires</span><b>{{ lease.ejari_expiry|date:"DATE_FORMAT" }}</b></div>{% endif %}
   </div>
 
   {% if kind == "summary" %}
@@ -73,14 +73,14 @@
     <tbody>
     {% for r in rows %}
       <tr>
-        <td>{% if r.p.is_rent %}{{ r.p.part }}{% else %}{{ r.p.get_kind_display }}{% endif %}</td><td>{{ r.p.due_date|date:"j M Y" }}</td>
+        <td>{% if r.p.is_rent %}{{ r.p.part }}{% else %}{{ r.p.get_kind_display }}{% endif %}</td><td>{{ r.p.due_date|date:"DATE_FORMAT" }}</td>
         <td class="num">{{ r.p.amount|floatformat:"2g" }}</td>
         {% if lease.vat_applies %}<td class="num">{{ r.p.vat|floatformat:"2g" }}</td>{% endif %}
         <td class="num">{{ r.p.total|floatformat:"2g" }}</td>
         <td>{{ r.p.get_method_display }}</td>
         <td>{{ r.p.cheque_number }}{% if r.p.bank_name %}<br><span class="muted">{{ r.p.bank_name }}</span>{% endif %}</td>
         <td class="{% if r.state == 'Overdue' or r.state == 'Bounced' %}bad{% elif r.state == 'Paid' %}good{% endif %}">{{ r.state }}{% if r.late %}<br><span class="muted">{{ r.late }} day{{ r.late|pluralize }} late</span>{% endif %}</td>
-        <td>{{ r.p.paid_on|date:"j M Y"|default:"-" }}</td>
+        <td>{{ r.p.paid_on|date:"DATE_FORMAT"|default:"-" }}</td>
         {% if kind == "statement" %}<td class="num">{% if r.received_so_far is not None %}{{ r.received_so_far|floatformat:"2g" }}{% endif %}</td>{% endif %}
       </tr>
     {% endfor %}

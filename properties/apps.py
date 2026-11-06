@@ -77,7 +77,7 @@ def _link_old_history(apps, using):
             )
 
 
-NEW_MODELS = ("propertydocument", "unitdocument", "unitphoto")
+NEW_MODELS = ("propertydocument", "unitdocument", "unitphoto", "propertyphoto")
 ROLE_ACCESS = {  # role -> actions allowed on the property / unit documents and photos
     "Property Manager": ("add", "change", "delete", "view"),
     "Accountant": ("view",),

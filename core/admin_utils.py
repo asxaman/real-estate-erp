@@ -16,7 +16,32 @@ def move_help_text_to_tooltip(form):
             field.help_text = ""
 
 
-class TooltipHelpMixin:
+class FriendlyDeleteMixin:
+    """When something cannot be deleted because other records depend on it, say so in one clear sentence."""
+
+    def get_deleted_objects(self, objs, request):
+        to_delete, model_count, perms_needed, protected = super().get_deleted_objects(objs, request)
+        if protected:
+            groups = {}
+            for item in protected:
+                text = " ".join(strip_tags(str(item)).split())
+                kind, _, name = text.partition(":")
+                groups.setdefault(kind.strip().lower() or "record", []).append(name.strip() or text)
+            parts = []
+            for kind, names in groups.items():
+                plural = kind if kind.endswith("s") else kind + "s"
+                shown = ", ".join(names[:4]) + (f" and {len(names) - 4} more" if len(names) > 4 else "")
+                parts.append(f"{len(names)} {kind if len(names) == 1 else plural} ({shown})")
+            objs = list(objs)
+            who = str(objs[0]) if len(objs) == 1 else f"The {len(objs)} selected records"
+            protected = [
+                f"{who} cannot be deleted because other records depend on it: {'; '.join(parts)}. "
+                "End, move or delete those first."
+            ]
+        return to_delete, model_count, perms_needed, protected
+
+
+class TooltipHelpMixin(FriendlyDeleteMixin):
     """Add to a ModelAdmin (before ModelAdmin) to show help texts as hover tooltips."""
 
     def get_form(self, request, obj=None, **kwargs):

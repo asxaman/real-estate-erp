@@ -1,5 +1,11 @@
 # Changelog
 
+## Update 31 - Vacant standalone properties on the dashboard, friendlier delete messages, locked lease total
+No migration needed. Run `python manage.py test`.
+- Dashboard: the Vacant card, the status bars and the vacant list now count vacant units and vacant standalone properties together.
+- Deleting something that is protected (a lease with payments, a tenant with leases) now shows one clear sentence instead of a raw list of records, in the pop-up and on the Django page.
+- Lease form: once a lease has rent payments, Annual rent and Payments per year are locked (shown read-only with a note). The total is the sum of the rent payments; edit or remove a payment and the lease total follows.
+
 ## Update 27 - Simpler lease form, Deductions, fines, refunds, bulk edit and remove, new module name
 Run `python manage.py makemigrations`, then `migrate` and `test`.
 - The lease form no longer asks for "Deposit is", "Deposit refunded on", "Amount refunded" or "Late fee per day". The deposit, commission, admin fee and Ejari fee stay; what actually happens is recorded as payment lines.
@@ -390,3 +396,20 @@ No migration needed. Run `python manage.py test`, press Ctrl+F5 twice, then try 
 
 ## Update 28
 - Lease Payments tab: summary cards (total, received, outstanding, overdue, held, next due), progress bar, filter chips, search, status colour bars, line count and total for what is shown; the repeated 'LSE-0001 payment 1' caption is hidden.
+
+
+## Update 29
+- New lease form: "Lease no." says it is created automatically.
+- Leases tab on units, properties and tenants: "Open lease" button instead of "Change"; the tenant's name opens the tenant.
+- Villas and other stand-alone properties now have a Photos tab (new table PropertyPhoto); units and villas can upload many photos at once (button or drag and drop).
+- Lease form: "Today" button under Starts on, "+1 Year" under Ends on (the day before the anniversary).
+- Banks: new list in System settings -> Banks (new table Bank, started with UAE banks). Cheque pop-ups and owner bank accounts choose from it (searchable).
+- Record Payment on a lease: choose which payment; "Cheque Held" and "Cheque Bounced" are hidden unless the payment is a cheque.
+- Needs `makemigrations` and `migrate` (two new tables).
+
+
+## Update 30
+- Dates now follow the style chosen in System settings everywhere: the pop-ups (Record Payment, Edit, Terminate, bulk edit ...) use a text box and calendar in that style instead of the browser's own date picker; printed lease and rent roll, the dashboard line, search results, messages, notes, Excel downloads (cell format) and CSV downloads use it too.
+- Imports also accept dates in the chosen style.
+
+- Update 30b: the pop-ups' server side now reads dates typed in the chosen style (before it accepted only 2026-11-06).

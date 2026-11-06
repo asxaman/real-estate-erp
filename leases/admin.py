@@ -16,6 +16,7 @@ from django.shortcuts import get_object_or_404, redirect
 from django.template.response import TemplateResponse
 from django.urls import path, reverse
 from django.utils import timezone
+from django.utils.safestring import mark_safe
 from django.utils.html import format_html, format_html_join
 from unfold.admin import ModelAdmin, TabularInline
 from unfold.decorators import display
@@ -23,7 +24,7 @@ from unfold.decorators import display
 from core import sysconf
 from core import exports
 from core.admin_utils import ExportPermissionMixin, TooltipHelpMixin, badge, circle_avatar, format_amount
-from core.formats import fmt_date
+from core.formats import fmt_date, fmt_datetime
 from core.paging import RowsPerPageMixin
 from core.search import SmartSearchMixin
 from core.toasts import titled
@@ -121,12 +122,19 @@ def payment_info(payment, today=None):
     }
 
 
-def record_button(payment, label="Record payment", tone="primary"):
+def record_button(payment, label="Record payment", tone="primary", choices=None):
+    """`choices`: on a lease page, the lease's other unpaid payments, so the pop-up can switch between them."""
     if payment is None or payment.status == LeasePayment.Status.PAID:
         return ""
     if payment.status == LeasePayment.Status.HELD:
         label = "Cash cheque"
-    return _button(label, "record", reverse("admin:leases_leasepayment_record", args=[payment.pk]), payment_info(payment), tone)
+    info = payment_info(payment)
+    if choices:
+        info["pick"] = [
+            dict(payment_info(p), url=reverse("admin:leases_leasepayment_record", args=[p.pk]))
+            for p in choices
+        ]
+    return _button(label, "record", reverse("admin:leases_leasepayment_record", args=[payment.pk]), info, tone)
 
 
 def edit_button(payment, label="Edit"):
@@ -322,7 +330,7 @@ class NoteInline(TabularInline):
 
     @admin.display(description="When")
     def written_on(self, obj):
-        return timezone.localtime(obj.created_at).strftime("%d %b %Y, %H:%M") if obj and obj.pk else "-"
+        return fmt_datetime(obj.created_at) if obj and obj.pk else "-"
 
 
 # ---------------------------------------------------------------------------------------
@@ -587,7 +595,7 @@ class LeaseAdmin(LeaseApiMixin, ReportsMixin, ExportPermissionMixin, FilterBarMi
         {
             "classes": ["tab"],
             "fields": (
-                ("code", "status"),
+                ("lease_no", "status"),
                 "tenant",
                 ("unit", "property"),
                 ("start_date", "end_date"),
@@ -623,13 +631,35 @@ class LeaseAdmin(LeaseApiMixin, ReportsMixin, ExportPermissionMixin, FilterBarMi
         },
     )
 
+    LOCKED_NOTE = (
+        "The annual rent and the number of payments are fixed once the payments exist, so the two can never "
+        "disagree. To change the rent, edit the payments themselves on the Payments tab (Edit on each line, or "
+        "Add Payment); the annual rent then becomes the total of the rent payments."
+    )
+
     def get_fieldsets(self, request, obj=None):
         if obj is not None:
-            return (self._header, self._overview, self._money, self._fees, self._termination)
+            overview = self._overview
+            if obj.has_rent_schedule():
+                overview = (overview[0], dict(overview[1], description=self.LOCKED_NOTE))
+            return (self._header, overview, self._money, self._fees, self._termination)
         return (self._overview, self._fees, self._termination)
 
     def get_readonly_fields(self, request, obj=None):
-        return ("code", "summary_header", "timeline_strip", "money_summary", "deposit_summary")
+        fixed = ("lease_no", "summary_header", "timeline_strip", "money_summary", "deposit_summary")
+        if obj is not None and obj.has_rent_schedule():
+            return fixed + ("annual_rent", "installments")
+        return fixed
+
+    @admin.display(description="Lease no.")
+    def lease_no(self, obj):
+        if obj is not None and obj.pk and obj.code:
+            return obj.code
+        return mark_safe(
+            '<span class="erp-autonote"><span class="erp-autoicon" title="The system numbers every lease by itself, '
+            'in order (LSE-0001, LSE-0002 ...). You cannot type it.">i</span>'
+            "Created automatically when you save</span>"
+        )
 
     # ---- one lease's payments on a page of their own ------------------------------------
     def get_urls(self):
@@ -717,6 +747,26 @@ class LeaseAdmin(LeaseApiMixin, ReportsMixin, ExportPermissionMixin, FilterBarMi
         if obj is not None and obj.payments.filter(status=LeasePayment.Status.PAID).exists():
             return False  # a lease with received rent is kept for the records: terminate it instead
         return super().has_delete_permission(request, obj)
+
+    def get_deleted_objects(self, objs, request):
+        """Says in plain words why a lease with payments is kept (the page shows this sentence)."""
+        to_delete, model_count, perms_needed, protected = super().get_deleted_objects(objs, request)
+        leases = list(objs)
+        lines = LeasePayment.objects.filter(lease__in=leases)
+        count = lines.count()
+        if count and perms_needed:
+            received = lines.filter(status__in=(LeasePayment.Status.PAID, LeasePayment.Status.HELD)).count()
+            who = leases[0].code if len(leases) == 1 else f"The {len(leases)} selected leases"
+            verb = "has" if len(leases) == 1 else "have"
+            perms_needed = {p for p in perms_needed if str(p).lower() != str(LeasePayment._meta.verbose_name).lower()}
+            perms_needed.add(
+                f"{who} {verb} {count} payment line{'s' if count != 1 else ''}"
+                + (f", {received} already received or held" if received else "")
+                + ". A lease with payments is kept for the records. If it ended early, terminate it instead. "
+                "If it was made by mistake, remove its unreceived payments first (Tenant payments: tick them, then Remove Ticked); "
+                "received payments can never be removed."
+            )
+        return to_delete, model_count, perms_needed, protected
 
     # ---- list columns ----------------------------------------------------------------
     @admin.display(description="Tenant", ordering="tenant__name")
@@ -921,7 +971,10 @@ class LeaseAdmin(LeaseApiMixin, ReportsMixin, ExportPermissionMixin, FilterBarMi
         )), None)
         if next_payment is not None:
             next_payment.lease = obj
-            actions.append(record_button(next_payment, "Record payment", "primary"))
+            to_pick = sorted((p for p in payments if p.status != LeasePayment.Status.PAID), key=lambda p: (p.due_date, p.part, p.pk))
+            for p in to_pick:
+                p.lease = obj
+            actions.append(record_button(next_payment, "Record payment", "primary", choices=to_pick))
             actions.append(_button("Cheque numbers", "cheques", reverse("admin:leases_lease_cheques", args=[obj.pk]), lease_info(obj, today)))
         actions.append(_button(
             "Add payment", "addpay", reverse("admin:leases_leasepayment_add_to", args=[obj.pk]),

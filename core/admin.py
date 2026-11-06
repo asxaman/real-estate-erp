@@ -27,7 +27,7 @@ from . import formats, sysconf
 from .admin_utils import TooltipHelpMixin, avatar_html
 from .paging import RowsPerPageMixin
 from .widgets import use_file_widget
-from .models import PHOTO_VALIDATORS, AuditEntry, SystemSettings, UserProfile
+from .models import PHOTO_VALIDATORS, AuditEntry, Bank, SystemSettings, UserProfile
 from .safety import superuser_change_problem, user_delete_problem
 
 admin.site.unregister(User)
@@ -284,11 +284,12 @@ class SystemSettingsAdmin(SuperuserOnlyMixin, TooltipHelpMixin, ModelAdmin):
                 "fields": ("development_mode",),
             },
         ),
+        ("Banks", {"classes": ["tab"], "fields": ("banks_panel",)}),
         ("Roles", {"classes": ["tab"], "fields": ("roles_panel",)}),
         ("Audit log", {"classes": ["tab"], "fields": ("audit_panel",)}),
         ("Data tools", {"classes": ["tab"], "fields": ("tools_panel",)}),
     )
-    readonly_fields = ("preview", "roles_panel", "audit_panel", "tools_panel")
+    readonly_fields = ("preview", "banks_panel", "roles_panel", "audit_panel", "tools_panel")
 
     def has_add_permission(self, request):
         return False
@@ -321,6 +322,19 @@ class SystemSettingsAdmin(SuperuserOnlyMixin, TooltipHelpMixin, ModelAdmin):
     def _button(url, text, danger=False):
         cls = "erp-fbtn erp-fbtn-danger" if danger else "erp-fbtn"
         return format_html('<a class="{}" href="{}">{}</a>', cls, url, text)
+
+    @admin.display(description="")
+    def banks_panel(self, obj):
+        total, shown = Bank.objects.count(), Bank.objects.filter(is_active=True).count()
+        return format_html(
+            '<div><p style="margin-bottom:12px;opacity:.8">The banks people can choose from when they enter a cheque '
+            "or an owner's bank account. {} banks are in the list ({} shown). Add a new bank, rename one, or "
+            "delete the ones you do not need.</p>"
+            '<div style="display:flex;gap:8px;flex-wrap:wrap">{}{}</div></div>',
+            total, shown,
+            self._button(reverse("admin:core_bank_changelist"), "Manage banks"),
+            self._button(reverse("admin:core_bank_add"), "Add a bank"),
+        )
 
     @admin.display(description="")
     def roles_panel(self, obj):
@@ -411,3 +425,14 @@ class SystemSettingsAdmin(SuperuserOnlyMixin, TooltipHelpMixin, ModelAdmin):
         sysconf.refresh(
             {name: getattr(obj, name) for name in sysconf.DEFAULTS}
         )  # takes effect at once on this server; other servers pick it up on their next request
+
+
+@admin.register(Bank)
+class BankAdmin(SuperuserOnlyMixin, ModelAdmin):
+    """The list of banks used in cheque and bank-account drop-downs (superusers only)."""
+
+    list_display = ("name", "is_active")
+    list_filter = ("is_active",)
+    search_fields = ("name",)
+    ordering = ("name",)
+    list_per_page = 100

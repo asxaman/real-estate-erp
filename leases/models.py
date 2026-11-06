@@ -14,6 +14,7 @@ from django.dispatch import receiver
 from django.utils import timezone
 
 from core import sysconf
+from core.formats import fmt_date
 from core.validators import validate_file_content
 from properties.models import Property, Unit, save_with_unique_code, validate_document_size
 from tenants.models import Tenant
@@ -296,8 +297,8 @@ class Lease(models.Model):
             if clash is not None:
                 where = "unit" if self.unit_id else "property"
                 errors[NON_FIELD_ERRORS] = (
-                    f"This {where} already has lease {clash.code} from {clash.start_date:%d %b %Y} "
-                    f"to {clash.effective_end:%d %b %Y}. Leases for the same place cannot overlap."
+                    f"This {where} already has lease {clash.code} from {fmt_date(clash.start_date)} "
+                    f"to {fmt_date(clash.effective_end)}. Leases for the same place cannot overlap."
                 )
         if errors:
             raise ValidationError(errors)
@@ -349,6 +350,17 @@ class Lease(models.Model):
         ])
         self.sync_charges()
         return self.installments or 1
+
+    def sync_rent_total(self):
+        """The annual rent is the total of the rent payments: when the payments change, the lease follows them."""
+        total = sum((p.amount for p in self.payments.filter(kind=LeasePayment.Kind.RENT)), Decimal("0.00"))
+        if total > 0 and total != self.annual_rent:
+            Lease.objects.filter(pk=self.pk).update(annual_rent=total)
+            self.annual_rent = total
+
+    def has_rent_schedule(self):
+        """True once the lease has rent payment lines (then the rent is changed through the payments, not here)."""
+        return bool(self.pk) and self.payments.filter(kind=LeasePayment.Kind.RENT).exists()
 
     def sync_charges(self):
         """

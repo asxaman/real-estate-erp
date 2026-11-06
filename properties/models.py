@@ -59,6 +59,10 @@ def unit_photo_path(instance, filename):
     return f"unit_photos/{uuid.uuid4().hex}{Path(filename).suffix.lower()}"
 
 
+def property_photo_path(instance, filename):
+    return f"property_photos/{uuid.uuid4().hex}{Path(filename).suffix.lower()}"
+
+
 def validate_document_size(file):
     from core import sysconf
 
@@ -962,6 +966,30 @@ class UnitPhoto(models.Model):
 
     def __str__(self):
         return self.caption or f"Photo {self.pk}"
+
+
+class PropertyPhoto(models.Model):
+    """Photos of a villa or other stand-alone property (a building's units have their own photos)."""
+
+    property = models.ForeignKey(Property, on_delete=models.CASCADE, related_name="photos")
+    image = models.ImageField(
+        "Photo", upload_to=property_photo_path, validators=PHOTO_VALIDATORS, help_text="JPG, PNG or WebP."
+    )
+    caption = models.CharField(max_length=100, blank=True)
+
+    class Meta:
+        ordering = ["pk"]
+        verbose_name = "photo"
+        verbose_name_plural = "Photos"
+
+    def __str__(self):
+        return self.caption or f"Photo {self.pk}"
+
+
+@receiver(post_delete, sender=PropertyPhoto)
+def remove_property_photo_file(sender, instance, **kwargs):
+    if instance.image:
+        instance.image.delete(save=False)
 
 
 @receiver(post_delete, sender=PropertyDocument)

@@ -198,7 +198,7 @@ def expiring_documents_view(request):
             raise PermissionDenied
         return exports.csv_response(
             ["Belongs to", "Record", "Document", "Number", "Expires on", "Status"],
-            ([r["kind"], r["who"], r["document"], r["number"], r["expiry"].isoformat(),
+            ([r["kind"], r["who"], r["document"], r["number"], r["expiry"],
               {"expired": "Expired", "soon": "Expiring soon", "valid": "Valid"}[r["state"]]] for r in rows),
             "expiring-documents",
         )
@@ -262,13 +262,14 @@ def dashboard_view(request):
     can_units = user.has_perm("properties.view_unit")
     standalone = Q(property_type__in=[t for t in Property.PropertyType.values if t not in Property.BUILDING_TYPES])
 
-    unit_total = vacant_units = rentable = occupied = 0
+    unit_total = vacant_units = vacant_standalone = standalone_count = rentable = occupied = 0
     if can_properties or can_units:
         properties = Property.objects.filter(is_active=True)
         units = Unit.objects.filter(property__is_active=True)
         unit_total = units.count()
         vacant_units = units.filter(status=Unit.Status.VACANT).count()
         standalone_count = properties.filter(standalone).count()
+        vacant_standalone = properties.filter(standalone, status=Property.Status.VACANT).count()
         rentable = unit_total + standalone_count
         occupied = units.filter(status=Unit.Status.OCCUPIED).count() + properties.filter(
             standalone, status=Property.Status.OCCUPIED
@@ -279,8 +280,12 @@ def dashboard_view(request):
     if can_units:
         cards.append({"label": "Units", "value": unit_total,
                       "url": reverse("admin:properties_unit_changelist"), "tone": "blue"})
-        cards.append({"label": "Vacant units", "value": vacant_units,
-                      "url": reverse("admin:properties_unit_changelist") + "?status__exact=vacant", "tone": "amber"})
+    if can_units or can_properties:
+        # vacant units and vacant stand-alone properties (villas, shops ...) are both space waiting for a tenant
+        vacant_cards = (vacant_units if can_units else 0) + (vacant_standalone if can_properties else 0)
+        cards.append({"label": "Vacant", "value": vacant_cards,
+                      "url": reverse("admin:properties_unit_changelist") + "?status__exact=vacant" if can_units else "",
+                      "tone": "amber"})
     if can_properties or can_units:
         cards.append({"label": "Occupancy", "value": f"{round(100 * occupied / rentable)}%" if rentable else "-",
                       "url": "", "tone": "green"})
@@ -326,25 +331,53 @@ def dashboard_view(request):
         panels["documents"] = documents[:6]
         panels["documents_total"] = len(documents)
 
-    if can_units and unit_total:
-        by_status = dict(Unit.objects.filter(property__is_active=True).order_by().values_list("status").annotate(c=Count("pk")))
+    if (can_units and unit_total) or (can_properties and standalone_count):
+        by_status = {}
+        if can_units:
+            by_status = dict(Unit.objects.filter(property__is_active=True).order_by().values_list("status").annotate(c=Count("pk")))
+        total_spaces = unit_total if can_units else 0
+        if can_properties:
+            for status, count in (
+                Property.objects.filter(standalone, is_active=True).order_by().values_list("status").annotate(c=Count("pk"))
+            ):
+                by_status[status] = by_status.get(status, 0) + count
+            total_spaces += standalone_count
         panels["status_bars"] = _bar(
             [
                 (label, by_status.get(value, 0), tone)
                 for (value, label), tone in zip(Unit.Status.choices, ("blue", "green", "amber", "red"))
             ],
-            unit_total,
+            total_spaces,
         )
-        panels["vacant"] = list(
-            Unit.objects.filter(property__is_active=True, status=Unit.Status.VACANT)
-            .select_related("property")
-            .order_by("property__code", "floor_sort", "unit_number")[:6]
-        )
-        panels["vacant_total"] = vacant_units
-        panels["vacant_rent"] = (
-            Unit.objects.filter(property__is_active=True, status=Unit.Status.VACANT)
-            .aggregate(t=Sum("asking_rent"))["t"]
-        )
+        vacant = []
+        if can_units:
+            for unit in (
+                Unit.objects.filter(property__is_active=True, status=Unit.Status.VACANT)
+                .select_related("property").order_by("property__code", "floor_sort", "unit_number")[:6]
+            ):
+                vacant.append({
+                    "url": reverse("admin:properties_unit_change", args=[unit.pk]), "name": str(unit),
+                    "sub": f"{unit.property.name} · {unit.get_unit_type_display()}", "rent": unit.asking_rent,
+                })
+        if can_properties:
+            for prop in (
+                Property.objects.filter(standalone, is_active=True, status=Property.Status.VACANT).order_by("code")[:6]
+            ):
+                vacant.append({
+                    "url": reverse("admin:properties_property_change", args=[prop.pk]), "name": f"{prop.code} · {prop.name}",
+                    "sub": f"{prop.get_property_type_display()} · whole property", "rent": prop.annual_rent,
+                })
+        panels["vacant"] = vacant[:6]
+        panels["vacant_total"] = (vacant_units if can_units else 0) + (vacant_standalone if can_properties else 0)
+        unit_rent = (
+            Unit.objects.filter(property__is_active=True, status=Unit.Status.VACANT).aggregate(t=Sum("asking_rent"))["t"]
+            if can_units else 0
+        ) or 0
+        property_rent = (
+            Property.objects.filter(standalone, is_active=True, status=Property.Status.VACANT).aggregate(t=Sum("annual_rent"))["t"]
+            if can_properties else 0
+        ) or 0
+        panels["vacant_rent"] = unit_rent + property_rent
 
     if user.has_perm("tenants.view_tenant"):
         panels["blacklisted"] = Tenant.objects.filter(is_blacklisted=True).count()

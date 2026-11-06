@@ -8,7 +8,7 @@
       <a class="erp-btn erp-btn-light" href="?export=xlsx{% if export_query %}&{{ export_query }}{% endif %}">Download Excel</a>
       <a class="erp-btn erp-btn-light" href="?export=csv{% if export_query %}&{{ export_query }}{% endif %}">Download CSV</a>
     {% endif %}
-    <span class="erp-dash-hello">{{ total_rows }} running lease{{ total_rows|pluralize }} on {{ today|date:"j F Y" }}{% if search %} matching “{{ search }}”{% endif %}</span>
+    <span class="erp-dash-hello">{{ total_rows }} running lease{{ total_rows|pluralize }} on {{ today|date:"DATE_FORMAT" }}{% if search %} matching “{{ search }}”{% endif %}</span>
   </div>
   <form method="get" class="erp-filterbar">
     <input type="hidden" name="per" value="{{ per }}">
@@ -29,12 +29,12 @@
         <tr>
           <td>{{ r.property }}</td><td>{{ r.rented }}</td><td>{{ r.tenant }}</td>
           <td><a href="{% url 'admin:leases_lease_change' r.lease.pk %}">{{ r.lease.code }}</a></td>
-          <td>{{ r.ends|date:"j M Y" }}</td>
+          <td>{{ r.ends|date:"DATE_FORMAT" }}</td>
           <td class="num">{{ r.rent|floatformat:"2g" }}{% if r.vat %} <small>+VAT</small>{% endif %}</td>
           <td class="num">{{ r.monthly|floatformat:"2g" }}</td>
           <td class="num">{{ r.paid|floatformat:"2g" }}</td>
           <td class="num{% if r.overdue %} erp-due-bad{% endif %}">{% if r.overdue %}{{ r.overdue|floatformat:"2g" }}{% else %}-{% endif %}</td>
-          <td>{% if r.next_due %}{{ r.next_due|date:"j M Y" }} · {{ r.next_amount|floatformat:"2g" }}{% else %}-{% endif %}</td>
+          <td>{% if r.next_due %}{{ r.next_due|date:"DATE_FORMAT" }} · {{ r.next_amount|floatformat:"2g" }}{% else %}-{% endif %}</td>
         </tr>
       {% endfor %}
       </tbody>

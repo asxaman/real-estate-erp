@@ -57,7 +57,9 @@ def _date(text, field):
     if not text:
         return None
     word = text.strip()[:10] if re.match(r"\d{4}-\d{2}-\d{2}", text.strip()) else text.strip()
-    for pattern in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%d.%m.%Y"):
+    from django.utils.formats import get_format
+
+    for pattern in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%d.%m.%Y", *get_format("DATE_INPUT_FORMATS")):
         try:
             return datetime.strptime(word, pattern).date()
         except ValueError:

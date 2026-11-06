@@ -58,7 +58,7 @@ def export_rows(queryset):
         yield [
             t.code or "", t.name, t.get_tenant_type_display(), "Yes" if t.is_active else "No",
             "Yes" if t.is_blacklisted else "No", t.nationality, t.email, t.phone, t.address,
-            t.emirates_id_number, t.passport_number, t.date_of_birth.isoformat() if t.date_of_birth else "",
+            t.emirates_id_number, t.passport_number, t.date_of_birth or "",
             t.trade_licence_number, t.authorised_signatory, t.trn, _docs_label(t), t.notes,
         ]
 

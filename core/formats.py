@@ -113,3 +113,24 @@ def fmt_datetime(value):
     from django.utils import timezone
 
     return formats.date_format(timezone.localtime(value) if timezone.is_aware(value) else value, "DATETIME_FORMAT")
+
+
+def current_date_shape():
+    """The Python pattern dates are typed in right now (for example %d-%m-%Y), and its label (DD-MM-YYYY)."""
+    shape = formats.get_format("DATE_INPUT_FORMATS")[0]
+    label = next((text for text, _show, pattern in DATE_FORMATS.values() if pattern == shape), "YYYY-MM-DD")
+    return shape, label
+
+
+_EXCEL_DATES = {
+    "%Y-%m-%d": "yyyy-mm-dd", "%d-%m-%Y": "dd-mm-yyyy", "%d/%m/%Y": "dd/mm/yyyy",
+    "%m/%d/%Y": "mm/dd/yyyy", "%d %b %Y": "dd mmm yyyy",
+}
+
+
+def excel_formats():
+    """(date format, date-and-time format) for Excel cells, following the chosen style."""
+    shape, _label = current_date_shape()
+    day = _EXCEL_DATES.get(shape, "yyyy-mm-dd")
+    clock = "h:mm AM/PM" if "A" in str(formats.get_format("TIME_FORMAT")) else "hh:mm"
+    return day, f"{day} {clock}"

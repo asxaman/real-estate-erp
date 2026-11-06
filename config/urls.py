@@ -5,11 +5,13 @@ from django.views.generic import RedirectView
 
 from core.media import media_view
 from core.overview import dashboard_view, expiring_documents_view
-from core.views import data_tools_view
+from core.views import banks_view, data_tools_view, formats_view
 
 urlpatterns = [
     # Superuser-only page with the "Seed sample data" and "Erase all data" buttons.
     # Must be listed BEFORE "admin/" so it is matched first.
+    path("admin/formats.json", admin.site.admin_view(formats_view), name="formats_json"),
+    path("admin/banks.json", admin.site.admin_view(banks_view), name="banks_json"),
     path("admin/data-tools/", admin.site.admin_view(data_tools_view), name="data_tools"),
     # The home page and the Expiring documents page (also before "admin/").
     path("admin/", admin.site.admin_view(dashboard_view), name="dashboard"),

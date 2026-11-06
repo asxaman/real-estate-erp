@@ -42,6 +42,110 @@
     if (redirect) { window.location.href = redirect; } else { window.location.reload(); }
   }
 
+  /* ---- dates: always shown and typed the way System settings says -------------------------------
+     DATE_SHAPE is a Python-style pattern such as %d-%m-%Y (loaded from /admin/formats.json). Dates travel to the
+     server as typed; the server reads them with the same setting. */
+  var DATE_SHAPE = "%Y-%m-%d", DATE_LABEL = "YYYY-MM-DD";
+  var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  fetch("/admin/formats.json", { credentials: "same-origin", headers: { "X-Requested-With": "XMLHttpRequest" } })
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (d) { if (d && d.date) { DATE_SHAPE = d.date; DATE_LABEL = d.label || DATE_LABEL; } })
+    .catch(function () { /* keep the default */ });
+
+  function pad2(n) { return (n < 10 ? "0" : "") + n; }
+  function isoToText(iso) {
+    var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso || "");
+    if (!m) { return iso || ""; }
+    return DATE_SHAPE.replace("%Y", m[1]).replace("%m", m[2]).replace("%d", m[3]).replace("%b", MONTHS[parseInt(m[2], 10) - 1]);
+  }
+  function parts(year, month, day) { return year + "-" + pad2(month) + "-" + pad2(day); }
+  function textToIso(text) {
+    text = (text || "").trim();
+    var iso = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(text);
+    if (iso) { return parts(+iso[1], +iso[2], +iso[3]); }
+    var order = [], pattern = DATE_SHAPE.replace(/[.*+?^${}()|[\]\\\/-]/g, "\\$&").replace(/%([dmYb])/g, function (all, k) {
+      order.push(k);
+      return k === "Y" ? "(\\d{4})" : (k === "b" ? "([A-Za-z]{3})" : "(\\d{1,2})");
+    });
+    var m = new RegExp("^" + pattern + "$").exec(text);
+    if (!m) { return ""; }
+    var y = 0, mo = 0, d = 0;
+    order.forEach(function (k, i) {
+      if (k === "Y") { y = +m[i + 1]; }
+      else if (k === "d") { d = +m[i + 1]; }
+      else if (k === "m") { mo = +m[i + 1]; }
+      else { mo = MONTHS.map(function (x) { return x.toLowerCase(); }).indexOf(m[i + 1].toLowerCase()) + 1; }
+    });
+    if (!y || !mo || !d || mo > 12 || d > 31) { return ""; }
+    return parts(y, mo, d);
+  }
+
+  // A small calendar that fills the text box in the chosen style.
+  function openCalendar(input) {
+    var old = document.getElementById("erp-cal");
+    if (old) { old.remove(); }
+    var iso = textToIso(input.value) || new Date().toISOString().slice(0, 10);
+    var shown = { y: +iso.slice(0, 4), m: +iso.slice(5, 7) };
+    var panel = el("div", "erp-cal");
+    panel.id = "erp-cal";
+    var rect = input.getBoundingClientRect();
+    panel.style.left = Math.max(8, Math.min(rect.left, window.innerWidth - 300)) + "px";
+    panel.style.top = Math.min(rect.bottom + 4, Math.max(8, window.innerHeight - 330)) + "px";
+    function pick(text) {
+      input.value = text;
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+      close();
+    }
+    function close() {
+      document.removeEventListener("mousedown", away, true);
+      document.removeEventListener("keydown", onKey, true);
+      panel.remove();
+    }
+    function away(e) { if (!panel.contains(e.target) && e.target !== input && !(e.target.closest && e.target.closest(".erp-dateicon"))) { close(); } }
+    function onKey(e) { if (e.key === "Escape") { e.stopPropagation(); close(); } }
+    function draw() {
+      panel.innerHTML = "";
+      var head = el("div", "erp-cal-head");
+      var prev = el("button", "erp-cal-nav", "‹"), next = el("button", "erp-cal-nav", "›");
+      prev.type = next.type = "button";
+      prev.addEventListener("click", function () { shown.m--; if (shown.m < 1) { shown.m = 12; shown.y--; } draw(); });
+      next.addEventListener("click", function () { shown.m++; if (shown.m > 12) { shown.m = 1; shown.y++; } draw(); });
+      head.appendChild(prev);
+      head.appendChild(el("b", "", MONTHS[shown.m - 1] + " " + shown.y));
+      head.appendChild(next);
+      panel.appendChild(head);
+      var grid = el("div", "erp-cal-grid");
+      ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"].forEach(function (d) { grid.appendChild(el("span", "erp-cal-dow", d)); });
+      var first = (new Date(shown.y, shown.m - 1, 1).getDay() + 6) % 7;  // Monday first
+      var days = new Date(shown.y, shown.m, 0).getDate();
+      for (var i = 0; i < first; i++) { grid.appendChild(el("span", "")); }
+      for (var d = 1; d <= days; d++) {
+        var value = parts(shown.y, shown.m, d);
+        var cell = el("button", "erp-cal-day" + (value === iso ? " is-on" : "") + (value === new Date().toISOString().slice(0, 10) ? " is-today" : ""), String(d));
+        cell.type = "button";
+        cell.addEventListener("click", (function (v) { return function () { pick(isoToText(v)); }; })(value));
+        grid.appendChild(cell);
+      }
+      panel.appendChild(grid);
+      var foot = el("div", "erp-cal-foot");
+      var clear = el("button", "erp-cal-link", "Clear"), today = el("button", "erp-cal-link", "Today");
+      clear.type = today.type = "button";
+      clear.addEventListener("click", function () { pick(""); });
+      today.addEventListener("click", function () {
+        var n = new Date();
+        pick(isoToText(parts(n.getFullYear(), n.getMonth() + 1, n.getDate())));
+      });
+      foot.appendChild(clear);
+      foot.appendChild(today);
+      panel.appendChild(foot);
+    }
+    draw();
+    document.body.appendChild(panel);
+    document.addEventListener("mousedown", away, true);
+    document.addEventListener("keydown", onKey, true);
+  }
+
   /* ---- a small dialog builder -------------------------------------------------------------
      cfg: { title, subtitle, fields: [...], note: function(values) -> text, buttons: [...] }
      field: { name, label, type: text|number|date|select|checkbox, value, options: [[v, l]],
@@ -73,7 +177,7 @@
         });
       } else {
         input = el("input", "erp-dlg-input");
-        input.type = f.type || "text";
+        input.type = f.type === "date" ? "text" : (f.type || "text");
         if (f.min) { input.min = f.min; }
         if (f.max) { input.max = f.max; }
         if (f.step) { input.step = f.step; }
@@ -89,15 +193,32 @@
         wrap.appendChild(el("span", "", f.label));
         row.appendChild(wrap);
       } else {
-        if (f.value !== undefined && f.value !== null) { input.value = f.value; }
+        if (f.type === "date") {
+          input.value = isoToText(f.value);
+          input.placeholder = DATE_LABEL;
+          input.autocomplete = "off";
+        } else if (f.value !== undefined && f.value !== null) { input.value = f.value; }
         var label = el("label", "erp-dlg-label", f.label);
         label.setAttribute("for", input.id);
         row.appendChild(label);
-        row.appendChild(input);
+        if (f.type === "date") {
+          var box = el("div", "erp-dateinput");
+          var icon = el("button", "erp-dateicon", "");
+          icon.type = "button";
+          icon.setAttribute("aria-label", "Open the calendar");
+          icon.innerHTML = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M8 3v4M16 3v4M3 10h18"/></svg>';
+          icon.addEventListener("click", function () { openCalendar(input); });
+          input.addEventListener("keydown", function (e) { if (e.key === "ArrowDown") { e.preventDefault(); openCalendar(input); } });
+          box.appendChild(input);
+          box.appendChild(icon);
+          row.appendChild(box);
+        } else {
+          row.appendChild(input);
+        }
       }
       if (f.hint) { row.appendChild(el("div", "erp-dlg-hint", f.hint)); }
       inputs[f.name] = input;
-      rows[f.name] = { row: row, field: f };
+      rows[f.name] = { row: row, field: f, last: input.value };
       form.appendChild(row);
     });
     var note = cfg.note ? el("div", "erp-dlg-note") : null;
@@ -115,16 +236,26 @@
       });
       return out;
     }
+    var buttonEls = [];
     function refresh() {
       var v = values();
       Object.keys(rows).forEach(function (name) {
         var f = rows[name].field;
         rows[name].row.hidden = f.when ? !f.when(v) : false;
       });
+      buttonEls.forEach(function (x) { x.btn.hidden = x.b.when ? !x.b.when(v) : false; });
       if (note) { note.textContent = cfg.note(v) || ""; note.hidden = !note.textContent; }
     }
     form.addEventListener("input", refresh);
-    form.addEventListener("change", refresh);
+    form.addEventListener("change", function (e) {
+      refresh();
+      var name = e.target && e.target.name;
+      var r = name && rows[name];
+      if (r && r.field.onchange && inputs[name].value !== r.last) {
+        r.last = inputs[name].value;
+        r.field.onchange(inputs[name].value);
+      }
+    });
 
     var actions = el("div", "erp-dlg-actions");
     var cancel = el("button", "erp-fbtn", "Cancel");
@@ -147,6 +278,7 @@
         b.run(values(), ui);
       });
       all.push(btn);
+      buttonEls.push({ btn: btn, b: b });
       actions.appendChild(btn);
     });
     dlg.appendChild(actions);
@@ -159,7 +291,7 @@
     }
     function onKey(e) {
       if (e.key === "Escape") {
-        if (document.querySelector(".erp-select-panel.is-open")) { return; }  // Esc closes the open dropdown first
+        if (document.querySelector(".erp-select-panel.is-open") || document.getElementById("erp-cal")) { return; }  // Esc closes the open dropdown or calendar first
         e.stopPropagation(); close();
       }
     }
@@ -190,6 +322,22 @@
     });
   }
 
+  /* ---- the list of banks (System settings -> Banks), loaded once ---------------------------- */
+  var BANKS = [];
+  fetch("/admin/banks.json", { credentials: "same-origin", headers: { "X-Requested-With": "XMLHttpRequest" } })
+    .then(function (r) { return r.ok ? r.json() : { banks: [] }; })
+    .then(function (d) { BANKS = (d && d.banks) || []; })
+    .catch(function () { BANKS = []; });
+
+  // The options of a bank drop-down. `current` (an older typed name) stays available; `blank` is the first line.
+  function bankOptions(current, blank) {
+    var out = [["", blank || "Select a bank"]];
+    var seen = {};
+    BANKS.forEach(function (name) { out.push([name, name]); seen[name.toLowerCase()] = true; });
+    if (current && !seen[String(current).toLowerCase()]) { out.push([current, current]); }
+    return out;
+  }
+
   /* ---- the pop-ups -------------------------------------------------------------------------- */
   var METHODS = [["cheque", "Cheque"], ["transfer", "Bank transfer"], ["cash", "Cash"], ["card", "Card"], ["other", "Other"]];
 
@@ -202,25 +350,36 @@
       } }
     ];
     if (!held) {
-      buttons.push({ label: "Cheque Held (Not Cashed)", kind: "light", run: function (v, ui) {
+      buttons.push({ label: "Cheque Held (Not Cashed)", kind: "light", when: function (v) { return v.method === "cheque"; }, run: function (v, ui) {
         if (v.method !== "cheque") { ui.error(["Choose Cheque in “Paid by” to hold a cheque."]); return; }
         send(url, { action: "held", date: v.date, cheque_number: v.cheque_number, bank_name: v.bank_name }, ui);
       } });
     }
-    buttons.push({ label: "Cheque Bounced", kind: "danger", run: function (v, ui) { send(url, { action: "bounced" }, ui); } });
+    buttons.push({ label: "Cheque Bounced", kind: "danger", when: function (v) { return held || v.method === "cheque"; }, run: function (v, ui) { send(url, { action: "bounced" }, ui); } });
+    var pickField = [];
+    if (info.pick && info.pick.length > 1) {
+      pickField = [{ name: "which", label: "Which payment?", type: "select", value: url, full: true,
+        options: info.pick.map(function (p) {
+          return [p.url, p.label + " · " + p.amount + " · due " + p.due + (p.held ? " · cheque held" : "") + (p.overdue ? " · overdue" : "")];
+        }),
+        onchange: function (chosenUrl) {
+          var next = info.pick.filter(function (p) { return p.url === chosenUrl; })[0];
+          if (next) { recordDialog(next.url, Object.assign({}, next, { pick: info.pick, today: info.today })); }
+        } }];
+    }
     var d = openDialog({
       title: held ? "Cash the Cheque" : "Record Payment",
       subtitle: info.code + " · " + what + " · " + info.amount + " due " + info.due +
         (info.overdue ? " (overdue)" : "") + (held ? " · the cheque is being held" : ""),
-      fields: [
+      fields: pickField.concat([
         { name: "date", label: held ? "Date Cashed" : "Date Received", type: "date", value: info.today },
         { name: "method", label: "Paid by", type: "select", options: METHODS, value: info.method || "cheque",
           when: function () { return !held; } },
         { name: "cheque_number", label: "Cheque number", type: "text", value: info.cheque, placeholder: "e.g. 000123",
           when: function (v) { return held || v.method === "cheque"; } },
-        { name: "bank_name", label: "Bank", type: "text", value: info.bank, placeholder: "e.g. Emirates NBD",
+        { name: "bank_name", label: "Bank", type: "select", value: info.bank, options: bankOptions(info.bank),
           when: function (v) { return held || v.method === "cheque"; } }
-      ],
+      ]),
       buttons: buttons
     });
     return d;
@@ -277,7 +436,7 @@
       subtitle: "Enter the first cheque number. The others follow in order, one for each payment that is not paid yet (" + info.unpaid + ").",
       fields: [
         { name: "first", label: "First cheque number", type: "text", placeholder: "e.g. 000123 or CQ-0042" },
-        { name: "bank", label: "Bank (optional)", type: "text", placeholder: "e.g. Emirates NBD" }
+        { name: "bank", label: "Bank (optional)", type: "select", options: bankOptions("", "No bank chosen") }
       ],
       buttons: [{ label: "Fill in the numbers", kind: "primary", run: function (v, ui) {
         if (!v.first.trim()) { ui.error(["Enter the first cheque number."]); return; }
@@ -297,7 +456,7 @@
       { name: "amount", label: "Amount (AED, before VAT)", type: "number", step: "0.01", min: "0.01", value: v.amount },
       { name: "method", label: "Paid by", type: "select", options: METHODS.concat([["deposit", "Kept From the Deposit"]]), value: v.method || "cheque" },
       { name: "cheque_number", label: "Cheque number", type: "text", value: v.cheque_number, when: isCheque },
-      { name: "bank_name", label: "Bank", type: "text", value: v.bank_name, when: isCheque },
+      { name: "bank_name", label: "Bank", type: "select", value: v.bank_name, options: bankOptions(v.bank_name), when: isCheque },
       { name: "cheque_date", label: "Date written on the cheque", type: "date", value: v.cheque_date, when: isCheque },
       { name: "deposited_on", label: "Deposited in the bank on", type: "date", value: v.deposited_on, when: isCheque }
     ];
@@ -531,7 +690,7 @@
         { name: "due_date", label: "Due On", type: "date", value: "" },
         { name: "amount", label: "Amount (AED, Before VAT)", type: "number", step: "0.01", min: "0.01", value: "", placeholder: "keep as it is" },
         { name: "method", label: "Paid By", type: "select", value: "", options: [["", "Keep each as it is"]].concat(METHODS) },
-        { name: "bank_name", label: "Bank", type: "text", value: "", placeholder: "keep as it is" },
+        { name: "bank_name", label: "Bank", type: "select", value: "", options: bankOptions("", "Keep as it is") },
         { name: "cheque_first", label: "Cheque Numbers, Starting At", type: "text", value: "", placeholder: "e.g. 000123 (the others follow in order)" },
         { name: "cheque_date", label: "Date Written on the Cheque", type: "date", value: "" },
         { name: "deposited_on", label: "Deposited in the Bank On", type: "date", value: "" },
@@ -780,6 +939,39 @@
         });
     }
 
+    /* Quick-fill buttons under the date fields: "Today" for the start, "+1 Year" for the end. */
+    var datesUrl = url.replace(/info\/$/, "dates/");
+    function quickDate(input, label, title, fill) {
+      var bar = el("div", "erp-datebtns");
+      var btn = el("button", "erp-fbtn erp-datebtn", label);
+      btn.type = "button";
+      btn.title = title;
+      btn.addEventListener("click", function () {
+        fetch(datesUrl + "?" + new URLSearchParams({ start: start.value }).toString(), { credentials: "same-origin", headers: { "X-Requested-With": "XMLHttpRequest" } })
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (data) { if (data) { fill(data); } });
+      });
+      bar.appendChild(btn);
+      var host = input.closest(".related-widget-wrapper") || input.parentNode;
+      host.insertAdjacentElement("afterend", bar);
+    }
+    function setDate(input, text) {
+      input.value = text;
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      fire(input);
+    }
+    quickDate(start, "Today", "Starts today", function (data) { setDate(start, data.today); });
+    if (end) {
+      quickDate(end, "+1 Year", "Ends one year after the start date (the day before the anniversary)", function (data) {
+        if (data.year_end) { setDate(end, data.year_end); return; }
+        // no start date yet: start today, then one year from today
+        setDate(start, data.today);
+        fetch(datesUrl + "?" + new URLSearchParams({ start: data.today }).toString(), { credentials: "same-origin" })
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (d2) { if (d2 && d2.year_end) { setDate(end, d2.year_end); } });
+      });
+    }
+
     unit.addEventListener("change", function () {
       if (busy) { return; }
       if (unit.value && prop.value) { busy = true; prop.value = ""; fire(prop); busy = false; }
@@ -798,7 +990,71 @@
     if (unit.value || prop.value) { ask(false); }
   }
 
-  function start() { pickers(); leaseForm(); }
+  /* ---- several photos at once on the Photos tab of a unit or property ------------------------ */
+  function photoUpload() {
+    var group = document.getElementById("photos-group");
+    if (!group || group.querySelector(".erp-photobar")) { return; }
+    var url = window.location.pathname.replace(/change\/?$/, "") + "photos/upload/";
+    var bar = el("div", "erp-photobar");
+    var text = el("span", "erp-photobar-text", "Add many photos at once: choose them here, or drag them onto this bar.");
+    var pick = el("button", "erp-fbtn erp-fbtn-primary", "Upload Photos");
+    pick.type = "button";
+    var input = el("input", "");
+    input.type = "file";
+    input.multiple = true;
+    input.accept = "image/png,image/jpeg,image/webp";
+    input.hidden = true;
+    var status = el("span", "erp-photobar-status");
+    bar.appendChild(text);
+    bar.appendChild(pick);
+    bar.appendChild(status);
+    bar.appendChild(input);
+    group.insertBefore(bar, group.firstChild);
+
+    function upload(files) {
+      if (!files || !files.length) { return; }
+      var body = new FormData();
+      Array.prototype.forEach.call(files, function (f) { body.append("photos", f); });
+      pick.disabled = true;
+      status.textContent = "Uploading " + files.length + " photo" + (files.length === 1 ? "" : "s") + " ...";
+      status.classList.remove("is-bad");
+      fetch(url, { method: "POST", credentials: "same-origin", headers: { "X-CSRFToken": csrf(), "X-Requested-With": "XMLHttpRequest" }, body: body })
+        .then(function (r) { return r.json().catch(function () { return { ok: false, errors: ["Something went wrong."] }; }); })
+        .then(function (reply) {
+          if (reply && reply.ok) {
+            try { window.sessionStorage.setItem("erpReopenTab", "Photos"); } catch (err) { /* private window */ }
+            reload();
+          } else {
+            pick.disabled = false;
+            status.classList.add("is-bad");
+            status.textContent = ((reply && reply.errors) || ["Something went wrong."]).join(" ");
+          }
+        })
+        .catch(function () { pick.disabled = false; status.classList.add("is-bad"); status.textContent = "The server could not be reached."; });
+    }
+    pick.addEventListener("click", function () { input.click(); });
+    input.addEventListener("change", function () { upload(input.files); });
+    ["dragenter", "dragover"].forEach(function (name) {
+      bar.addEventListener(name, function (e) { e.preventDefault(); bar.classList.add("is-drop"); });
+    });
+    ["dragleave", "drop"].forEach(function (name) {
+      bar.addEventListener(name, function (e) { e.preventDefault(); bar.classList.remove("is-drop"); });
+    });
+    bar.addEventListener("drop", function (e) { upload(e.dataTransfer && e.dataTransfer.files); });
+  }
+
+  /* After an upload the page reloads; open the tab the person was on. */
+  function reopenTab() {
+    var name = "";
+    try { name = window.sessionStorage.getItem("erpReopenTab") || ""; window.sessionStorage.removeItem("erpReopenTab"); } catch (err) { name = ""; }
+    if (!name) { return; }
+    var links = document.querySelectorAll("a, button");
+    for (var i = 0; i < links.length; i++) {
+      if (links[i].textContent.trim() === name && links[i].closest("nav, ul, [role=tablist], [x-data]")) { links[i].click(); return; }
+    }
+  }
+
+  function start() { pickers(); leaseForm(); photoUpload(); reopenTab(); }
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", start);
   } else {

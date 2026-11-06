@@ -1,6 +1,8 @@
 """The 'Leases' tab shown on the Tenant, Unit and Property pages (read-only; open a lease to change it)."""
 from django.contrib import admin
+from django.urls import reverse
 from django.utils import timezone
+from django.utils.html import format_html
 
 from core.admin_utils import badge, format_amount
 from core.formats import fmt_date
@@ -13,8 +15,8 @@ class LeasesInline(ReadOnlyInline):
     model = Lease
     tab = True
     verbose_name_plural = "Leases"
-    show_change_link = True
-    fields = ("code", "tenant_name", "rented", "period", "rent", "state")
+    show_change_link = False  # the "Open lease" button below replaces the small "Change" link
+    fields = ("code", "tenant_name", "rented", "period", "rent", "state", "open_lease")
     readonly_fields = fields
     ordering = ("-start_date",)
 
@@ -27,7 +29,16 @@ class LeasesInline(ReadOnlyInline):
 
     @admin.display(description="Tenant")
     def tenant_name(self, obj):
-        return obj.tenant.name
+        return format_html(
+            '<a href="{}" style="font-weight:600">{}</a>',
+            reverse("admin:tenants_tenant_change", args=[obj.tenant_id]), obj.tenant.name,
+        )
+
+    @admin.display(description="")
+    def open_lease(self, obj):
+        if not obj.pk:
+            return ""
+        return format_html('<a class="erp-qbtn erp-qbtn-primary" href="{}">Open lease</a>', reverse("admin:leases_lease_change", args=[obj.pk]))
 
     @admin.display(description="Rented")
     def rented(self, obj):

@@ -664,11 +664,26 @@
             });
             return;
           }
-          var reason = lines.filter(function (l) { return l.length > 25; }).slice(0, 6);
+          // The reasons are the items of Django's list: either whole sentences written by the app (shown as
+          // the explanation) or the names of linked records that cannot be removed.
+          var seen = {}, reasons = [];
+          Array.prototype.forEach.call(area ? area.querySelectorAll("li") : [], function (li) {
+            if (li.querySelector("li")) { return; }
+            var t = (li.textContent || "").replace(/\s+/g, " ").trim();
+            if (t && !seen[t]) { seen[t] = true; reasons.push(t); }
+          });
+          var sentences = reasons.filter(function (t) { return t.length > 40 && /[.!]$/.test(t); });
+          var linked = reasons.filter(function (t) { return sentences.indexOf(t) < 0; });
+          var protectedCase = /protected related objects|would require deleting/i.test(area ? area.textContent : pageText);
+          var what = (opts.noun || "record");
+          var intro = sentences.length ? sentences.join(" ")
+            : (protectedCase
+              ? "This " + singular(what) + " cannot be deleted because other records depend on it. Remove or change these first:"
+              : "This " + singular(what) + " cannot be deleted because it is linked to records that your account is not allowed to delete:");
           showDialog({
             title: "This cannot be deleted",
-            text: reason.length ? "" : "Other records depend on it, or you do not have permission to delete it.",
-            sections: [{ heading: "", items: reason }]
+            text: intro,
+            sections: sentences.length ? [] : [{ heading: "", items: linked.slice(0, 8) }]
           });
           return;
         }

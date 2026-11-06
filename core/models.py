@@ -5,6 +5,7 @@ from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.validators import FileExtensionValidator, MaxValueValidator, MinValueValidator
 from django.db import models
+from django.db.models import functions as _functions
 from django.db.models.signals import post_delete
 from django.dispatch import receiver
 
@@ -266,3 +267,26 @@ class LoginAttempt(models.Model):
 
     def __str__(self):
         return f"{self.username} from {self.ip or '?'}"
+
+
+class Bank(models.Model):
+    """The banks offered wherever a bank is chosen (cheques, owner bank accounts). Managed in System settings."""
+
+    name = models.CharField(max_length=80)
+    is_active = models.BooleanField(
+        "Show in the list", default=True, help_text="Untick to hide a bank from the lists without deleting it."
+    )
+
+    class Meta:
+        ordering = ["name"]
+        verbose_name = "bank"
+        verbose_name_plural = "Banks"
+        constraints = [
+            models.UniqueConstraint(_functions.Lower("name"), name="bank_name_unique_any_case"),
+        ]
+
+    def __str__(self):
+        return self.name
+
+    def clean(self):
+        self.name = " ".join((self.name or "").split())

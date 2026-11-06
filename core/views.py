@@ -1,6 +1,7 @@
 from django.contrib import admin, messages
 from django.contrib.auth import get_user_model
 from django.core.exceptions import PermissionDenied
+from django.http import JsonResponse
 from django.shortcuts import redirect, render
 
 from .audit import log_tool
@@ -75,3 +76,18 @@ def data_tools_view(request):
         "tools_allowed": allowed,
     }
     return render(request, "core/data_tools.html", context)
+
+
+def formats_view(request):
+    """How dates are typed and shown (System settings), for the date boxes in the pop-ups."""
+    from .formats import current_date_shape
+
+    shape, label = current_date_shape()
+    return JsonResponse({"date": shape, "label": label})
+
+
+def banks_view(request):
+    """The bank names for the drop-downs in the pop-ups (read by core/static/core/leases.js)."""
+    from . import banks
+
+    return JsonResponse({"banks": banks.names()})

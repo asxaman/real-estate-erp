@@ -2,7 +2,7 @@
 
 {% block content %}
 <div class="erp-dash">
-  <div class="erp-dash-hello">Welcome back, <b>{{ greeting_name }}</b>. Here is where things stand today, {{ today|date:"j F Y" }}.</div>
+  <div class="erp-dash-hello">Welcome back, <b>{{ greeting_name }}</b>. Here is where things stand today, {{ today|date:"DATE_FORMAT" }}.</div>
 
   {% if dev_mode %}
   <div class="erp-panel" style="border-color:#d97706;">
@@ -77,7 +77,7 @@
 
     {% if panels.status_bars %}
     <div class="erp-panel">
-      <h3>Units by status <a href="{{ units_url }}">Open units</a></h3>
+      <h3>Units and properties by status <a href="{{ units_url }}">Open units</a></h3>
       <div class="erp-bars">
         {% for bar in panels.status_bars %}
         <div class="erp-bar-row erp-tone-{{ bar.tone }}">
@@ -92,18 +92,18 @@
 
     {% if panels.vacant_total is not None %}
     <div class="erp-panel">
-      <h3>Vacant units <a href="{{ units_url }}?status__exact=vacant">See all ({{ panels.vacant_total }})</a></h3>
+      <h3>Vacant units and properties <a href="{{ units_url }}?status__exact=vacant">See all ({{ panels.vacant_total }})</a></h3>
       {% if panels.vacant %}
       <ul class="erp-list">
-        {% for unit in panels.vacant %}
+        {% for item in panels.vacant %}
         <li>
-          <span><a href="{% url 'admin:properties_unit_change' unit.pk %}">{{ unit }}</a><small>{{ unit.property.name }} · {{ unit.get_unit_type_display }}</small></span>
-          <span>{% if unit.asking_rent %}AED {{ unit.asking_rent|floatformat:"0g" }}{% else %}-{% endif %}</span>
+          <span><a href="{{ item.url }}">{{ item.name }}</a><small>{{ item.sub }}</small></span>
+          <span>{% if item.rent %}AED {{ item.rent|floatformat:"0g" }}{% else %}-{% endif %}</span>
         </li>
         {% endfor %}
       </ul>
       {% else %}
-      <div class="erp-empty">No vacant units. Everything is let.</div>
+      <div class="erp-empty">Nothing is vacant. Everything is let.</div>
       {% endif %}
     </div>
     {% endif %}

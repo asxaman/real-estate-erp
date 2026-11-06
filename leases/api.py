@@ -3,7 +3,7 @@ Small JSON endpoints used by the pop-ups and the auto-fill on the lease pages (t
 core/static/core/leases.js). Each one answers {"ok": true, ...} or {"ok": false, "errors": [...]}.
 """
 import re
-from datetime import date, timedelta
+from datetime import timedelta
 from decimal import Decimal, InvalidOperation
 
 from django import forms
@@ -40,10 +40,14 @@ def refuse():
 
 
 def read_date(text, label="date"):
+    """A date typed in the style chosen in System settings (2026-11-06 is always accepted too)."""
     try:
-        return date.fromisoformat((text or "").strip())
-    except ValueError:
+        value = forms.DateField().clean((text or "").strip())
+    except ValidationError:
         raise ValidationError(f"Enter a valid {label}.") from None
+    if value is None:
+        raise ValidationError(f"Enter a valid {label}.")
+    return value
 
 
 def read_number(text):
@@ -68,6 +72,7 @@ class LeaseApiMixin:
         custom = [
             path("info/", wrap(self.info_view), name="leases_lease_info"),
             path("search/", wrap(self.search_view), name="leases_lease_search"),
+            path("dates/", wrap(self.dates_view), name="leases_lease_dates"),
             path("<int:pk>/renew/", wrap(self.renew_view), name="leases_lease_renew"),
             path("<int:pk>/terminate/", wrap(self.terminate_view), name="leases_lease_terminate"),
             path("<int:pk>/cheques/", wrap(self.cheques_view), name="leases_lease_cheques"),
@@ -82,6 +87,23 @@ class LeaseApiMixin:
         if kind not in ("tenant", "unit", "property"):
             return fail("Unknown list.")
         return JsonResponse({"ok": True, "results": pickers.search(kind, request.GET.get("q", ""))})
+
+    # ---- the "Today" and "+1 Year" buttons on the lease form --------------------------------
+    def dates_view(self, request):
+        """Today, and one year after `start` (the day before the anniversary), written the way dates are typed here."""
+        if not (self.has_add_permission(request) or self.has_change_permission(request)):
+            return refuse()
+        shape = get_format("DATE_INPUT_FORMATS")[0]
+        data = {"today": timezone.localdate().strftime(shape), "year_end": ""}
+        text = (request.GET.get("start") or "").strip()
+        if text:
+            try:
+                start = forms.DateField().clean(text)
+            except ValidationError:
+                start = None
+            if start is not None:
+                data["year_end"] = (add_months(start, 12) - timedelta(days=1)).strftime(shape)
+        return JsonResponse({"ok": True, **data})
 
     # ---- auto-fill on the lease form ------------------------------------------------
     def info_view(self, request):
@@ -218,6 +240,8 @@ class LeaseApiMixin:
 
 def _follow_lease_amount(payment):
     """A deposit / fee line and the amount typed on the lease are the same money: keep them equal."""
+    if payment.kind == LeasePayment.Kind.RENT:
+        payment.lease.sync_rent_total()  # the annual rent is the total of the rent payments
     field = dict(CHARGE_FIELDS).get(payment.kind)
     if field and getattr(payment.lease, field) != payment.amount:
         Lease.objects.filter(pk=payment.lease_id).update(**{field: payment.amount})
@@ -357,9 +381,12 @@ class PaymentApiMixin:
             return fail("A payment that was received (or whose cheque is held) cannot be removed.")
         label = f"{payment.label} of {payment.lease.code}"
         field = dict(CHARGE_FIELDS).get(payment.kind)
+        was_rent, lease = payment.kind == LeasePayment.Kind.RENT, payment.lease
         payment.delete()
         if field:  # a removed deposit / fee line means none is asked for any more
             Lease.objects.filter(pk=payment.lease_id).update(**{field: 0})
+        if was_rent:
+            lease.sync_rent_total()
         messages.success(request, f"{label} was removed.", extra_tags=titled("Payment removed"))
         return JsonResponse({"ok": True, "redirect": ""})
 
@@ -405,9 +432,12 @@ class PaymentApiMixin:
                     continue
                 field = dict(CHARGE_FIELDS).get(payment.kind)
                 lease_id = payment.lease_id
+                was_rent = payment.kind == LeasePayment.Kind.RENT
                 payment.delete()
                 if field:  # a removed deposit / fee line means none is asked for any more
                     Lease.objects.filter(pk=lease_id).update(**{field: 0})
+                if was_rent:
+                    Lease.objects.get(pk=lease_id).sync_rent_total()
                 removed += 1
         if not removed:
             return fail(f"Nothing was removed: the {kept} ticked payment(s) were already received or hold a cheque.")

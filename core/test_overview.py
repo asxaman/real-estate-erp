@@ -38,7 +38,7 @@ class DashboardPage(TestCase):
         self.assertEqual(response.status_code, 200)
         html = response.content.decode()
         for text in ("Welcome back", "Active properties", "Vacant units", "Occupancy", "Expired documents",
-                     "Documents that need attention", "Units by status", "Recent activity", "Overview Owner"):
+                     "Documents that need attention", "Units and properties by status", "Recent activity", "Overview Owner"):
             self.assertIn(text, html, text)
         self.assertEqual(self.client.get(reverse("dashboard")).status_code, 200)
 
@@ -47,7 +47,7 @@ class DashboardPage(TestCase):
         cards = {c["label"]: c["value"] for c in response.context["cards"]}
         self.assertEqual(cards["Active properties"], 1)
         self.assertEqual(cards["Units"], 1)
-        self.assertEqual(cards["Vacant units"], 1)
+        self.assertEqual(cards["Vacant"], 1)
         self.assertEqual(cards["Occupancy"], "0%")
         self.assertEqual(cards["Active owners"], 1)
         self.assertEqual(cards["Active tenants"], 1)

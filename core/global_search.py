@@ -3,6 +3,8 @@ from django.contrib import admin
 from django.urls import reverse
 from unfold.dataclasses import SearchResult
 
+from .formats import fmt_date
+
 PER_KIND = 5
 
 
@@ -20,7 +22,7 @@ def _sources():
         (Lease, "description", "Lease", ("tenant", "unit__property", "property"), lambda o: f"{o.code} · {o.tenant.name}",
          lambda o: f"{o.item_name} · {o.get_status_display()}"),
         (LeasePayment, "payments", "Payment", ("lease__tenant",), lambda o: f"{o.lease.code} {o.label.lower()} · {o.lease.tenant.name}",
-         lambda o: f"Due {o.due_date:%d-%m-%Y} · {o.amount:,.0f} AED · {o.get_status_display()}"),
+         lambda o: f"Due {fmt_date(o.due_date)} · {o.amount:,.0f} AED · {o.get_status_display()}"),
     ]
 
 
