@@ -850,3 +850,5 @@ html.dark .erp-grid-panel { background: #111827; border-color: #374151; color: #
 .erp-grid-opt { padding: 7px 10px; border-radius: 6px; font-size: 13px; cursor: pointer; }
 .erp-grid-opt:hover, .erp-grid-opt.is-on { background: #ede9fe; }
 html.dark .erp-grid-opt:hover, html.dark .erp-grid-opt.is-on { background: #2e1065; }
+.erp-grid-in.is-suggested { color: #6b7280; font-style: italic; }
+html.dark .erp-grid-in.is-suggested { color: #9ca3af; }

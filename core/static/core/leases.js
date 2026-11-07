@@ -540,6 +540,7 @@
 
   function buildChequeGrid(url, data) {
     var banks = (data.banks && data.banks.length) ? data.banks : BANKS;
+    var methods = (data.methods && data.methods.length) ? data.methods : METHODS;   // [[value, label], ...]
     var rows = data.rows || [];
     var old = document.getElementById("erp-dlg-overlay");
     if (old) { old.remove(); }
@@ -553,12 +554,20 @@
     dlg.appendChild(el("p", "erp-dlg-sub",
       "Type the cheque number, bank and date for as many payments as you like, then save once. " +
       "Tab, Enter and the arrow keys move between cells. You can paste a column or a block copied from Excel. " +
-      "Ctrl+D copies the cell above."));
+      "Ctrl+D copies the cell above. A cheque date shown in grey is the payment's due date, a starting value: " +
+      "change it if the cheque is dated differently. It is saved together with the rest of that row. " +
+      "Paid By can be changed here too: click it and choose Cheque, Cash, Bank transfer, Card or Other."));
 
     var states = [];
-    var COLS = ["cheque_number", "bank_name", "cheque_date"];
+    // cells of a row: 0 cheque number, 1 bank, 2 cheque date, 3 Paid By
+    var BANK = "bank", METHOD = "method";
 
-    /* ---- the bank list shown under a bank cell (our own, searchable) ---- */
+    function labelOf(value) {
+      for (var i = 0; i < methods.length; i++) { if (methods[i][0] === value) { return methods[i][1]; } }
+      return value;
+    }
+
+    /* ---- the list shown under a bank or Paid By cell (our own, searchable) ---- */
     var panel = el("div", "erp-grid-panel");
     panel.hidden = true;
     document.body.appendChild(panel);
@@ -575,21 +584,38 @@
       return found.length === 1 ? found[0] : "";
     }
 
-    function showPanel(input) {
-      var q = input.value.trim().toLowerCase();
-      var list = banks.filter(function (b) { return !q || b.toLowerCase().indexOf(q) >= 0; }).slice(0, 14);
+    // "cash", "Cash", "bank transfer", "trans", "card" ... become the method value ("" when unclear).
+    function matchMethod(text) {
+      var t = (text || "").trim().toLowerCase();
+      if (!t) { return ""; }
+      for (var i = 0; i < methods.length; i++) {
+        if (methods[i][0] === t || methods[i][1].toLowerCase() === t) { return methods[i][0]; }
+      }
+      var found = methods.filter(function (m) { return m[1].toLowerCase().indexOf(t) === 0; });
+      if (found.length !== 1) { found = methods.filter(function (m) { return m[1].toLowerCase().indexOf(t) >= 0; }); }
+      return found.length === 1 ? found[0][0] : "";
+    }
+
+    function optionsFor(input, all) {
+      var q = all ? "" : input.value.trim().toLowerCase();
+      var names = input.getAttribute("data-kind") === METHOD ? methods.map(function (m) { return m[1]; }) : banks;
+      return names.filter(function (b) { return !q || b.toLowerCase().indexOf(q) >= 0; }).slice(0, 14);
+    }
+
+    function showPanel(input, all) {
+      var list = optionsFor(input, all);
       if (!list.length) { hidePanel(); return; }
       panel.innerHTML = "";
       panelFor = input;
-      activeOption = q ? 0 : -1;
+      activeOption = (!all && input.value.trim()) ? 0 : -1;
       list.forEach(function (name, i) {
         var opt = el("div", "erp-grid-opt" + (i === activeOption ? " is-on" : ""), name);
-        opt.addEventListener("mousedown", function (e) { e.preventDefault(); chooseBank(input, name); });
+        opt.addEventListener("mousedown", function (e) { e.preventDefault(); choose(input, name); });
         panel.appendChild(opt);
       });
       var rect = input.getBoundingClientRect();
       panel.style.left = Math.max(8, Math.min(rect.left, window.innerWidth - 270)) + "px";
-      panel.style.minWidth = Math.max(220, rect.width) + "px";
+      panel.style.minWidth = Math.max(180, rect.width) + "px";
       var below = rect.bottom + 4;
       panel.style.top = (below + 250 > window.innerHeight ? Math.max(8, rect.top - 254) : below) + "px";
       panel.hidden = false;
@@ -603,10 +629,35 @@
       if (opts[activeOption].scrollIntoView) { opts[activeOption].scrollIntoView({ block: "nearest" }); }
     }
 
-    function chooseBank(input, name) {
-      input.value = name;
+    function choose(input, name) {
       hidePanel();
+      var r = input.getAttribute("data-r");
+      if (r !== null && input.getAttribute("data-kind") === METHOD) { setMethod(states[Number(r)], matchMethod(name)); }
+      else { input.value = name; }
       refresh();
+    }
+
+    // One behaviour for every searchable cell: type to filter, arrows and Enter pick, Esc closes.
+    function attachCombo(input, kind, commit) {
+      input.setAttribute("data-kind", kind);
+      input.addEventListener("input", function () { showPanel(input); });
+      // close the list a moment after leaving the cell, unless another cell has opened it meanwhile
+      input.addEventListener("blur", function () { setTimeout(function () { if (panelFor === input) { hidePanel(); } }, 120); commit(); });
+      if (kind === METHOD) { input.addEventListener("click", function () { showPanel(input, true); }); }
+      input.addEventListener("keydown", function (e) {
+        if (panel.hidden || panelFor !== input) {
+          if ((e.altKey && e.key === "ArrowDown") || (kind === METHOD && e.key === " ")) {
+            e.preventDefault(); e.stopPropagation(); showPanel(input, true);
+          }
+          return;
+        }
+        if (e.key === "ArrowDown") { e.preventDefault(); e.stopPropagation(); moveOption(1); }
+        else if (e.key === "ArrowUp") { e.preventDefault(); e.stopPropagation(); moveOption(-1); }
+        else if (e.key === "Enter") {
+          var opt = panel.children[activeOption];
+          if (opt) { e.preventDefault(); e.stopPropagation(); choose(input, opt.textContent); }
+        } else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); hidePanel(); }
+      });
     }
 
     /* ---- the table ---- */
@@ -628,6 +679,17 @@
       return td;
     }
 
+    function makeInput(index, c, label) {
+      var input = el("input", "erp-grid-in");
+      input.type = "text";
+      input.autocomplete = "off";
+      input.setAttribute("data-erp-no-fill", "1");
+      input.setAttribute("data-r", String(index));
+      input.setAttribute("data-c", String(c));
+      input.setAttribute("aria-label", label);
+      return input;
+    }
+
     rows.forEach(function (row, index) {
       var tr = el("tr", row.editable ? "" : "is-locked");
       var first = info(row.label);
@@ -637,46 +699,31 @@
       tr.appendChild(first);
       tr.appendChild(info(isoToText(row.due)));
       tr.appendChild(info("AED " + row.amount, "num"));
-      var st = { row: row, tr: tr, inputs: [], editable: row.editable, index: index,
+      var st = { row: row, tr: tr, inputs: [], editable: row.editable, index: index, method: row.method,
+        methodEditable: !!row.method_editable,
         orig: { cheque_number: row.cheque_number || "", bank_name: row.bank_name || "", cheque_date: row.cheque_date || "" } };
-      COLS.forEach(function (col, c) {
+      // An unpaid cheque line with no cheque date yet starts with its due date (a suggestion, saved with the row).
+      st.suggest = (row.editable && row.status === "pending" && row.method === "cheque" && !row.cheque_date) ? row.due : "";
+      st.baseDate = st.suggest || st.orig.cheque_date;
+      var labels = ["Cheque number", "Bank", "Cheque date"];
+      [st.orig.cheque_number, st.orig.bank_name, isoToText(st.baseDate)].forEach(function (value, c) {
         var td = el("td", "erp-grid-cell");
-        var input = el("input", "erp-grid-in");
-        input.type = "text";
-        input.autocomplete = "off";
-        input.setAttribute("data-erp-no-fill", "1");
-        input.setAttribute("data-r", String(index));
-        input.setAttribute("data-c", String(c));
-        input.setAttribute("aria-label", col === "cheque_number" ? "Cheque number" : col === "bank_name" ? "Bank" : "Cheque date");
-        if (col === "cheque_date") { input.placeholder = DATE_LABEL; }
-        if (col === "bank_name") { input.placeholder = "Type to search"; }
-        input.value = col === "cheque_date" ? isoToText(st.orig[col]) : st.orig[col];
-        if (!row.editable) { input.disabled = true; input.title = row.why; }
+        var input = makeInput(index, c, labels[c]);
+        if (c === 2) { input.placeholder = DATE_LABEL; }
+        if (c === 1) { input.placeholder = "Type to search"; }
+        input.value = value;
         td.appendChild(input);
         tr.appendChild(td);
         st.inputs.push(input);
-        if (row.editable && col === "bank_name") {
-          input.addEventListener("input", function () { showPanel(input); });
-          input.addEventListener("blur", function () {
-            setTimeout(hidePanel, 120);
+        if (!row.editable) { return; }
+        if (c === 1) {
+          attachCombo(input, BANK, function () {
             var v = input.value.trim();
             if (v) { var m = matchBank(v, st.orig.bank_name); if (m) { input.value = m; } }
             refresh();
           });
-          input.addEventListener("keydown", function (e) {
-            if (panel.hidden || panelFor !== input) {
-              if (e.altKey && e.key === "ArrowDown") { e.preventDefault(); e.stopPropagation(); showPanel(input); }
-              return;
-            }
-            if (e.key === "ArrowDown") { e.preventDefault(); e.stopPropagation(); moveOption(1); }
-            else if (e.key === "ArrowUp") { e.preventDefault(); e.stopPropagation(); moveOption(-1); }
-            else if (e.key === "Enter") {
-              var opt = panel.children[activeOption];
-              if (opt) { e.preventDefault(); e.stopPropagation(); chooseBank(input, opt.textContent); }
-            } else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); hidePanel(); }
-          });
         }
-        if (row.editable && col === "cheque_date") {
+        if (c === 2) {
           input.addEventListener("blur", function () {
             var iso = parseGridDate(input.value);
             if (iso) { input.value = isoToText(iso); }
@@ -688,9 +735,23 @@
           });
         }
       });
-      var method = info(row.method_label);
-      st.methodCell = method;
-      tr.appendChild(method);
+      // the "Paid By" cell: a searchable list of the ways of paying
+      var mtd = el("td", "erp-grid-cell");
+      var minput = makeInput(index, 3, "Paid by");
+      minput.value = row.method_label || labelOf(row.method);
+      mtd.appendChild(minput);
+      tr.appendChild(mtd);
+      st.inputs.push(minput);
+      if (row.editable && st.methodEditable) {
+        attachCombo(minput, METHOD, function () {
+          var m = matchMethod(minput.value);
+          if (m) { setMethod(st, m); } else { minput.value = labelOf(st.method); }
+          refresh();
+        });
+      } else {
+        minput.disabled = true;
+        minput.title = row.method_why || "";
+      }
       var status = info("");
       status.appendChild(el("span", "erp-grid-st erp-grid-st-" + row.status, row.status_label));
       tr.appendChild(status);
@@ -702,18 +763,46 @@
 
     /* ---- helpers shared by the toolbar, paste and the keyboard ---- */
     function cellValue(st, c) { return st.inputs[c].value.trim(); }
+    function isCheque(st) { return st.method === "cheque"; }
+    // Received money that is not a cheque has no cheque details (until Paid By is changed to Cheque).
+    function chequeLocked(st) { return st.row.status === "paid" && !isCheque(st); }
     function isChanged(st) {
       if (!st.editable) { return false; }
-      return cellValue(st, 0) !== st.orig.cheque_number || cellValue(st, 1) !== st.orig.bank_name ||
-        parseGridDate(cellValue(st, 2)) !== st.orig.cheque_date || (cellValue(st, 2) && !parseGridDate(cellValue(st, 2)));
+      return st.method !== st.row.method || cellValue(st, 0) !== st.orig.cheque_number || cellValue(st, 1) !== st.orig.bank_name ||
+        parseGridDate(cellValue(st, 2)) !== st.baseDate || (cellValue(st, 2) && !parseGridDate(cellValue(st, 2)));
     }
+
+    function setMethod(st, value) {
+      if (!st || !st.editable || !st.methodEditable || !value || value === st.method) { return; }
+      st.method = value;
+      st.inputs[3].value = labelOf(value);
+      if (value !== "cheque") {
+        for (var c = 0; c < 3; c++) { st.inputs[c].value = ""; }   // cheque details only go with a cheque
+      } else if (st.row.method === "cheque") {
+        st.inputs[0].value = st.orig.cheque_number;                 // back to what the cheque had
+        st.inputs[1].value = st.orig.bank_name;
+        st.inputs[2].value = isoToText(st.baseDate);
+      } else if (!cellValue(st, 2) && st.row.status === "pending") {
+        st.inputs[2].value = isoToText(st.row.due);                 // a post-dated cheque is dated on its due date
+      }
+    }
+
+    // An unpaid line that was cash becomes a cheque once cheque details are typed: Paid By follows, and the
+    // cheque date starts at the due date, like every other cheque.
+    function becomeCheque(st) {
+      st.method = "cheque";
+      st.inputs[3].value = labelOf("cheque");
+      if (!cellValue(st, 2) && st.row.status === "pending") { st.inputs[2].value = isoToText(st.row.due); }
+    }
+
     function setCell(st, c, value) {
-      var input = st.inputs[c];
-      if (!st.editable) { return; }
+      if (!st.editable || st.inputs[c].disabled) { return; }
       value = (value || "").trim();
+      if (c === 3) { var m = matchMethod(value); if (m) { setMethod(st, m); } return; }
       if (c === 1 && value) { value = matchBank(value, st.orig.bank_name) || value; }
       if (c === 2 && value) { var iso = parseGridDate(value); if (iso) { value = isoToText(iso); } }
-      input.value = value;
+      st.inputs[c].value = value;
+      if (value && !isCheque(st) && st.methodEditable) { becomeCheque(st); }
     }
 
     var counter = el("span", "erp-grid-count", "");
@@ -733,6 +822,12 @@
       });
       states.forEach(function (st) {
         if (!st.editable) { return; }
+        var locked = chequeLocked(st);
+        for (var c = 0; c < 3; c++) {
+          st.inputs[c].disabled = locked;
+          st.inputs[c].title = locked ? "Received by " + labelOf(st.method).toLowerCase() + ": choose Cheque in Paid By to add cheque details." : "";
+        }
+        st.tr.classList.toggle("is-locked", locked);
         var number = cellValue(st, 0), bank = cellValue(st, 1), day = cellValue(st, 2);
         var dup = false;
         if (number) {
@@ -746,16 +841,15 @@
         var badDate = !!day && !parseGridDate(day);
         st.inputs[0].classList.toggle("is-changed", number !== st.orig.cheque_number);
         st.inputs[0].classList.toggle("is-dup", dup);
-        st.inputs[0].title = dup ? "This cheque number is used on another payment of this lease." : "";
+        if (!locked) { st.inputs[0].title = dup ? "This cheque number is used on another payment of this lease." : ""; }
         st.inputs[1].classList.toggle("is-changed", bank !== st.orig.bank_name);
         st.inputs[1].classList.toggle("is-bad", badBank);
-        st.inputs[1].title = badBank ? "This bank is not in the list (System settings, Banks)." : "";
-        st.inputs[2].classList.toggle("is-changed", !badDate && parseGridDate(day) !== st.orig.cheque_date);
+        if (!locked) { st.inputs[1].title = badBank ? "This bank is not in the list (System settings, Banks)." : ""; }
+        st.inputs[2].classList.toggle("is-changed", !badDate && parseGridDate(day) !== st.baseDate);
+        st.inputs[2].classList.toggle("is-suggested", !badDate && !!st.suggest && isCheque(st) && parseGridDate(day) === st.suggest);
         st.inputs[2].classList.toggle("is-bad", badDate);
-        st.inputs[2].title = badDate ? "Type the date as " + DATE_LABEL + "." : "";
-        var becomesCheque = (number || bank || day) && st.row.method !== "cheque";
-        st.methodCell.textContent = becomesCheque ? "Cheque (will change)" : st.row.method_label;
-        st.methodCell.classList.toggle("is-changing", !!becomesCheque);
+        if (!locked) { st.inputs[2].title = badDate ? "Type the date as " + DATE_LABEL + "." : ""; }
+        st.inputs[3].classList.toggle("is-changed", st.method !== st.row.method);
         st.tr.classList.toggle("is-edited", isChanged(st));
         if (isChanged(st)) { changed++; }
       });
@@ -765,7 +859,7 @@
 
     function focusCell(r, c) {
       var st = states[r];
-      if (!st || !st.editable) { return false; }
+      if (!st || st.inputs[c].disabled) { return false; }
       st.inputs[c].focus();
       st.inputs[c].select();
       return true;
@@ -775,7 +869,7 @@
     }
     function fillDown(r, c) {
       for (var i = r - 1; i >= 0; i--) {
-        if (states[i].editable) { setCell(states[r], c, states[i].inputs[c].value); refresh(); return; }
+        if (!states[i].inputs[c].disabled) { setCell(states[r], c, states[i].inputs[c].value); refresh(); return; }
       }
     }
 
@@ -785,13 +879,21 @@
       var r = Number(t.getAttribute("data-r")), c = Number(t.getAttribute("data-c"));
       if (e.key === "ArrowDown" && !e.altKey || (e.key === "Enter" && !e.shiftKey)) { e.preventDefault(); moveVertical(r, c, 1); }
       else if (e.key === "ArrowUp" || (e.key === "Enter" && e.shiftKey)) { e.preventDefault(); moveVertical(r, c, -1); }
-      else if (e.key === "ArrowRight" && c < 2 && t.selectionStart === t.value.length && t.selectionEnd === t.value.length) {
+      else if (e.key === "ArrowRight" && c < 3 && t.selectionStart === t.value.length && t.selectionEnd === t.value.length) {
         e.preventDefault(); focusCell(r, c + 1);
       } else if (e.key === "ArrowLeft" && c > 0 && t.selectionStart === 0 && t.selectionEnd === 0) {
         e.preventDefault(); focusCell(r, c - 1);
       } else if ((e.ctrlKey || e.metaKey) && (e.key === "d" || e.key === "D")) { e.preventDefault(); fillDown(r, c); }
     });
-    table.addEventListener("input", function () { refresh(); });
+    // typing a cheque detail on an unpaid line that was cash makes it a cheque (Paid By follows)
+    table.addEventListener("input", function (e) {
+      var t = e.target;
+      if (t.classList && t.classList.contains("erp-grid-in")) {
+        var c = Number(t.getAttribute("data-c")), st = states[Number(t.getAttribute("data-r"))];
+        if (st && c < 3 && t.value.trim() && !isCheque(st) && st.methodEditable && !chequeLocked(st)) { becomeCheque(st); }
+      }
+      refresh();
+    });
     table.addEventListener("change", function () { refresh(); });
     table.addEventListener("paste", function (e) {
       var t = e.target;
@@ -804,13 +906,13 @@
       e.preventDefault();
       var r = Number(t.getAttribute("data-r")), c = Number(t.getAttribute("data-c"));
       var order = [];
-      for (var i = r; i < states.length; i++) { if (states[i].editable) { order.push(states[i]); } }
+      for (var i = r; i < states.length; i++) { if (!states[i].inputs[c].disabled) { order.push(states[i]); } }
       var used = 0;
       block.forEach(function (cells, k) {
         var st = order[k];
         if (!st) { return; }
         used++;
-        cells.forEach(function (value, j) { if (c + j <= 2) { setCell(st, c + j, value); } });
+        cells.forEach(function (value, j) { if (c + j <= 3) { setCell(st, c + j, value); } });
       });
       refresh();
       note(used < block.length ? "Pasted " + used + " rows; the last " + (block.length - used) + " did not fit." : "Pasted " + used + " row" + (used === 1 ? "" : "s") + ".");
@@ -818,69 +920,83 @@
 
     /* ---- toolbar ---- */
     var tools = el("div", "erp-grid-tools");
-    var firstIn = el("input", "erp-grid-tin");
-    firstIn.type = "text";
-    firstIn.placeholder = "First cheque no., e.g. 000123";
-    firstIn.autocomplete = "off";
-    firstIn.setAttribute("data-erp-no-fill", "1");
-    var numBtn = el("button", "erp-fbtn", "Number the Empty Ones");
-    numBtn.type = "button";
-    numBtn.addEventListener("click", function () {
+    function toolInput(placeholder) {
+      var input = el("input", "erp-grid-tin");
+      input.type = "text";
+      input.placeholder = placeholder;
+      input.autocomplete = "off";
+      input.setAttribute("data-erp-no-fill", "1");
+      return input;
+    }
+    function toolButton(text, handler) {
+      var button = el("button", "erp-fbtn", text);
+      button.type = "button";
+      button.addEventListener("click", handler);
+      return button;
+    }
+    function fillSummary(done, what) {
+      note(done ? what + " for " + done + " payment" + (done === 1 ? "" : "s") + "." : "Nothing was left to fill in.", !done);
+    }
+    // cheque lines that are not received yet: what the fill-in helpers work on
+    function openCheque(st) { return st.editable && st.row.status !== "paid" && isCheque(st); }
+
+    var firstIn = toolInput("First cheque no., e.g. 000123");
+    var numBtn = toolButton("Number the Empty Ones", function () {
       var m = /^(\D*)(\d+)$/.exec(firstIn.value.trim());
       if (!m) { note("The first cheque number must end in digits, for example 000123 or CQ-0042.", true); return; }
       var n = parseInt(m[2], 10), width = m[2].length, done = 0;
       states.forEach(function (st) {
-        if (!st.editable || st.row.status === "paid" || st.row.method !== "cheque" || cellValue(st, 0)) { return; }
+        if (!openCheque(st) || cellValue(st, 0)) { return; }
         var digits = String(n++);
         while (digits.length < width) { digits = "0" + digits; }
         setCell(st, 0, m[1] + digits);
         done++;
       });
       refresh();
-      note(done ? "Numbered " + done + " payment" + (done === 1 ? "" : "s") + "." : "No empty cheque number was left to fill.", !done);
+      fillSummary(done, "Numbered");
     });
-    var bankIn = el("input", "erp-grid-tin");
-    bankIn.type = "text";
-    bankIn.placeholder = "Bank for all, type to search";
-    bankIn.autocomplete = "off";
-    bankIn.setAttribute("data-erp-no-fill", "1");
-    bankIn.addEventListener("input", function () { showPanel(bankIn); });
-    bankIn.addEventListener("blur", function () { setTimeout(hidePanel, 120); });
-    bankIn.addEventListener("keydown", function (e) {
-      if (panel.hidden || panelFor !== bankIn) { return; }
-      if (e.key === "ArrowDown") { e.preventDefault(); e.stopPropagation(); moveOption(1); }
-      else if (e.key === "ArrowUp") { e.preventDefault(); e.stopPropagation(); moveOption(-1); }
-      else if (e.key === "Enter") { var o = panel.children[activeOption]; if (o) { e.preventDefault(); e.stopPropagation(); bankIn.value = o.textContent; hidePanel(); } }
-      else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); hidePanel(); }
-    });
-    var bankBtn = el("button", "erp-fbtn", "Fill Empty Banks");
-    bankBtn.type = "button";
-    bankBtn.addEventListener("click", function () {
+    var bankIn = toolInput("Bank for all, type to search");
+    attachCombo(bankIn, BANK, function () {});
+    var bankBtn = toolButton("Fill Empty Banks", function () {
       var bank = matchBank(bankIn.value);
       if (!bank) { note("Choose a bank from the list first.", true); return; }
       bankIn.value = bank;
       var done = 0;
       states.forEach(function (st) {
-        if (!st.editable || st.row.status === "paid" || st.row.method !== "cheque" || cellValue(st, 1)) { return; }
+        if (!openCheque(st) || cellValue(st, 1)) { return; }
         setCell(st, 1, bank);
         done++;
       });
       refresh();
-      note(done ? "Bank filled in for " + done + " payment" + (done === 1 ? "" : "s") + "." : "No empty bank cell was left to fill.", !done);
+      fillSummary(done, "Bank filled in");
     });
-    var dateBtn = el("button", "erp-fbtn", "Cheque Date = Due Date (Empty Ones)");
-    dateBtn.type = "button";
-    dateBtn.addEventListener("click", function () {
+    var dateBtn = toolButton("Cheque Date = Due Date (Empty Ones)", function () {
       var done = 0;
       states.forEach(function (st) {
-        if (!st.editable || st.row.status === "paid" || st.row.method !== "cheque" || cellValue(st, 2)) { return; }
+        if (!openCheque(st) || cellValue(st, 2)) { return; }
         setCell(st, 2, isoToText(st.row.due));
         done++;
       });
       refresh();
-      note(done ? "Cheque date filled in for " + done + " payment" + (done === 1 ? "" : "s") + "." : "No empty cheque date was left to fill.", !done);
+      fillSummary(done, "Cheque date filled in");
     });
-    [firstIn, numBtn, bankIn, bankBtn, dateBtn].forEach(function (node) { tools.appendChild(node); });
+    // Paid By for every payment that is not received yet, in one go
+    var methodIn = toolInput("Paid by for all unpaid");
+    attachCombo(methodIn, METHOD, function () {});
+    var methodBtn = toolButton("Set Paid By for Unpaid", function () {
+      var m = matchMethod(methodIn.value);
+      if (!m) { note("Choose how they are paid from the list first.", true); return; }
+      methodIn.value = labelOf(m);
+      var done = 0;
+      states.forEach(function (st) {
+        if (!st.editable || !st.methodEditable || st.row.status !== "pending" || st.method === m) { return; }
+        setMethod(st, m);
+        done++;
+      });
+      refresh();
+      note(done ? "Paid By set to " + labelOf(m) + " for " + done + " payment" + (done === 1 ? "" : "s") + "." : "Every unpaid payment is already " + labelOf(m) + ".", !done);
+    });
+    [firstIn, numBtn, bankIn, bankBtn, dateBtn, methodIn, methodBtn].forEach(function (node) { tools.appendChild(node); });
     dlg.insertBefore(tools, wrap);
     dlg.appendChild(noteBox);
 
@@ -935,14 +1051,15 @@
       var problems = [], send_ = [];
       states.forEach(function (st) {
         if (!st.editable || !isChanged(st)) { return; }
-        var number = cellValue(st, 0), bank = cellValue(st, 1), day = cellValue(st, 2);
+        var cheque = isCheque(st);
+        var number = cheque ? cellValue(st, 0) : "", bank = cheque ? cellValue(st, 1) : "", day = cheque ? cellValue(st, 2) : "";
         var name = st.row.label;
         if (number.length > 30) { problems.push(name + ": a cheque number can have at most 30 characters."); return; }
         var bankName = bank ? matchBank(bank, st.orig.bank_name) : "";
         if (bank && !bankName) { problems.push(name + ": “" + bank + "” is not in the bank list."); return; }
         var iso = parseGridDate(day);
         if (day && !iso) { problems.push(name + ": the date must be written as " + DATE_LABEL + "."); return; }
-        send_.push({ id: st.row.id, cheque_number: number, bank_name: bankName, cheque_date: iso });
+        send_.push({ id: st.row.id, method: st.method, cheque_number: number, bank_name: bankName, cheque_date: iso });
       });
       if (problems.length) { showErrors(problems.slice(0, 8)); return; }
       if (!send_.length) { showErrors(["Nothing was changed."]); return; }
@@ -959,8 +1076,8 @@
     });
 
     refresh();
-    var firstEditable = states.filter(function (st) { return st.editable; })[0];
-    if (firstEditable) { firstEditable.inputs[0].focus(); }
+    var firstOpen = states.filter(function (st) { return !st.inputs[0].disabled; })[0];
+    if (firstOpen) { firstOpen.inputs[0].focus(); }
   }
 
   /* An "Add Payment" button on the lease's Payments tab itself (the same button as in the lease header). */

@@ -325,7 +325,14 @@ class PaymentApiMixin:
         locked = payment.status == LeasePayment.Status.PAID and payment.method != LeasePayment.Method.CHEQUE
         why = ""
         if locked:
-            why = f"Received by {payment.get_method_display().lower()}: it has no cheque details."
+            why = f"Received by {payment.get_method_display().lower()}: choose Cheque in Paid By to add cheque details."
+        kept = payment.method == LeasePayment.Method.FROM_DEPOSIT
+        stays_cheque = payment.status in (LeasePayment.Status.HELD, LeasePayment.Status.BOUNCED)
+        method_why = ""
+        if kept:
+            method_why = "This was kept from the deposit, so it cannot be changed here."
+        elif stays_cheque:
+            method_why = f"A {payment.get_status_display().lower().split(' ')[0]} cheque stays a cheque. Cash it or record it from the Record button first."
         return {
             "id": payment.pk, "label": payment.label, "kind": payment.get_kind_display(),
             "due": payment.due_date.isoformat(), "amount": format_amount(payment.total),
@@ -333,7 +340,10 @@ class PaymentApiMixin:
             "method": payment.method, "method_label": payment.get_method_display(),
             "cheque_number": payment.cheque_number, "bank_name": payment.bank_name,
             "cheque_date": payment.cheque_date.isoformat() if payment.cheque_date else "",
-            "editable": not locked, "why": why,
+            # editable: the line takes part in the grid; cheque_locked: its cheque cells start locked;
+            # method_editable: "Paid By" can be changed here.
+            "editable": not kept, "cheque_locked": locked, "why": why,
+            "method_editable": not (kept or stays_cheque), "method_why": method_why,
         }
 
     def cheque_grid_view(self, request, lease_pk):
@@ -347,6 +357,8 @@ class PaymentApiMixin:
             lines = lease.payments.exclude(status=LeasePayment.Status.WAIVED).order_by("due_date", "part", "id")
             return JsonResponse({
                 "ok": True, "code": lease.code, "banks": banks.names(),
+                "methods": [[value, label] for value, label in LeasePayment.Method.choices
+                            if value != LeasePayment.Method.FROM_DEPOSIT],
                 "rows": [self._grid_row(p) for p in lines],
             })
         if request.method != "POST":
@@ -368,6 +380,8 @@ class PaymentApiMixin:
                 for line in lines.values():
                     line.lease = lease
                 known = {name.lower(): name for name in banks.names()}
+                allowed_methods = {value for value, _label in LeasePayment.Method.choices
+                                   if value != LeasePayment.Method.FROM_DEPOSIT}
                 touched = []
                 for item in sent:
                     try:
@@ -398,14 +412,35 @@ class PaymentApiMixin:
                     except ValidationError as exc:
                         errors.append(f"{where}: {exc.messages[0]}")
                         continue
-                    if (number, bank, day) == (payment.cheque_number, payment.bank_name, payment.cheque_date):
-                        continue  # nothing changed on this line
                     has_details = bool(number or bank or day)
-                    if has_details and payment.method != LeasePayment.Method.CHEQUE:
-                        if payment.status == LeasePayment.Status.PAID:
-                            errors.append(f"{where}: it was received by {payment.get_method_display().lower()}, so it has no cheque details.")
+                    wanted = str(item.get("method") or "").strip()
+                    if wanted and wanted != payment.method:
+                        # "Paid By" was changed in the grid.
+                        if wanted not in allowed_methods:
+                            errors.append(f"{where}: choose how it is paid from the list (Cheque, Cash, Bank transfer, Card or Other).")
                             continue
-                        payment.method = LeasePayment.Method.CHEQUE
+                        if payment.method == LeasePayment.Method.FROM_DEPOSIT:
+                            errors.append(f"{where}: this was kept from the deposit, so how it is paid cannot be changed.")
+                            continue
+                        if payment.status in (LeasePayment.Status.HELD, LeasePayment.Status.BOUNCED):
+                            errors.append(f"{where}: a {payment.get_status_display().lower().split(' ')[0]} cheque stays a cheque.")
+                            continue
+                        if has_details and wanted != LeasePayment.Method.CHEQUE:
+                            errors.append(f"{where}: cheque details only go with Cheque. Clear them, or choose Cheque.")
+                            continue
+                        new_method = wanted
+                    else:
+                        new_method = payment.method
+                        if has_details and payment.method != LeasePayment.Method.CHEQUE:
+                            if payment.status == LeasePayment.Status.PAID:
+                                errors.append(f"{where}: it was received by {payment.get_method_display().lower()}, so it has no cheque details. Choose Cheque in Paid By first.")
+                                continue
+                            new_method = LeasePayment.Method.CHEQUE  # typing cheque details on an unpaid line makes it a cheque
+                    if (number, bank, day, new_method) == (
+                        payment.cheque_number, payment.bank_name, payment.cheque_date, payment.method
+                    ):
+                        continue  # nothing changed on this line
+                    payment.method = new_method
                     payment.cheque_number, payment.bank_name, payment.cheque_date = number, bank, day
                     try:
                         payment.full_clean(exclude=["lease", "part"])

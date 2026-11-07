@@ -1,5 +1,18 @@
 # Changelog
 
+## Update 38 - Change Paid By in the Cheque Grid
+No migration needed. Run `python manage.py test`, then Ctrl+F5 twice.
+- In the Cheque Grid, the Paid By cell is now editable: click it (or type a few letters, or press Space) and choose Cheque, Cash, Bank transfer, Card or Other. Arrow keys, Enter and paste from Excel work in it like the other cells, and Ctrl+D copies the cell above.
+- New helper "Set Paid By for Unpaid": choose a way of paying and apply it to every payment that is still pending in one click.
+- Switching a payment away from Cheque clears its cheque number, bank and date (cheque details only go with a cheque) and switching it back restores what the cheque had. Typing a cheque number on an unpaid cash line makes it a cheque and gives it the due date as cheque date.
+- A payment that was already received can be corrected to another way of paying (for example cash to bank transfer). Held and bounced cheques stay cheques, and money kept from the deposit cannot be changed here. The save is still all-or-nothing, and every change goes into the audit log.
+
+## Update 37 - Cheque grid starts each cheque date at its due date
+No migration needed. Run `python manage.py test`, then Ctrl+F5 twice.
+- In the Cheque Grid, every unpaid cheque line with no cheque date yet now starts with its due date in the Cheque Date cell (shown in grey and italic, as a starting value). Change it where a cheque is dated differently. It works on existing leases too.
+- A date is saved together with the rest of its row when you type or change something in that row and press Save. Rows you do not touch are left as they are, so opening and closing the grid asks no "unsaved changes" question.
+- Received payments, held and bounced cheques, and lines planned as cash are not filled in.
+
 ## Update 36 - Cheque grid on the lease's Payments tab
 No migration needed. Run `python manage.py test`, then Ctrl+F5.
 - New "Cheque Grid" button (lease header, and at the top of the Payments tab): an Excel-style table of the lease's payment lines (rent, deposit, fees ...) where you fill in the cheque number, bank and cheque date for many payments at once, then save once.
