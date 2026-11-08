@@ -278,7 +278,7 @@ UNFOLD = {
     "SHOW_VIEW_ON_SITE": False,
     # Our own small style/behaviour layer (info icons, compact forms).
     # Bump the ?v= number whenever these files change so browsers reload them.
-    "STYLES": [lambda request: static("core/erp.css") + "?v=48"],
+    "STYLES": [lambda request: static("core/erp.css") + "?v=49"],
     "SCRIPTS": [
         lambda request: static("core/erp.js") + "?v=32",
         lambda request: static("core/leases.js") + "?v=16",

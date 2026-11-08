@@ -234,7 +234,8 @@ def expiring_documents_view(request):
         "state": state,
         "kind": kind,
         "window": window,
-        "search": search,
+        "search": search, "per": per, "search_placeholder": "Search name, document or number",
+        "hidden": [("state", state), ("kind", kind), ("days", window)],
         "states": [
             (key, text, link(state=key, page=""))
             for key, text in (("attention", "Needs attention"), ("expired", "Expired"),

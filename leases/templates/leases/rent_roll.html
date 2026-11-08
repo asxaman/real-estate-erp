@@ -1,51 +1,60 @@
 {% extends "admin/base_site.html" %}
 
 {% block content %}
-<div class="erp-dash">
-  <div class="erp-filterbar">
-    <a class="erp-btn erp-btn-light" href="{{ list_url }}">Back to leases</a>
-    {% if can_export %}
-      <a class="erp-btn erp-btn-light" href="?export=xlsx{% if export_query %}&{{ export_query }}{% endif %}">Download Excel</a>
-      <a class="erp-btn erp-btn-light" href="?export=csv{% if export_query %}&{{ export_query }}{% endif %}">Download CSV</a>
-    {% endif %}
-    <span class="erp-dash-hello">{{ total_rows }} running lease{{ total_rows|pluralize }} on {{ today|date:"DATE_FORMAT" }}{% if search %} matching “{{ search }}”{% endif %}</span>
-  </div>
-  <form method="get" class="erp-filterbar">
-    <input type="hidden" name="per" value="{{ per }}">
-    <input class="erp-search" type="search" name="q" value="{{ search }}" placeholder="Search property, unit, tenant or lease no.">
-    <button class="erp-btn" type="submit">Search</button>
-    {% if search %}<a class="erp-btn erp-btn-light" href="?per={{ per }}">Clear</a>{% endif %}
-  </form>
-  <div class="erp-panel erp-scroll">
+<div class="erp-listtop">
+  <div class="erp-summary" role="status"><span>Showing <b>{{ total_rows }}</b> running lease{{ total_rows|pluralize }} on {{ today|date:"DATE_FORMAT" }}{% if search %} matching &ldquo;{{ search }}&rdquo;{% endif %}</span></div>
+
+  <div class="erp-listwrap">
+            <div class="flex flex-col flex-wrap gap-3 mb-4 sm:flex-row empty:hidden lg:border lg:border-base-200 lg:dark:border-base-800 lg:-mb-8 lg:p-3 lg:pb-11 lg:rounded-t-default">
+      <div class="erp-toolbar-search">
+        <form method="get" role="search">
+          <input type="hidden" name="per" value="{{ per }}">
+          {% for name, value in hidden %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endfor %}
+          <div class="bg-white border border-base-200 flex flex-row items-center px-3 rounded-default relative shadow-xs w-full focus-within:outline-2 focus-within:-outline-offset-2 focus-within:outline-primary-600 lg:w-96 dark:bg-base-900 dark:border-base-700">
+            <button type="submit" class="flex items-center focus:outline-hidden" id="searchbar-submit"><span class="material-symbols-outlined md-18 text-base-400 dark:text-base-500">search</span></button>
+            <input type="text" class="grow font-medium min-w-0 overflow-hidden p-2 placeholder-font-subtle-light truncate focus:outline-hidden dark:bg-base-900 dark:placeholder-font-subtle-dark dark:text-font-default-dark"
+                   name="q" value="{{ search }}" id="searchbar" autocomplete="off" data-erp-no-fill="1" placeholder="{{ search_placeholder }}">
+            {% include "unfold/helpers/shortcut.html" with shortcut="/" %}
+          </div>
+        </form>
+      </div>
+        <a class="bg-white border-base-200 hover:text-primary-600 dark:bg-base-900 dark:border-base-700 dark:hover:text-primary-500 border cursor-pointer flex font-medium gap-2 group items-center px-3 py-2 rounded-default shadow-xs text-sm lg:ml-auto md:mt-0" href="{{ list_url }}">Back to Leases <span class="material-symbols-outlined md-18 ml-auto">arrow_back</span></a>
+        {% if can_export %}
+        <a class="bg-white border-base-200 hover:text-primary-600 dark:bg-base-900 dark:border-base-700 dark:hover:text-primary-500 border cursor-pointer flex font-medium gap-2 group items-center px-3 py-2 rounded-default shadow-xs text-sm lg:ml-auto md:mt-0" href="?export=xlsx{% if export_query %}&{{ export_query }}{% endif %}">Excel <span class="material-symbols-outlined md-18 ml-auto">download</span></a>
+        <a class="bg-white border-base-200 hover:text-primary-600 dark:bg-base-900 dark:border-base-700 dark:hover:text-primary-500 border cursor-pointer flex font-medium gap-2 group items-center px-3 py-2 rounded-default shadow-xs text-sm lg:ml-auto md:mt-0" href="?export=csv{% if export_query %}&{{ export_query }}{% endif %}">CSV <span class="material-symbols-outlined md-18 ml-auto">download</span></a>
+        {% endif %}
+      </div>
     {% if rows %}
-    <table class="erp-table" id="result_list">
-      <thead><tr>
-        <th>Property</th><th>Rented</th><th>Tenant</th><th>Lease</th><th>Ends</th>
-        <th class="num">Annual rent<br><small>before VAT</small></th><th class="num">Monthly<br><small>with VAT</small></th><th class="num">Received</th>
-        <th class="num">Overdue</th><th>Next payment</th>
-      </tr></thead>
-      <tbody>
-      {% for r in rows %}
-        <tr>
-          <td>{{ r.property }}</td><td>{{ r.rented }}</td><td>{{ r.tenant }}</td>
-          <td><a href="{% url 'admin:leases_lease_change' r.lease.pk %}">{{ r.lease.code }}</a></td>
-          <td>{{ r.ends|date:"DATE_FORMAT" }}</td>
-          <td class="num">{{ r.rent|floatformat:"2g" }}{% if r.vat %} <small>+VAT</small>{% endif %}</td>
-          <td class="num">{{ r.monthly|floatformat:"2g" }}</td>
-          <td class="num">{{ r.paid|floatformat:"2g" }}</td>
-          <td class="num{% if r.overdue %} erp-due-bad{% endif %}">{% if r.overdue %}{{ r.overdue|floatformat:"2g" }}{% else %}-{% endif %}</td>
-          <td>{% if r.next_due %}{{ r.next_due|date:"DATE_FORMAT" }} · {{ r.next_amount|floatformat:"2g" }}{% else %}-{% endif %}</td>
-        </tr>
-      {% endfor %}
-      </tbody>
-      <tfoot><tr>
-        <th colspan="5">Total (AED){% if page.paginator.num_pages > 1 %}, all pages{% endif %}</th>
-        <th class="num">{{ totals.rent|floatformat:"2g" }}</th><th class="num">{{ totals.monthly|floatformat:"2g" }}</th>
-        <th class="num">{{ totals.paid|floatformat:"2g" }}</th><th class="num">{{ totals.overdue|floatformat:"2g" }}</th><th></th>
-      </tr></tfoot>
-    </table>
+    <div class="rounded-default lg:rounded-t-none lg:rounded-b-default overflow-x-auto scrollbar-default border border-base-200 shadow-xs dark:border-base-800 bg-white dark:bg-base-900">
+      <table class="erp-ul w-full border-spacing-none border-separate" id="result_list">
+        <thead><tr>
+          <th class="align-middle font-semibold py-2 text-start text-important whitespace-nowrap px-3" scope="col">Property</th><th class="align-middle font-semibold py-2 text-start text-important whitespace-nowrap px-3" scope="col">Rented</th><th class="align-middle font-semibold py-2 text-start text-important whitespace-nowrap px-3" scope="col">Tenant</th><th class="align-middle font-semibold py-2 text-start text-important whitespace-nowrap px-3" scope="col">Lease</th><th class="align-middle font-semibold py-2 text-start text-important whitespace-nowrap px-3" scope="col">Ends</th>
+          <th class="align-middle font-semibold py-2 text-start text-important whitespace-nowrap px-3 num" scope="col">Annual Rent<br><small>before VAT</small></th><th class="align-middle font-semibold py-2 text-start text-important whitespace-nowrap px-3 num" scope="col">Monthly<br><small>with VAT</small></th><th class="align-middle font-semibold py-2 text-start text-important whitespace-nowrap px-3 num" scope="col">Received</th>
+          <th class="align-middle font-semibold py-2 text-start text-important whitespace-nowrap px-3 num" scope="col">Overdue</th><th class="align-middle font-semibold py-2 text-start text-important whitespace-nowrap px-3" scope="col">Next Payment</th>
+        </tr></thead>
+        <tbody>
+        {% for r in rows %}
+          <tr class="{% cycle '' 'bg-base-50 dark:bg-white/[.02]' %}">
+            <td class="align-middle border-t border-base-200 font-normal px-3 py-2 text-start dark:border-base-800">{{ r.property }}</td><td class="align-middle border-t border-base-200 font-normal px-3 py-2 text-start dark:border-base-800">{{ r.rented }}</td><td class="align-middle border-t border-base-200 font-normal px-3 py-2 text-start dark:border-base-800">{{ r.tenant }}</td>
+            <td class="align-middle border-t border-base-200 font-normal px-3 py-2 text-start dark:border-base-800"><a class="erp-ul-link" href="{% url 'admin:leases_lease_change' r.lease.pk %}">{{ r.lease.code }}</a></td>
+            <td class="align-middle border-t border-base-200 font-normal px-3 py-2 text-start dark:border-base-800">{{ r.ends|date:"DATE_FORMAT" }}</td>
+            <td class="align-middle border-t border-base-200 font-normal px-3 py-2 text-start dark:border-base-800 num">{{ r.rent|floatformat:"2g" }}{% if r.vat %} <small>+VAT</small>{% endif %}</td>
+            <td class="align-middle border-t border-base-200 font-normal px-3 py-2 text-start dark:border-base-800 num">{{ r.monthly|floatformat:"2g" }}</td>
+            <td class="align-middle border-t border-base-200 font-normal px-3 py-2 text-start dark:border-base-800 num">{{ r.paid|floatformat:"2g" }}</td>
+            <td class="align-middle border-t border-base-200 font-normal px-3 py-2 text-start dark:border-base-800 num{% if r.overdue %} erp-due-bad{% endif %}">{% if r.overdue %}{{ r.overdue|floatformat:"2g" }}{% else %}-{% endif %}</td>
+            <td class="align-middle border-t border-base-200 font-normal px-3 py-2 text-start dark:border-base-800">{% if r.next_due %}{{ r.next_due|date:"DATE_FORMAT" }} &middot; {{ r.next_amount|floatformat:"2g" }}{% else %}-{% endif %}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+        <tfoot><tr>
+          <th class="align-middle border-t border-base-200 font-normal px-3 py-2 text-start dark:border-base-800 font-semibold" colspan="5">Total (AED){% if page.paginator.num_pages > 1 %}, all pages{% endif %}</th>
+          <th class="align-middle border-t border-base-200 font-normal px-3 py-2 text-start dark:border-base-800 font-semibold num">{{ totals.rent|floatformat:"2g" }}</th><th class="align-middle border-t border-base-200 font-normal px-3 py-2 text-start dark:border-base-800 font-semibold num">{{ totals.monthly|floatformat:"2g" }}</th>
+          <th class="align-middle border-t border-base-200 font-normal px-3 py-2 text-start dark:border-base-800 font-semibold num">{{ totals.paid|floatformat:"2g" }}</th><th class="align-middle border-t border-base-200 font-normal px-3 py-2 text-start dark:border-base-800 font-semibold num">{{ totals.overdue|floatformat:"2g" }}</th><th class="align-middle border-t border-base-200 font-normal px-3 py-2 text-start dark:border-base-800"></th>
+        </tr></tfoot>
+      </table>
+    </div>
     {% else %}
-    <div class="erp-empty">{% if search %}No running lease matches your search.{% else %}No lease is running today.{% endif %}</div>
+    <div class="rounded-default lg:rounded-t-none lg:rounded-b-default overflow-x-auto scrollbar-default border border-base-200 shadow-xs dark:border-base-800 bg-white dark:bg-base-900 erp-empty">{% if search %}No running lease matches your search.{% else %}No lease is running today.{% endif %}</div>
     {% endif %}
   </div>
 </div>

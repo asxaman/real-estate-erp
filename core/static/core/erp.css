@@ -904,3 +904,16 @@ html.dark .erp-jump-go:hover { background: #1f2937; }
 .erp-footer-tools { gap: 12px; }
 .erp-footer-tools .erp-per-moved, .erp-footer-tools .erp-jump-static { margin: 0; padding: 0; }
 .erp-footer-tools .erp-per-moved { padding-left: 10px; }
+
+/* top and table of custom list pages (Expiring Documents, Rent Roll): same look as the admin lists */
+.erp-listtop .erp-chips { align-items: center; }
+.erp-listtop .erp-chips .erp-label { font-size: 12px; color: #6b7280; text-transform: uppercase; letter-spacing: .05em; margin-right: 2px; }
+.erp-listtop .erp-chips .erp-label-gap { margin-left: 14px; }
+.dark .erp-listtop .erp-chips .erp-label { color: #9ca3af; }
+.erp-ul .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.erp-ul th.num > small, .erp-ul th small { font-weight: 400; color: #6b7280; }
+.erp-ul-link { color: inherit; font-weight: 600; text-decoration: none; }
+.erp-ul-link:hover { color: #9333ea; }
+.erp-ul tfoot td, .erp-ul tfoot th { background: rgba(0, 0, 0, .02); }
+.erp-ul .erp-due-bad { color: #b91c1c; font-weight: 600; }
+.erp-listwrap .erp-empty { padding: 24px; text-align: center; color: #6b7280; }

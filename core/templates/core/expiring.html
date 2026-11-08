@@ -1,50 +1,60 @@
 {% extends "admin/base_site.html" %}
 
 {% block content %}
-<div class="erp-dash">
-  <div class="erp-filterbar">
+<div class="erp-listtop">
+  <div class="erp-chips" role="navigation" aria-label="Quick filters">
     <span class="erp-label">Show</span>
-    {% for key, text, url in states %}<a class="erp-chip{% if key == state %} is-on{% endif %}" href="{{ url }}">{{ text }}</a>{% endfor %}
+    {% for key, text, url in states %}<a class="erp-chip{% if key == state %} is-active{% endif %}" href="{{ url }}">{{ text }}</a>{% endfor %}
   </div>
-  <div class="erp-filterbar">
+  <div class="erp-chips" role="navigation" aria-label="Belongs to and due within">
     <span class="erp-label">Belongs to</span>
-    {% for key, text, url in kinds %}<a class="erp-chip{% if key == kind %} is-on{% endif %}" href="{{ url }}">{{ text }}</a>{% endfor %}
-    <span class="erp-label" style="margin-left:14px;">Due within</span>
-    {% for days, url in windows %}<a class="erp-chip{% if days == window %} is-on{% endif %}" href="{{ url }}">{{ days }} days</a>{% endfor %}
+    {% for key, text, url in kinds %}<a class="erp-chip{% if key == kind %} is-active{% endif %}" href="{{ url }}">{{ text }}</a>{% endfor %}
+    <span class="erp-label erp-label-gap">Due within</span>
+    {% for days, url in windows %}<a class="erp-chip{% if days == window %} is-active{% endif %}" href="{{ url }}">{{ days }} days</a>{% endfor %}
   </div>
-  <form method="get" class="erp-filterbar">
-    <input type="hidden" name="state" value="{{ state }}">
-    <input type="hidden" name="kind" value="{{ kind }}">
-    <input type="hidden" name="days" value="{{ window }}">
-    <input class="erp-search" type="search" name="q" value="{{ search }}" placeholder="Search name, document or number">
-    <button class="erp-btn" type="submit">Search</button>
-    {% if export_url %}<a class="erp-btn erp-btn-light" href="{{ export_url }}">Download as CSV</a>{% endif %}
-    <span class="erp-dash-hello">{{ total }} document{{ total|pluralize }}</span>
-  </form>
+  <div class="erp-summary" role="status"><span>Showing <b>{{ total }}</b></span></div>
 
-  <div class="erp-panel erp-scroll">
+  <div class="erp-listwrap">
+            <div class="flex flex-col flex-wrap gap-3 mb-4 sm:flex-row empty:hidden lg:border lg:border-base-200 lg:dark:border-base-800 lg:-mb-8 lg:p-3 lg:pb-11 lg:rounded-t-default">
+      <div class="erp-toolbar-search">
+        <form method="get" role="search">
+          <input type="hidden" name="per" value="{{ per }}">
+          {% for name, value in hidden %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endfor %}
+          <div class="bg-white border border-base-200 flex flex-row items-center px-3 rounded-default relative shadow-xs w-full focus-within:outline-2 focus-within:-outline-offset-2 focus-within:outline-primary-600 lg:w-96 dark:bg-base-900 dark:border-base-700">
+            <button type="submit" class="flex items-center focus:outline-hidden" id="searchbar-submit"><span class="material-symbols-outlined md-18 text-base-400 dark:text-base-500">search</span></button>
+            <input type="text" class="grow font-medium min-w-0 overflow-hidden p-2 placeholder-font-subtle-light truncate focus:outline-hidden dark:bg-base-900 dark:placeholder-font-subtle-dark dark:text-font-default-dark"
+                   name="q" value="{{ search }}" id="searchbar" autocomplete="off" data-erp-no-fill="1" placeholder="{{ search_placeholder }}">
+            {% include "unfold/helpers/shortcut.html" with shortcut="/" %}
+          </div>
+        </form>
+      </div>
+        {% if export_url %}<a class="bg-white border-base-200 hover:text-primary-600 dark:bg-base-900 dark:border-base-700 dark:hover:text-primary-500 border cursor-pointer flex font-medium gap-2 group items-center px-3 py-2 rounded-default shadow-xs text-sm lg:ml-auto md:mt-0" href="{{ export_url }}">Download CSV <span class="material-symbols-outlined md-18 ml-auto">download</span></a>{% endif %}
+      </div>
     {% if page.object_list %}
-    <table class="erp-table" id="result_list">
-      <thead><tr><th>Belongs to</th><th>Record</th><th>Document</th><th>Number</th><th>Expires on</th><th>Status</th><th>File</th></tr></thead>
-      <tbody>
-      {% for row in page %}
-        <tr>
-          <td>{{ row.kind }}</td>
-          <td><a href="{{ row.url }}">{{ row.who }}</a></td>
-          <td>{{ row.document }}</td>
-          <td>{{ row.number|default:"-" }}</td>
-          <td>{{ row.date_text }}</td>
-          <td><span class="erp-pill erp-pill-{{ row.state }}">{% if row.state == "expired" %}Expired {{ row.when }}{% elif row.state == "soon" %}Expires {{ row.when }}{% else %}Valid, expires {{ row.when }}{% endif %}</span></td>
-          <td>{% if row.file %}<a href="{{ row.file }}" target="_blank" rel="noopener">View</a>{% else %}-{% endif %}</td>
-        </tr>
-      {% endfor %}
-      </tbody>
-    </table>
+    <div class="rounded-default lg:rounded-t-none lg:rounded-b-default overflow-x-auto scrollbar-default border border-base-200 shadow-xs dark:border-base-800 bg-white dark:bg-base-900">
+      <table class="erp-ul w-full border-spacing-none border-separate" id="result_list">
+        <thead><tr>
+          <th class="align-middle font-semibold py-2 text-start text-important whitespace-nowrap px-3" scope="col">Belongs To</th><th class="align-middle font-semibold py-2 text-start text-important whitespace-nowrap px-3" scope="col">Record</th><th class="align-middle font-semibold py-2 text-start text-important whitespace-nowrap px-3" scope="col">Document</th><th class="align-middle font-semibold py-2 text-start text-important whitespace-nowrap px-3" scope="col">Number</th><th class="align-middle font-semibold py-2 text-start text-important whitespace-nowrap px-3" scope="col">Expires On</th><th class="align-middle font-semibold py-2 text-start text-important whitespace-nowrap px-3" scope="col">Status</th><th class="align-middle font-semibold py-2 text-start text-important whitespace-nowrap px-3" scope="col">File</th>
+        </tr></thead>
+        <tbody>
+        {% for row in page %}
+          <tr class="{% cycle '' 'bg-base-50 dark:bg-white/[.02]' %}">
+            <td class="align-middle border-t border-base-200 font-normal px-3 py-2 text-start dark:border-base-800">{{ row.kind }}</td>
+            <td class="align-middle border-t border-base-200 font-normal px-3 py-2 text-start dark:border-base-800"><a class="erp-ul-link" href="{{ row.url }}">{{ row.who }}</a></td>
+            <td class="align-middle border-t border-base-200 font-normal px-3 py-2 text-start dark:border-base-800">{{ row.document }}</td>
+            <td class="align-middle border-t border-base-200 font-normal px-3 py-2 text-start dark:border-base-800">{{ row.number|default:"-" }}</td>
+            <td class="align-middle border-t border-base-200 font-normal px-3 py-2 text-start dark:border-base-800">{{ row.date_text }}</td>
+            <td class="align-middle border-t border-base-200 font-normal px-3 py-2 text-start dark:border-base-800"><span class="erp-pill erp-pill-{{ row.state }}">{% if row.state == "expired" %}Expired {{ row.when }}{% elif row.state == "soon" %}Expires {{ row.when }}{% else %}Valid, expires {{ row.when }}{% endif %}</span></td>
+            <td class="align-middle border-t border-base-200 font-normal px-3 py-2 text-start dark:border-base-800">{% if row.file %}<a class="erp-ul-link" href="{{ row.file }}" target="_blank" rel="noopener">View</a>{% else %}-{% endif %}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
     {% else %}
-    <div class="erp-empty">Nothing here. {% if state == "attention" %}No document is expired or due within {{ window }} days.{% endif %}</div>
+    <div class="rounded-default lg:rounded-t-none lg:rounded-b-default overflow-x-auto scrollbar-default border border-base-200 shadow-xs dark:border-base-800 bg-white dark:bg-base-900 erp-empty">Nothing here. {% if state == "attention" %}No document is expired or due within {{ window }} days.{% endif %}</div>
     {% endif %}
   </div>
-
 </div>
 {% endblock %}
 

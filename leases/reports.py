@@ -169,6 +169,7 @@ class ReportsMixin:
         return self._page(
             request, "leases/rent_roll.html", "Rent roll", rows=page.object_list, page=page, totals=totals,
             total_rows=len(rows), today=timezone.localdate(), search=search, per=per,
+            search_placeholder="Search property, unit, tenant or lease no.", hidden=[],
             jump_url=link(page="__P__"), pages=page.paginator.num_pages,
             pager_numbers=pager_numbers(page, link) if page.paginator.num_pages > 1 else [],
             count_text=f"{len(rows)} running lease{'' if len(rows) == 1 else 's'}",

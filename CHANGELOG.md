@@ -1,5 +1,12 @@
 # Changelog
 
+## Update 51 - Top of Expiring Documents and Rent Roll built like the other lists
+No migration needed. Run `python manage.py test`, then Ctrl+F5 twice.
+- The quick-filter buttons use the same purple pill look as the other lists (the old blue ones are gone).
+- "Showing N" line like the other lists.
+- The search box is Unfold's own search box (magnifier, "/" key hint), inside the same bordered bar that sits on top of the table; the download buttons sit at the right of that bar like the "Filters" button does elsewhere.
+- The table uses Unfold's own heading and row styles (bold headings, striped rows, rounded border joined to the search bar).
+
 ## Update 50 - Bottom strip of Expiring Documents and Rent Roll: same sticky wrapper as Unfold's lists
 No migration needed. Run `python manage.py test`, then Ctrl+F5 twice.
 - The strip is now wrapped in exactly the same two containers Unfold uses for its own list footer, so it stays fixed at the bottom of the screen, has the same blur, top line and width, and no longer runs under the Back to Top button.
