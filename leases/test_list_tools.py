@@ -83,7 +83,7 @@ class ListScrollHelpers(Setup):
     def test_rows_per_page_is_marked_so_it_can_sit_next_to_the_page_numbers(self):
         root = Path(__file__).resolve().parent.parent / "core" / "static" / "core"
         script = (root / "lists.js").read_text(encoding="utf-8")
-        for text in ("erp-per-moved", "erp-pagerline", "findCountRow"):
+        for text in ("erp-per-moved", "erp-pagerline", "findCountRow", "an empty list"):
             self.assertIn(text, script)
         self.client.force_login(get_user_model().objects.create_superuser("perboss", "pr@example.com", "Pass-word1!"))
         for name in ("admin:tenants_tenant_changelist", "admin:leases_leasepayment_changelist"):

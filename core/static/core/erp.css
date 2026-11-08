@@ -917,3 +917,10 @@ html.dark .erp-jump-go:hover { background: #1f2937; }
 .erp-ul tfoot td, .erp-ul tfoot th { background: rgba(0, 0, 0, .02); }
 .erp-ul .erp-due-bad { color: #b91c1c; font-weight: 600; }
 .erp-listwrap .erp-empty { padding: 24px; text-align: center; color: #6b7280; }
+
+/* Table rows inside forms (bank accounts, contacts, documents, ...): an error message under one box must not push that
+   box out of line with the others. The message is placed under the box without taking height from the row, and the
+   whole row gets the room for it, so every box stays on the same line. */
+td.field-tabular .flex.flex-col.grow { position: relative; }
+td.field-tabular .mt-2.text-red-600 { position: absolute; top: 100%; left: 0; right: 0; margin-top: 4px; line-height: 1.3; z-index: 1; }
+tr.form-row:has(td.errors) > td { padding-bottom: 42px; }

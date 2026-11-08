@@ -525,7 +525,7 @@ class CleanupRules(TestCase):
         owner.full_clean()  # fine once its property is inactive too
 
     def test_limits(self):
-        for field, value in [("year_built", 5), ("year_built", 9999), ("total_floors", 0), ("total_floors", 5000)]:
+        for field, value in [("year_built", 5), ("year_built", 1799), ("year_built", 10000), ("total_floors", 0), ("total_floors", 5000)]:
             tower = Property(
                 name="T", code="LIM1", property_type=T.RESIDENTIAL_BUILDING, owner=Owner.company(),
                 emirate="dubai", management_fee_type="", **{field: value},
@@ -1111,3 +1111,17 @@ class BulkActions(TestCase):
         response = self.run_action("property", "change_owner", [props[0].pk], apply="1", owner=gone.pk)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(Property.objects.get(pk=props[0].pk).owner_id, old.pk)
+
+
+class YearBuiltRange(TestCase):
+    """Update 52: a building year may be anything from 1800 to 9999."""
+
+    def test_the_edges_are_allowed(self):
+        from .models import validate_year_built
+
+        for year in (1800, 1950, 2031, 9999):
+            validate_year_built(year)
+        for year in (1799, 10000):
+            with self.assertRaises(ValidationError):
+                validate_year_built(year)
+

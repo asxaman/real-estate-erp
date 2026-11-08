@@ -227,11 +227,13 @@
   /* A list with one page has no page numbers, only a line such as "56 owners": the boxes go into the row that holds it. */
   function findCountRow(table) {
     var found = Array.prototype.filter.call(document.querySelectorAll("p, div, span, li"), function (n) {
-      return !table.contains(n) && (table.compareDocumentPosition(n) & 4) && !n.children.length &&
+      return (!table || (!table.contains(n) && (table.compareDocumentPosition(n) & 4))) && !n.children.length &&
         !n.closest(".erp-chips, .erp-sticky, .erp-fbar, .erp-summary, .erp-jump, .erp-pagerline, .erp-totop, .erp-footer-bar, [role=dialog]") &&
         /^[\d,]+\s+[^\d]{2,40}$/.test(n.textContent.trim());
-    })[0];
-    return found ? found.parentElement : null;
+    });
+    // with no table (an empty list) the count at the bottom is the last one on the page, the top one is in the header
+    var hit = table ? found[0] : found[found.length - 1];
+    return hit ? hit.parentElement : null;
   }
 
   function addPageBox() {
@@ -239,9 +241,8 @@
       if (node.parentNode) { node.parentNode.removeChild(node); }
     });
     var table = document.getElementById("result_list");
-    if (!table) { return; }
     var top = document.querySelector(".erp-jump:not(.erp-jump-bottom):not([data-static])");
-    var row = findPagerRow(table) || findCountRow(table);
+    var row = (table && findPagerRow(table)) || findCountRow(table);
     // "Rows per page" moves down next to the page numbers (a fresh one comes with every refreshed list)
     var per = document.querySelector("[data-erp-per]:not(.erp-per-moved)") || (chrome.per && !document.body.contains(chrome.per) ? chrome.per : null);
     if (row && !per) { per = row.querySelector(".erp-per-moved"); }
@@ -272,6 +273,15 @@
       return;
     }
     if (!copy && !per) { return; }
+    if (!table) {
+      // an empty list with no bottom row to join: there is nothing to page through, so leave the box out of the top bar
+      if (per && !per.classList.contains("erp-per-moved") && per.parentNode) {
+        var bar = per.parentElement;
+        bar.removeChild(per);
+        if (bar.classList.contains("erp-fbar") && !bar.children.length && bar.parentNode) { bar.parentNode.removeChild(bar); }
+      }
+      return;
+    }
     // no row with page numbers found: put the boxes on a line of their own under the table
     var form = table.closest("form");
     var anchor = form || table.parentNode;

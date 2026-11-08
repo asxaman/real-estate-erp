@@ -87,10 +87,12 @@ def validate_trn(value):
         raise ValidationError("A tax registration number (TRN) has 15 digits.")
 
 
+YEAR_BUILT_MIN, YEAR_BUILT_MAX = 1800, 9999
+
+
 def validate_year_built(value):
-    latest = timezone.localdate().year + 5  # buildings still under construction are allowed
-    if value < 1900 or value > latest:
-        raise ValidationError(f"Enter a year between 1900 and {latest}.")
+    if value < YEAR_BUILT_MIN or value > YEAR_BUILT_MAX:
+        raise ValidationError(f"Enter a year between {YEAR_BUILT_MIN} and {YEAR_BUILT_MAX}.")
 
 
 TOTAL_FLOORS_VALIDATORS = [

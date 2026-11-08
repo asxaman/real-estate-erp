@@ -1,5 +1,14 @@
 # Changelog
 
+## Update 53 - Empty lists: Rows per page also goes to the bottom
+No migration needed. Run `python manage.py test`, then Ctrl+F5 twice.
+- Fixed: after erasing all data, the lists (Properties, Units, Tenants, Leases, Tenant Payments ...) showed "Rows per page" at the top. The move to the bottom row only ran when the list had a table. It now also runs for an empty list, using the "0 properties" line at the bottom.
+
+## Update 52 - Error messages no longer push boxes out of line; Year Built range 1800 to 9999
+No migration needed. Run `python manage.py test`, then Ctrl+F5 twice.
+- In every table-style section of a form (Owner bank accounts, contacts and documents; tenant and property documents; and any other), an error such as "This field is required" or "This IBAN is not valid" is now shown under its box without changing the height of that box's cell. All boxes in the row stay on the same line, and the row makes room for the message.
+- Year Built accepts 1800 to 9999 (was 1900 to current year + 5).
+
 ## Update 51 - Top of Expiring Documents and Rent Roll built like the other lists
 No migration needed. Run `python manage.py test`, then Ctrl+F5 twice.
 - The quick-filter buttons use the same purple pill look as the other lists (the old blue ones are gone).
