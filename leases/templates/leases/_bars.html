@@ -14,7 +14,7 @@
   </label>
   {% endfor %}
   {% if per_options %}
-  <label class="erp-fsel">
+  <label class="erp-fsel" data-erp-per="1">
     <span>Rows per page</span>
     <select data-erp-nav="1">
       {% for n, url, selected in per_options %}<option value="{{ url }}"{% if selected %} selected{% endif %}>{{ n }}</option>{% endfor %}

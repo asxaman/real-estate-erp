@@ -1,0 +1,31 @@
+{% comment %}
+  The bottom strip of a list page that is not a normal admin list. It goes into the page's "footer" block, the same place and
+  the same wrapper the admin lists use, so it looks and sticks exactly like theirs.
+  Needs: count_text, page, pages, pager_numbers, per_options [(n, url, selected)], jump_url (with __P__).
+{% endcomment %}
+{# the same two wrapper elements Unfold puts around the footer of its own lists (unfold/helpers/pagination.html): they make it sticky, blurred, bordered and the same width #}
+<div class="px-4 lg:backdrop-blur-xs lg:bg-white/80 lg:dark:bg-base-900/80 lg:left-0 lg:right-0 lg:bottom-0 lg:sticky relative z-40 lg:border-t lg:border-base-200 lg:relative lg:scrollable-top lg:dark:border-base-800">
+<div class="lg:flex lg:items-center container mx-auto">
+<div class="erp-footer-bar flex flex-row grow items-center lg:h-[64px]">
+  {% for item in pager_numbers %}
+    <div class="{% if forloop.last %}pe-2{% else %}pe-4{% endif %}">
+      {% if item.url %}<a class="erp-pn" href="{{ item.url }}">{{ item.label }}</a>{% elif item.current %}<span class="erp-pn is-current">{{ item.label }}</span>{% else %}<span class="erp-pn is-dots">{{ item.label }}</span>{% endif %}
+    </div>
+  {% endfor %}
+  <div class="py-4">{% if pager_numbers %}- {% endif %}{{ count_text }}</div>
+  <div class="erp-footer-tools ms-auto flex flex-row items-center">
+    <label class="erp-fsel erp-per-moved" data-erp-per="1">
+      <span>Rows per page</span>
+      <select data-erp-nav="1">
+        {% for n, url, selected in per_options %}<option value="{{ url }}"{% if selected %} selected{% endif %}>{{ n }}</option>{% endfor %}
+      </select>
+    </label>
+    <span class="erp-jump erp-jump-static" data-static="1" data-pages="{{ pages }}" data-url="{{ jump_url }}">
+      Page <input class="erp-jump-in" type="text" inputmode="numeric" autocomplete="off" data-erp-no-fill="1"
+                  value="{{ page.number }}" aria-label="Page number, 1 to {{ pages }}"> of <b>{{ pages }}</b>
+      <button type="button" class="erp-jump-go" title="Go to this page">Go</button>
+    </span>
+  </div>
+</div>
+</div>
+</div>

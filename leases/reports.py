@@ -12,6 +12,7 @@ from django.utils.http import urlencode
 from django.utils import timezone
 
 from core import exports
+from core.paging import pager_numbers
 
 from .models import Lease, LeasePayment, running_q
 
@@ -168,6 +169,9 @@ class ReportsMixin:
         return self._page(
             request, "leases/rent_roll.html", "Rent roll", rows=page.object_list, page=page, totals=totals,
             total_rows=len(rows), today=timezone.localdate(), search=search, per=per,
+            jump_url=link(page="__P__"), pages=page.paginator.num_pages,
+            pager_numbers=pager_numbers(page, link) if page.paginator.num_pages > 1 else [],
+            count_text=f"{len(rows)} running lease{'' if len(rows) == 1 else 's'}",
             per_options=[(n, link(per=n, page=1), n == per) for n in (50, 100, 200)],
             prev_url=link(page=page.previous_page_number()) if page.has_previous() else "",
             next_url=link(page=page.next_page_number()) if page.has_next() else "",

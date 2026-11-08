@@ -58,7 +58,7 @@
      These work on any change list. The headings are a copy of the table's heading row, shown fixed at the
      top of the screen while the real one has scrolled away (this works whichever part of the page scrolls
      and however wide the table is). */
-  var chrome = { table: null, bar: null, inner: null, pill: null, scroller: null, queued: false, wrapper: null };
+  var chrome = { per: null, table: null, bar: null, inner: null, pill: null, scroller: null, queued: false, wrapper: null };
 
   function pageTop(scroller) {
     if (scroller && scroller !== document && scroller !== document.documentElement && scroller !== document.body) { return scroller.scrollTop || 0; }
@@ -224,28 +224,66 @@
     return row;
   }
 
+  /* A list with one page has no page numbers, only a line such as "56 owners": the boxes go into the row that holds it. */
+  function findCountRow(table) {
+    var found = Array.prototype.filter.call(document.querySelectorAll("p, div, span, li"), function (n) {
+      return !table.contains(n) && (table.compareDocumentPosition(n) & 4) && !n.children.length &&
+        !n.closest(".erp-chips, .erp-sticky, .erp-fbar, .erp-summary, .erp-jump, .erp-pagerline, .erp-totop, .erp-footer-bar, [role=dialog]") &&
+        /^[\d,]+\s+[^\d]{2,40}$/.test(n.textContent.trim());
+    })[0];
+    return found ? found.parentElement : null;
+  }
+
   function addPageBox() {
     Array.prototype.forEach.call(document.querySelectorAll(".erp-jump-bottom, .erp-jump-line"), function (node) {
       if (node.parentNode) { node.parentNode.removeChild(node); }
     });
-    var top = document.querySelector(".erp-jump:not(.erp-jump-bottom)");
     var table = document.getElementById("result_list");
-    if (!top || !table) { return; }
-    var copy = top.cloneNode(true);
-    copy.removeAttribute("hidden");
-    copy.classList.add("erp-jump-bottom");
-    var row = findPagerRow(table);
+    if (!table) { return; }
+    var top = document.querySelector(".erp-jump:not(.erp-jump-bottom):not([data-static])");
+    var row = findPagerRow(table) || findCountRow(table);
+    // "Rows per page" moves down next to the page numbers (a fresh one comes with every refreshed list)
+    var per = document.querySelector("[data-erp-per]:not(.erp-per-moved)") || (chrome.per && !document.body.contains(chrome.per) ? chrome.per : null);
+    if (row && !per) { per = row.querySelector(".erp-per-moved"); }
+    var copy = null;
+    if (top) {
+      copy = top.cloneNode(true);
+      copy.removeAttribute("hidden");
+      copy.classList.add("erp-jump-bottom");
+    }
     if (row) {
-      copy.classList.add(/flex/.test(window.getComputedStyle(row).display) ? "is-flex" : "is-float");
-      row.appendChild(copy);
+      var flex = /flex/.test(window.getComputedStyle(row).display);
+      var mode = flex ? "is-flex" : "is-float";
+      if (copy) { copy.classList.add(mode); }
+      if (per) {
+        var holder = per.parentElement;
+        per.classList.add("erp-per-moved", mode);
+        chrome.per = per;
+        if (copy) { copy.classList.add("after-per"); }
+        // in a floated row the first box added sits furthest right, so the page box goes first
+        if (flex) { row.appendChild(per); if (copy) { row.appendChild(copy); } }
+        else { if (copy) { row.appendChild(copy); } row.appendChild(per); }
+        if (holder && holder !== row && holder.classList.contains("erp-fbar") && !holder.children.length) {
+          holder.parentNode.removeChild(holder);
+        }
+      } else if (copy) {
+        row.appendChild(copy);
+      }
       return;
     }
-    // no page numbers found: put the box on a line of its own under the table
+    if (!copy && !per) { return; }
+    // no row with page numbers found: put the boxes on a line of their own under the table
     var form = table.closest("form");
     var anchor = form || table.parentNode;
     var line = document.createElement("div");
-    line.className = "erp-jump-line";
-    line.appendChild(copy);
+    line.className = "erp-jump-line erp-pagerline";
+    if (per) {
+      per.classList.add("erp-per-moved", "is-flex");
+      chrome.per = per;
+      line.appendChild(per);
+      if (copy) { copy.classList.add("is-flex", "after-per"); }
+    }
+    if (copy) { line.appendChild(copy); }
     if (anchor.parentNode) { anchor.parentNode.insertBefore(line, anchor.nextSibling); }
   }
 
@@ -290,6 +328,14 @@
   });
   document.addEventListener("focusin", function (e) {
     if (e.target && e.target.classList && e.target.classList.contains("erp-jump-in")) { e.target.select(); }
+  });
+
+  /* The whole "Rows per page" box opens its list, not only the number and the arrow. */
+  document.addEventListener("click", function (e) {
+    var pill = e.target.closest ? e.target.closest(".erp-fsel") : null;
+    if (!pill || e.target.closest(".erp-select")) { return; }
+    var trigger = pill.querySelector(".erp-select-trigger");
+    if (trigger) { e.preventDefault(); trigger.click(); }
   });
 
   function setUpChrome() {

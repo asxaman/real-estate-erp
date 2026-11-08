@@ -884,3 +884,23 @@ html.dark .erp-jump-go:hover { background: #1f2937; }
 .erp-jump-bottom.is-flex { margin-left: auto; padding-left: 18px; }
 .erp-jump-bottom.is-float { float: right; }
 .erp-searchinfo { position: absolute; top: 50%; transform: translateY(-50%); margin: 0; z-index: 2; }
+.erp-per-moved { margin: 0; }
+.erp-per-moved.is-flex { margin-left: auto; }
+.erp-per-moved.is-float { float: right; margin-left: 12px; }
+.erp-jump-bottom.after-per.is-flex { margin-left: 12px; padding-left: 0; }
+.erp-jump-bottom.after-per.is-float { margin-left: 12px; }
+.erp-pagerline { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px 12px; margin: 12px 0 0; }
+.erp-pagerline .erp-per-moved, .erp-pagerline .erp-jump-bottom { margin: 0; }
+.erp-pagerline .erp-jump-bottom { padding: 0; }
+.erp-pager-count { margin-right: auto; font-size: 13px; color: #4b5563; }
+.dark .erp-pager-count { color: #9ca3af; }
+.erp-fsel { cursor: pointer; }
+/* bottom strip of custom list pages: the layout comes from the admin footer; only the page numbers and the boxes are styled here */
+.erp-footer-bar .erp-pn { font-size: 14px; text-decoration: none; color: #4b5563; }
+.erp-footer-bar a.erp-pn:hover { color: #9333ea; }
+.erp-footer-bar .erp-pn.is-current { color: #9333ea; font-weight: 600; }
+.dark .erp-footer-bar .erp-pn { color: #9ca3af; }
+.dark .erp-footer-bar .erp-pn.is-current { color: #c084fc; }
+.erp-footer-tools { gap: 12px; }
+.erp-footer-tools .erp-per-moved, .erp-footer-tools .erp-jump-static { margin: 0; padding: 0; }
+.erp-footer-tools .erp-per-moved { padding-left: 10px; }

@@ -31,10 +31,10 @@ class ListPaging(Setup):
         self.assertIn("chip=active", url)
         self.assertIn("per=50", url)
 
-    def test_a_short_list_has_no_box(self):
-        reply = self.client.get(self.url)  # 131 rows, 100 per page: only 2 pages
-        self.assertIsNone(reply.context["page_jump"])
-        self.assertNotContains(reply, 'class="erp-jump"')
+    def test_a_list_with_one_page_still_shows_page_1_of_1(self):
+        reply = self.client.get(self.url, {"chip": "inactive"})  # nobody is inactive: one (empty) page
+        self.assertEqual((reply.context["page_jump"]["pages"], reply.context["page_jump"]["page"]), (1, 1))
+        self.assertContains(reply, 'data-pages="1"')
 
     def test_a_page_past_the_end_shows_the_last_page(self):
         reply = self.client.get(self.url, {"per": 50, "p": 99})
@@ -80,3 +80,11 @@ class ListScrollHelpers(Setup):
         self.assertNotContains(reply, "Search finds")
         self.assertContains(reply, "data-erp-search-hint")
 
+    def test_rows_per_page_is_marked_so_it_can_sit_next_to_the_page_numbers(self):
+        root = Path(__file__).resolve().parent.parent / "core" / "static" / "core"
+        script = (root / "lists.js").read_text(encoding="utf-8")
+        for text in ("erp-per-moved", "erp-pagerline", "findCountRow"):
+            self.assertIn(text, script)
+        self.client.force_login(get_user_model().objects.create_superuser("perboss", "pr@example.com", "Pass-word1!"))
+        for name in ("admin:tenants_tenant_changelist", "admin:leases_leasepayment_changelist"):
+            self.assertContains(self.client.get(reverse(name)), 'data-erp-per="1"')

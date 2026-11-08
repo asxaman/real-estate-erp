@@ -112,8 +112,12 @@ class ExpiringDocumentsPage(TestCase):
             OwnerDocument.objects.create(
                 owner=owner, doc_type="other", number=f"N{n}", expiry_date=timezone.localdate() - timedelta(days=1)
             )
-        self.assertEqual(len(self.rows("?state=expired")), 50)
-        self.assertEqual(len(self.rows("?state=expired&page=2")), 11)
+        self.assertEqual(len(self.rows("?state=expired&per=50")), 50)
+        self.assertEqual(len(self.rows("?state=expired&per=50&page=2")), 11)
+        page = self.client.get(self.url, {"state": "expired", "per": "50"})
+        self.assertContains(page, "erp-footer-bar")  # the strip sits in the same footer as the admin lists
+        self.assertEqual([n["label"] for n in page.context["pager_numbers"]], [1, 2])
+        self.assertContains(page, "- 61 documents")
 
     def test_only_what_the_user_may_see(self):
         user = User.objects.create_user("clerk", password="pw-12345-xyz", is_staff=True)
@@ -126,6 +130,14 @@ class ExpiringDocumentsPage(TestCase):
         rows = self.rows("?state=all")
         owner = Owner.objects.get(name="Overview Owner")
         self.assertIn(reverse("admin:properties_owner_change", args=[owner.pk]), [r["url"] for r in rows])
+
+    def test_the_page_has_rows_per_page_and_a_go_to_page_box(self):
+        page = self.client.get(self.url, {"state": "expired"})
+        self.assertContains(page, 'id="result_list"')
+        self.assertContains(page, 'data-erp-per="1"')
+        self.assertContains(page, 'data-pages="1"')
+        everything = self.client.get(self.url, {"state": "expired", "per": "200"})
+        self.assertEqual(len(everything.context["page"].object_list), everything.context["total"])
 
 
 class NewPermissionsForExistingRoles(TestCase):

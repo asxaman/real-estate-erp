@@ -12,6 +12,7 @@ from django.utils import timezone
 from . import exports, sysconf
 from .formats import fmt_date
 from .models import AuditEntry
+from .paging import DEFAULT_PER_PAGE, PER_PAGE_CHOICES, pager_numbers
 
 # (label, model path, parent field, admin change url name, permission)
 SOURCES = (
@@ -205,13 +206,16 @@ def expiring_documents_view(request):
             "expiring-documents",
         )
 
-    page = Paginator(rows, 50).get_page(request.GET.get("page"))
+    per = request.GET.get("per", "")
+    per = int(per) if per.isdigit() and int(per) in PER_PAGE_CHOICES else DEFAULT_PER_PAGE
+    page = Paginator(rows, per).get_page(request.GET.get("page"))
     for row in page:
         row["when"] = _days_text(row["days"])
         row["date_text"] = fmt_date(row["expiry"])
 
     def link(**changes):
-        params = {"state": state, "kind": kind, "days": window if window != sysconf.expiry_days() else "", "q": search}
+        params = {"state": state, "kind": kind, "days": window if window != sysconf.expiry_days() else "", "q": search,
+                  "per": per if per != DEFAULT_PER_PAGE else ""}
         params.update(changes)
         from urllib.parse import urlencode
 
@@ -240,6 +244,11 @@ def expiring_documents_view(request):
         + [(label.lower(), f"{label}s", link(kind=label.lower(), page="")) for label in available],
         "windows": [(days, link(days=days, page="")) for days in WINDOWS],
         "export_url": link(export="csv") if can_export else "",
+        "per_options": [(n, link(per=n, page=""), n == per) for n in PER_PAGE_CHOICES],
+        "jump_url": link(page="__P__"),
+        "pages": page.paginator.num_pages,
+        "pager_numbers": pager_numbers(page, link) if page.paginator.num_pages > 1 else [],
+        "count_text": f"{len(rows)} document{'' if len(rows) == 1 else 's'}",
         "prev_url": link(page=page.previous_page_number()) if page.has_previous() else "",
         "next_url": link(page=page.next_page_number()) if page.has_next() else "",
     }

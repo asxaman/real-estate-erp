@@ -1,5 +1,49 @@
 # Changelog
 
+## Update 50 - Bottom strip of Expiring Documents and Rent Roll: same sticky wrapper as Unfold's lists
+No migration needed. Run `python manage.py test`, then Ctrl+F5 twice.
+- The strip is now wrapped in exactly the same two containers Unfold uses for its own list footer, so it stays fixed at the bottom of the screen, has the same blur, top line and width, and no longer runs under the Back to Top button.
+- Other lists are not touched.
+
+## Update 49 - Bottom strip of Expiring Documents and Rent Roll now built like the other lists
+No migration needed. Run `python manage.py test`, then Ctrl+F5 twice.
+- The strip is now placed in the same footer area, with the same wrapper (64px row, page numbers "1 2 3 ... 20 21", then "- 1238 documents"), as the admin lists, so it stays in view and looks the same. Rows per page and Page N of M [Go] sit at the right.
+- Previous / Next buttons were replaced by the page numbers, as on the other lists.
+
+## Update 48 - Fix: stray text above the bottom strip of Expiring Documents and Rent Roll
+No migration needed. Run `python manage.py test`, then Ctrl+F5 twice.
+- A long note inside the shared bottom-strip template was printed on the page instead of being hidden. It is now a proper hidden comment.
+
+## Update 47 - Bottom strip of Expiring Documents and Rent Roll matches the other lists
+No migration needed. Run `python manage.py test`, then Ctrl+F5 twice.
+- The strip is taller, runs edge to edge across the page, has the same softer top line and the same count text size as the strip on the other lists.
+- Test fix: the Expiring Documents test expected data that test does not create.
+
+## Update 46 - The bottom strip stays in view on every list; two test fixes
+No migration needed. Run `python manage.py test`, then Ctrl+F5 twice.
+- Expiring Documents and the Rent Roll report now have the same bottom strip as the other lists: it stays fixed at the bottom of the screen while you scroll (count on the left; Previous, Next, Rows per page and "Page 1 of N [Go]" on the right). One shared piece of code (`core/templates/core/_pager_bar.html`) now builds it, so any new list page gets it by including that file.
+- Rent Roll also gets the frozen column headings and the Back to Top button.
+- Test fixes: one new test was in the wrong test group, and one checked for a word the script no longer contains.
+
+## Update 45 - Owners list back, Rows per Page is one big button, Expiring Documents gets the list tools
+No migration needed. Run `python manage.py test`, then Ctrl+F5 twice.
+- Fixed: the Owners list looked empty at the bottom. The previous update hid the "56 owners" line; nothing is hidden any more. "Rows per page" and "Page 1 of 1" now go into the same row that holds the count.
+- "Rows per page" is now one button: click anywhere on it (the words, the border, the number or the arrow) to open the list.
+- Expiring Documents now has what the other lists have: the column headings stay in view while you scroll, the Back to Top button, "Rows per page" (50, 100 or 200; 100 is the default now) and "Page 1 of 25 [Go]" at the bottom of the list, together with Previous and Next.
+
+## Update 44 - Bottom row on every list: count, Rows per Page, Page 1 of 1
+No migration needed. Run `python manage.py test`, then Ctrl+F5 twice.
+- Every list now has the "Page 1 of N [Go]" box, even when everything fits on one page. On one-page lists (Owners, Users and so on) the bottom row is: the count on the left ("56 owners"), then "Rows per page" and "Page 1 of 1" on the right.
+- Fixed: the Rows per page box in the Users list (and other one-page lists) had no left padding, so its label touched the border. It now looks like the other filter boxes.
+
+## Update 43 - Rows per page also on single-page lists (Owners and others)
+No migration needed. Run `python manage.py test`, then Ctrl+F5 twice.
+- Lists that fit on one page (for example Owners) had no page numbers, so "Rows per page" stayed at the top. It now sits at the bottom right of every list, in line with the "55 owners" count (and the "Page 1 of N" box when there are several pages).
+
+## Update 42 - Rows per page next to the page numbers
+No migration needed. Run `python manage.py test`, then Ctrl+F5 twice.
+- In every module, "Rows per page" moved from the top of the list down to the row under the table, just left of the "Page 1 of 21 [Go]" box. The filter bar at the top is tidier (and has room for more filters).
+
 ## Update 41 - Unit, Tenant and Property search on the lease form
 No migration needed. Run `python manage.py test`, then Ctrl+F5 twice.
 - Fixed: typing a full unit reference such as B010-301 in the Unit box said "No match". The search looked for the whole text inside the unit number or the building code separately. It now checks every word you type against the building code, building name, unit number and the full reference.

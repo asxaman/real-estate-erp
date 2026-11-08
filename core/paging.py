@@ -11,7 +11,7 @@ PER_PAGE_CHOICES = (50, 100, 200)
 DEFAULT_PER_PAGE = 100
 PRIVATE_PARAMS = ("per", "chip")
 _PAGED = {}
-JUMP_FROM_PAGES = 3  # lists with at least this many pages get a "go to page" box
+JUMP_FROM_PAGES = 1  # every list shows "Page 1 of N" (even a single page)
 
 
 def _page_number(text, pages):
@@ -21,6 +21,18 @@ def _page_number(text, pages):
     except (TypeError, ValueError):
         number = 1
     return min(max(number, 1), max(pages, 1))
+
+
+def pager_numbers(page, link):
+    """The page numbers for the bottom strip of a custom list page: 1 2 3 4 ... 20 21 (as on the admin lists).
+    `link(page=n)` gives the address of a page. Returns [{"label", "url", "current"}]; url is "" for the dots and the current page."""
+    numbers = []
+    for item in page.paginator.get_elided_page_range(page.number):
+        if item == page.paginator.ELLIPSIS:
+            numbers.append({"label": item, "url": "", "current": False})
+        else:
+            numbers.append({"label": item, "url": "" if item == page.number else link(page=item), "current": item == page.number})
+    return numbers
 
 
 def paged(base):

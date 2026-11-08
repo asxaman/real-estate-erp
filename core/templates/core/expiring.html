@@ -24,7 +24,7 @@
 
   <div class="erp-panel erp-scroll">
     {% if page.object_list %}
-    <table class="erp-table">
+    <table class="erp-table" id="result_list">
       <thead><tr><th>Belongs to</th><th>Record</th><th>Document</th><th>Number</th><th>Expires on</th><th>Status</th><th>File</th></tr></thead>
       <tbody>
       {% for row in page %}
@@ -45,12 +45,7 @@
     {% endif %}
   </div>
 
-  {% if page.has_previous or page.has_next %}
-  <div class="erp-pager">
-    {% if prev_url %}<a class="erp-btn erp-btn-light" href="{{ prev_url }}">Previous</a>{% endif %}
-    <span>Page {{ page.number }} of {{ page.paginator.num_pages }}</span>
-    {% if next_url %}<a class="erp-btn erp-btn-light" href="{{ next_url }}">Next</a>{% endif %}
-  </div>
-  {% endif %}
 </div>
 {% endblock %}
+
+{% block footer %}{% include "core/_pager_bar.html" %}{% endblock %}

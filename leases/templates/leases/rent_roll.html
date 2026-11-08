@@ -18,7 +18,7 @@
   </form>
   <div class="erp-panel erp-scroll">
     {% if rows %}
-    <table class="erp-table">
+    <table class="erp-table" id="result_list">
       <thead><tr>
         <th>Property</th><th>Rented</th><th>Tenant</th><th>Lease</th><th>Ends</th>
         <th class="num">Annual rent<br><small>before VAT</small></th><th class="num">Monthly<br><small>with VAT</small></th><th class="num">Received</th>
@@ -48,14 +48,7 @@
     <div class="erp-empty">{% if search %}No running lease matches your search.{% else %}No lease is running today.{% endif %}</div>
     {% endif %}
   </div>
-  {% if page.paginator.num_pages > 1 or total_rows > 50 %}
-  <div class="erp-filterbar erp-pager">
-    {% if prev_url %}<a class="erp-btn erp-btn-light" href="{{ prev_url }}">&larr; Previous</a>{% endif %}
-    <span class="erp-dash-hello">Page {{ page.number }} of {{ page.paginator.num_pages }}</span>
-    {% if next_url %}<a class="erp-btn erp-btn-light" href="{{ next_url }}">Next &rarr;</a>{% endif %}
-    <span class="erp-label" style="margin-left:14px;">Rows per page</span>
-    {% for n, url, selected in per_options %}<a class="erp-chip{% if selected %} is-on{% endif %}" href="{{ url }}">{{ n }}</a>{% endfor %}
-  </div>
-  {% endif %}
 </div>
 {% endblock %}
+
+{% block footer %}{% include "core/_pager_bar.html" %}{% endblock %}
