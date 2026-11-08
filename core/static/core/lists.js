@@ -208,22 +208,65 @@
     chrome.pill = pill;
   }
 
-  /* "Page 3 of 122 [Go]": the box under the summary line is copied below the table, where the page numbers are. */
+  /* "Page 3 of 122 [Go]": the page box is hidden in the summary line and shown in the row with the page numbers
+     under the table ("1 2 3 ... 123 - 12230 Tenant payments"), found by its page links. */
+  var PAGE_LINK = /[?&]p=\d+(&|$)/;
+
+  function findPagerRow(table) {
+    var links = Array.prototype.filter.call(document.querySelectorAll("a[href]"), function (a) {
+      return PAGE_LINK.test(a.getAttribute("href")) && !table.contains(a) && (table.compareDocumentPosition(a) & 4) &&
+        !a.closest(".erp-chips, .erp-sticky, .erp-fbar, .erp-summary, .erp-jump");
+    });
+    if (!links.length) { return null; }
+    var row = links[0].parentElement;
+    // the row with the numbers also says what is being counted ("... Tenant payments"): go up until it does
+    while (row && !/[A-Za-z]/.test(row.textContent) && row.parentElement && !row.parentElement.contains(table)) { row = row.parentElement; }
+    return row;
+  }
+
   function addPageBox() {
-    var old = document.querySelector(".erp-jump-bottom");
-    if (old) { old.parentNode.removeChild(old); }
-    var top = document.querySelector(".erp-jump");
+    Array.prototype.forEach.call(document.querySelectorAll(".erp-jump-bottom, .erp-jump-line"), function (node) {
+      if (node.parentNode) { node.parentNode.removeChild(node); }
+    });
+    var top = document.querySelector(".erp-jump:not(.erp-jump-bottom)");
     var table = document.getElementById("result_list");
     if (!top || !table) { return; }
     var copy = top.cloneNode(true);
+    copy.removeAttribute("hidden");
     copy.classList.add("erp-jump-bottom");
+    var row = findPagerRow(table);
+    if (row) {
+      copy.classList.add(/flex/.test(window.getComputedStyle(row).display) ? "is-flex" : "is-float");
+      row.appendChild(copy);
+      return;
+    }
+    // no page numbers found: put the box on a line of its own under the table
     var form = table.closest("form");
-    var pager = document.querySelector('.paginator, nav[aria-label*="agination"], [class*="pagination"]');
-    var anchor = pager && !pager.contains(table) ? pager : (form || table.parentNode);
+    var anchor = form || table.parentNode;
     var line = document.createElement("div");
     line.className = "erp-jump-line";
     line.appendChild(copy);
     if (anchor.parentNode) { anchor.parentNode.insertBefore(line, anchor.nextSibling); }
+  }
+
+  /* The search box says what it can find through a small "i" next to it, not through a line of text. */
+  function addSearchInfo(input, text) {
+    if (!window.erpMakeInfo) { return; }
+    var box = input.parentElement;
+    while (box && box !== document.body && parseFloat(window.getComputedStyle(box).borderTopWidth) < 1) { box = box.parentElement; }
+    if (!box || box === document.body) { box = input.parentElement; }
+    if (box.querySelector(".erp-searchinfo")) { return; }
+    if (window.getComputedStyle(box).position === "static") { box.style.position = "relative"; }
+    var icon = window.erpMakeInfo(text);
+    if (!icon) { return; }
+    icon.classList.add("erp-searchinfo");
+    // leave the "/" key hint of the box where it is: the icon goes just to its left
+    var chip = Array.prototype.filter.call(box.querySelectorAll("*"), function (n) { return n.children.length === 0 && n.textContent.trim() === "/"; })[0];
+    var right = 14;
+    if (chip) { right = Math.round(box.getBoundingClientRect().right - chip.getBoundingClientRect().left + 8); }
+    icon.style.right = right + "px";
+    box.appendChild(icon);
+    input.style.paddingRight = (right + 28) + "px";
   }
 
   function goToPage(box) {
@@ -265,7 +308,10 @@
     var input = findInput();
     if (!input) { return; }
     var hint = document.querySelector("[data-erp-search-hint]");
-    if (hint) { input.setAttribute("placeholder", hint.getAttribute("data-erp-search-hint")); }
+    if (hint) {
+      input.setAttribute("placeholder", "Search\u2026");
+      addSearchInfo(input, "You can search by: " + hint.getAttribute("data-erp-search-hint"));
+    }
     highlight(input);
 
     // Live search only when the search box sits inside the part of the page that is refreshed.

@@ -69,3 +69,14 @@ class ListScrollHelpers(Setup):
             self.assertIn(text, script)
         for text in (".erp-sticky", ".erp-totop", ".erp-jump-in"):
             self.assertIn(text, css)
+
+    def test_search_hint_moved_into_an_info_icon_and_the_page_box_moves_to_the_pager(self):
+        root = Path(__file__).resolve().parent.parent / "core" / "static" / "core"
+        script = (root / "lists.js").read_text(encoding="utf-8")
+        for text in ("findPagerRow", "addSearchInfo", "You can search by: "):
+            self.assertIn(text, script)
+        self.client.force_login(get_user_model().objects.create_superuser("hintboss", "hb@example.com", "Pass-word1!"))
+        reply = self.client.get(reverse("admin:leases_leasepayment_changelist"))
+        self.assertNotContains(reply, "Search finds")
+        self.assertContains(reply, "data-erp-search-hint")
+

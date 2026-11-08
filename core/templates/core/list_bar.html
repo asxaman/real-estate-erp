@@ -1,9 +1,11 @@
-{% include "core/per_page_bar.html" %}
-{% if quick_chips %}
-<div class="erp-chips" role="navigation" aria-label="Quick filters">
-  {% for chip in quick_chips %}
-    <a class="erp-chip erp-chip-{{ chip.tone }}{% if chip.active %} is-active{% endif %}" href="{{ chip.url }}">{{ chip.label }}{% if chip.count is not None %} <b>{{ chip.count }}</b>{% endif %}</a>
-  {% endfor %}
+<div class="erp-listbar">
+  {% if quick_chips %}
+  <div class="erp-chips" role="navigation" aria-label="Quick filters">
+    {% for chip in quick_chips %}
+      <a class="erp-chip erp-chip-{{ chip.tone }}{% if chip.active %} is-active{% endif %}" href="{{ chip.url }}">{{ chip.label }}{% if chip.count is not None %} <b>{{ chip.count }}</b>{% endif %}</a>
+    {% endfor %}
+  </div>
+  {% endif %}
+  {% include "core/per_page_bar.html" %}
 </div>
-{% endif %}
 {% include "core/_list_summary.html" %}

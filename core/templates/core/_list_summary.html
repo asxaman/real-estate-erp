@@ -4,7 +4,7 @@
 <div class="erp-summary" role="status">
   <span>Showing <b>{{ list_summary.shown }}</b>{% if list_summary.narrowed %} of <b>{{ list_summary.total }}</b>{% endif %}</span>
   {% if page_jump %}
-  <span class="erp-jump" data-pages="{{ page_jump.pages }}" data-url="{{ page_jump.url }}">
+  <span class="erp-jump" hidden data-pages="{{ page_jump.pages }}" data-url="{{ page_jump.url }}">
     Page <input class="erp-jump-in" type="text" inputmode="numeric" autocomplete="off" data-erp-no-fill="1"
                 value="{{ page_jump.page }}" aria-label="Page number, 1 to {{ page_jump.pages }}"> of <b>{{ page_jump.pages }}</b>
     <button type="button" class="erp-jump-go" title="Go to this page">Go</button>
@@ -12,6 +12,5 @@
   {% endif %}
   {% for tag in list_summary.tags %}<a class="erp-tag" href="{{ tag.remove }}" title="Remove this filter">{{ tag.label }} <i>&times;</i></a>{% endfor %}
   {% if list_summary.narrowed %}<a class="erp-fclear" href="{{ list_summary.clear_url }}">Clear all</a>{% endif %}
-  {% if search_hint %}<span class="erp-hint">Search finds: {{ search_hint }}</span>{% endif %}
 </div>
 {% endif %}

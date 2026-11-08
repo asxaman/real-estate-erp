@@ -1,5 +1,16 @@
 # Changelog
 
+## Update 41 - Unit, Tenant and Property search on the lease form
+No migration needed. Run `python manage.py test`, then Ctrl+F5 twice.
+- Fixed: typing a full unit reference such as B010-301 in the Unit box said "No match". The search looked for the whole text inside the unit number or the building code separately. It now checks every word you type against the building code, building name, unit number and the full reference.
+- Works in any style: B010-301, B010 301, b010301, "301 Jumeirah", or the whole chosen label. Tenants: words in any order ("Abbas Ahmed") and phone numbers typed with spaces, dashes or +971. Properties: name or code words.
+
+## Update 40 - Tidier list bars
+No migration needed. Run `python manage.py test`, then Ctrl+F5 twice.
+- The "Go to page" box now sits in the page-number row under the table (next to "1 2 3 ... 122 123"), not above the list.
+- The filter dropdowns (Leases, Tenant Payments and the Rows per page bar in every module) are now small, compact pills that take only the width of the chosen value, so they fit on fewer rows.
+- The "Search finds: ..." line is gone. An "i" sits inside the search bar instead; hover or tap it to see what you can search by.
+
 ## Update 39 - Lists: headings that stay in view, a back-to-top button, go to page
 No migration needed. Run `python manage.py test`, then Ctrl+F5 twice.
 - On every list, the column headings now stay at the top of the screen while you scroll down through the rows (a copy of the heading row appears just under the page header). Sort links and the select-all box on the copy work.

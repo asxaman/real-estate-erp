@@ -90,6 +90,13 @@
     label.appendChild(icon);
   }
 
+  // The same "i" icon for other scripts (the search box of the lists): window.erpMakeInfo("text") returns the icon.
+  window.erpMakeInfo = function (text) {
+    var holder = document.createElement("span");
+    makeIcon(holder, text);
+    return holder.firstChild;
+  };
+
   function labelForControl(control, form) {
     if (control.id) {
       var direct = form.querySelector('label[for="' + control.id + '"]');
