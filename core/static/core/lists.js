@@ -53,8 +53,215 @@
     });
   }
 
+
+  /* ---- list chrome: column headings that stay in view, a "back to top" pill, and a "go to page" box ------
+     These work on any change list. The headings are a copy of the table's heading row, shown fixed at the
+     top of the screen while the real one has scrolled away (this works whichever part of the page scrolls
+     and however wide the table is). */
+  var chrome = { table: null, bar: null, inner: null, pill: null, scroller: null, queued: false, wrapper: null };
+
+  function pageTop(scroller) {
+    if (scroller && scroller !== document && scroller !== document.documentElement && scroller !== document.body) { return scroller.scrollTop || 0; }
+    return window.pageYOffset || document.documentElement.scrollTop || 0;
+  }
+
+  // How far down the screen a bar that stays at the top (Unfold's page header) reaches.
+  function topOffset() {
+    var offset = 0;
+    var stack = document.elementsFromPoint ? document.elementsFromPoint(Math.floor(window.innerWidth * 0.6), 3) : [];
+    stack.forEach(function (node) {
+      if (chrome.bar && chrome.bar.contains(node)) { return; }
+      if (node === chrome.pill) { return; }
+      var style = window.getComputedStyle(node);
+      if (style.position !== "fixed" && style.position !== "sticky") { return; }
+      var rect = node.getBoundingClientRect();
+      if (rect.top <= 3 && rect.height < 200 && rect.bottom > offset) { offset = rect.bottom; }
+    });
+    return offset;
+  }
+
+  function backgroundOf(node) {
+    for (var el = node; el && el.nodeType === 1; el = el.parentNode) {
+      var color = window.getComputedStyle(el).backgroundColor;
+      if (color && color !== "transparent" && !/rgba\(\s*\d+,\s*\d+,\s*\d+,\s*0\s*\)/.test(color)) { return color; }
+    }
+    return "";
+  }
+
+  function horizontalScroller(node) {
+    for (var el = node.parentNode; el && el.nodeType === 1 && el !== document.body; el = el.parentNode) {
+      var overflow = window.getComputedStyle(el).overflowX;
+      if (overflow === "auto" || overflow === "scroll") { return el; }
+    }
+    return null;
+  }
+
+  function dropHeadingCopy() {
+    if (chrome.bar && chrome.bar.parentNode) { chrome.bar.parentNode.removeChild(chrome.bar); }
+    chrome.bar = chrome.inner = chrome.table = chrome.wrapper = null;
+  }
+
+  function buildHeadingCopy() {
+    dropHeadingCopy();
+    var table = document.getElementById("result_list");
+    if (!table || !table.tHead || !table.tHead.rows.length) { return; }
+    var copy = document.createElement("table");
+    copy.className = table.className;
+    var head = table.tHead.cloneNode(true);
+    copy.appendChild(head);
+    Array.prototype.forEach.call(copy.querySelectorAll("*"), function (node) {
+      node.removeAttribute("id");
+      Array.prototype.slice.call(node.attributes).forEach(function (attribute) {
+        // the copy is only for looking at and clicking: it carries none of the page's script hooks
+        if (/^(x-|@|:|data-erp-)/.test(attribute.name)) { node.removeAttribute(attribute.name); }
+      });
+    });
+    var inner = document.createElement("div");
+    inner.className = "erp-sticky-inner";
+    inner.appendChild(copy);
+    var bar = document.createElement("div");
+    bar.className = "erp-sticky";
+    bar.hidden = true;
+    bar.appendChild(inner);
+    // the "select all" box of the copy works the real one
+    var boxes = copy.querySelectorAll('input[type="checkbox"]');
+    var real = table.tHead.querySelector('input[type="checkbox"]');
+    if (boxes.length && real) {
+      boxes[0].addEventListener("click", function (e) {
+        e.preventDefault();
+        real.click();
+        // (the browser puts the clicked box back after a cancelled click, so copy the real state a moment later)
+        window.setTimeout(function () { boxes[0].checked = real.checked; }, 0);
+      });
+      real.addEventListener("change", function () { boxes[0].checked = real.checked; });
+    }
+    document.body.appendChild(bar);
+    chrome.bar = bar;
+    chrome.inner = inner;
+    chrome.table = table;
+    chrome.wrapper = horizontalScroller(table);
+    if (chrome.wrapper) { chrome.wrapper.addEventListener("scroll", function () { if (chrome.inner) { chrome.inner.scrollLeft = chrome.wrapper.scrollLeft; } }); }
+    update();
+  }
+
+  function update() {
+    chrome.queued = false;
+    var scrolled = pageTop(chrome.scroller);
+    if (chrome.pill) { chrome.pill.hidden = scrolled < 500; }
+    document.body.classList.toggle("erp-scrolled", scrolled >= 500);
+    var bar = chrome.bar, table = chrome.table;
+    if (!bar || !table || !table.isConnected) { if (bar) { bar.hidden = true; } return; }
+    var rect = table.getBoundingClientRect();
+    var headHeight = table.tHead.offsetHeight;
+    var offset = topOffset();
+    var show = rect.top + headHeight < offset + 1 && rect.bottom > offset + headHeight + 8;
+    if (!show) { bar.hidden = true; return; }
+    var box = (chrome.wrapper || table).getBoundingClientRect();
+    var width = chrome.wrapper ? chrome.wrapper.clientWidth : table.offsetWidth;
+    bar.style.top = offset + "px";
+    bar.style.left = box.left + "px";
+    bar.style.width = width + "px";
+    var background = backgroundOf(table.parentNode);
+    if (background) { bar.style.backgroundColor = background; }
+    var copy = bar.firstChild.firstChild;
+    copy.style.width = table.offsetWidth + "px";
+    copy.style.tableLayout = "fixed";
+    var real = table.tHead.rows[0].cells, mine = copy.tHead.rows[0].cells;
+    for (var i = 0; i < real.length && i < mine.length; i++) {
+      var w = real[i].getBoundingClientRect().width + "px";
+      mine[i].style.width = w;
+      mine[i].style.minWidth = w;
+      mine[i].style.maxWidth = w;
+      mine[i].style.boxSizing = "border-box";
+    }
+    bar.hidden = false;
+    chrome.inner.scrollLeft = chrome.wrapper ? chrome.wrapper.scrollLeft : 0;
+  }
+
+  function queueUpdate(e) {
+    if (e && e.type === "scroll" && e.target) {
+      // remember which part of the page scrolls up and down (a table scrolling sideways does not count)
+      if (e.target === document) { chrome.scroller = document.scrollingElement; }
+      else if (e.target.scrollTop > 0) { chrome.scroller = e.target; }
+    }
+    if (chrome.queued) { return; }
+    chrome.queued = true;
+    window.requestAnimationFrame(update);
+  }
+
+  function buildPill() {
+    if (chrome.pill) { return; }
+    var pill = document.createElement("button");
+    pill.type = "button";
+    pill.className = "erp-totop";
+    pill.hidden = true;
+    pill.setAttribute("aria-label", "Back to the top of the page");
+    pill.innerHTML = '<svg viewBox="0 0 20 20" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M10 16V4M4.5 9.5 10 4l5.5 5.5"/></svg><span>Back to Top</span>';
+    pill.addEventListener("click", function () {
+      var scroller = chrome.scroller;
+      if (scroller && scroller !== document.scrollingElement && scroller !== document.documentElement && scroller !== document.body) {
+        scroller.scrollTo({ top: 0, behavior: "smooth" });
+      }
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    });
+    document.body.appendChild(pill);
+    chrome.pill = pill;
+  }
+
+  /* "Page 3 of 122 [Go]": the box under the summary line is copied below the table, where the page numbers are. */
+  function addPageBox() {
+    var old = document.querySelector(".erp-jump-bottom");
+    if (old) { old.parentNode.removeChild(old); }
+    var top = document.querySelector(".erp-jump");
+    var table = document.getElementById("result_list");
+    if (!top || !table) { return; }
+    var copy = top.cloneNode(true);
+    copy.classList.add("erp-jump-bottom");
+    var form = table.closest("form");
+    var pager = document.querySelector('.paginator, nav[aria-label*="agination"], [class*="pagination"]');
+    var anchor = pager && !pager.contains(table) ? pager : (form || table.parentNode);
+    var line = document.createElement("div");
+    line.className = "erp-jump-line";
+    line.appendChild(copy);
+    if (anchor.parentNode) { anchor.parentNode.insertBefore(line, anchor.nextSibling); }
+  }
+
+  function goToPage(box) {
+    var input = box.querySelector(".erp-jump-in");
+    var pages = parseInt(box.getAttribute("data-pages"), 10) || 1;
+    var wanted = parseInt(input.value, 10);
+    if (isNaN(wanted)) { input.focus(); input.select(); return; }
+    wanted = Math.min(Math.max(wanted, 1), pages);
+    input.value = wanted;
+    window.__erpAllowLeave = true;
+    window.location.href = box.getAttribute("data-url").replace("__P__", String(wanted));
+  }
+
+  document.addEventListener("click", function (e) {
+    var go = e.target.closest ? e.target.closest(".erp-jump-go") : null;
+    if (go) { e.preventDefault(); goToPage(go.closest(".erp-jump")); }
+  });
+  document.addEventListener("keydown", function (e) {
+    var input = e.target && e.target.classList && e.target.classList.contains("erp-jump-in") ? e.target : null;
+    if (input && e.key === "Enter") { e.preventDefault(); goToPage(input.closest(".erp-jump")); }
+  });
+  document.addEventListener("focusin", function (e) {
+    if (e.target && e.target.classList && e.target.classList.contains("erp-jump-in")) { e.target.select(); }
+  });
+
+  function setUpChrome() {
+    buildPill();
+    buildHeadingCopy();
+    addPageBox();
+    update();
+  }
+  window.addEventListener("scroll", queueUpdate, true);
+  window.addEventListener("resize", queueUpdate);
+  window.erpListChrome = setUpChrome;  // called again after the list is refreshed by live search
+
   /* ---- live search -------------------------------------------------------------------------- */
   function start() {
+    setUpChrome();
     var input = findInput();
     if (!input) { return; }
     var hint = document.querySelector("[data-erp-search-hint]");
@@ -112,6 +319,7 @@
           swap(new DOMParser().parseFromString(html, "text/html"));
           window.history.replaceState(null, "", url.toString());
           highlight(input);
+          setUpChrome();
         })
         .catch(function (error) {
           if (error && error.name === "AbortError") { return; }

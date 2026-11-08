@@ -1,5 +1,12 @@
 # Changelog
 
+## Update 39 - Lists: headings that stay in view, a back-to-top button, go to page
+No migration needed. Run `python manage.py test`, then Ctrl+F5 twice.
+- On every list, the column headings now stay at the top of the screen while you scroll down through the rows (a copy of the heading row appears just under the page header). Sort links and the select-all box on the copy work.
+- When you have scrolled down a list (or any long page), a "Back to Top" button appears at the bottom right. It is also your sign that you are not at the top. Click it to go back up smoothly.
+- A "Go to page" box: "Page 3 of 122 [Go]" in the summary line above the list and again under the table. Type a page number and press Enter (or Go). It shows on lists with three or more pages and keeps your search, filters and rows per page.
+- A page number that does not exist (typed by hand, or the list got shorter) now shows the nearest page instead of an error page.
+
 ## Update 38 - Change Paid By in the Cheque Grid
 No migration needed. Run `python manage.py test`, then Ctrl+F5 twice.
 - In the Cheque Grid, the Paid By cell is now editable: click it (or type a few letters, or press Space) and choose Cheque, Cash, Bank transfer, Card or Other. Arrow keys, Enter and paste from Excel work in it like the other cells, and Ctrl+D copies the cell above.

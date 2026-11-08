@@ -4,12 +4,23 @@ Django treats every unknown address parameter as a database lookup (and redirect
 private parameters used here ('per' = rows per page, 'chip' = quick filter) are taken out of the request
 while the list is built and put back into every link it makes.
 """
+from django.contrib.admin.options import IncorrectLookupParameters
 from django.db.models import Count
 
 PER_PAGE_CHOICES = (50, 100, 200)
 DEFAULT_PER_PAGE = 100
 PRIVATE_PARAMS = ("per", "chip")
 _PAGED = {}
+JUMP_FROM_PAGES = 3  # lists with at least this many pages get a "go to page" box
+
+
+def _page_number(text, pages):
+    """The page the address asks for, kept inside 1..pages."""
+    try:
+        number = int(text)
+    except (TypeError, ValueError):
+        number = 1
+    return min(max(number, 1), max(pages, 1))
 
 
 def paged(base):
@@ -24,6 +35,7 @@ def paged(base):
                     self.per = int(value)
                 self.chip = request.GET.get("chip", "")[:40]
                 request._erp_params = {"per": self.per, "chip": self.chip}
+                self.page_shown = 1
                 original = request.GET
                 if any(name in original for name in PRIVATE_PARAMS):
                     clean = original.copy()
@@ -31,7 +43,24 @@ def paged(base):
                         clean.pop(name, None)
                     request.GET = clean
                 try:
-                    super().__init__(request, *args, **kwargs)
+                    try:
+                        super().__init__(request, *args, **kwargs)
+                        self.page_shown = _page_number(request.GET.get("p"), self.paginator.num_pages)
+                    except IncorrectLookupParameters:
+                        # A page number that does not exist (typed by hand, or the list got shorter):
+                        # show the nearest page instead of an error page.
+                        wanted = request.GET.get("p")
+                        if not wanted:
+                            raise
+                        first = request.GET.copy()
+                        first["p"] = "1"
+                        request.GET = first
+                        super().__init__(request, *args, **kwargs)
+                        self.page_shown = _page_number(wanted, self.paginator.num_pages)
+                        fixed = first.copy()
+                        fixed["p"] = str(self.page_shown)
+                        request.GET = fixed
+                        super().__init__(request, *args, **kwargs)
                 finally:
                     request.GET = original
 
@@ -92,7 +121,19 @@ class RowsPerPageMixin:
             data["search_hint"] = self.search_hint
             term = getattr(request, "_erp_fuzzy", "")
             data["search_note"] = f"Nothing matches “{term}” exactly, so similar names are shown." if term else ""
+            data["page_jump"] = self._page_jump(cl)
         return response
+
+    @staticmethod
+    def _page_jump(cl):
+        """What the 'go to page' box needs: how many pages there are, the page shown, and a link with a hole for the number."""
+        paginator = getattr(cl, "paginator", None)
+        if paginator is None or getattr(cl, "show_all", False) or paginator.num_pages < JUMP_FROM_PAGES:
+            return None
+        return {
+            "pages": paginator.num_pages, "page": getattr(cl, "page_shown", 1),
+            "url": cl.get_query_string({"p": "__P__"}),
+        }
 
     # ---- chips -----------------------------------------------------------------------
     def _chip_buttons(self, cl):
