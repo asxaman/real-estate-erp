@@ -88,3 +88,9 @@ class ListScrollHelpers(Setup):
         self.client.force_login(get_user_model().objects.create_superuser("perboss", "pr@example.com", "Pass-word1!"))
         for name in ("admin:tenants_tenant_changelist", "admin:leases_leasepayment_changelist"):
             self.assertContains(self.client.get(reverse(name)), 'data-erp-per="1"')
+
+    def test_the_top_of_a_list_has_no_showing_line(self):
+        self.client.force_login(get_user_model().objects.create_superuser("showboss", "sb@example.com", "Pass-word1!"))
+        for name in ("admin:tenants_tenant_changelist", "admin:leases_lease_changelist", "admin:leases_leasepayment_changelist"):
+            self.assertNotContains(self.client.get(reverse(name)), "Showing")
+

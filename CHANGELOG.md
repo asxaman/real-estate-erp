@@ -1,5 +1,9 @@
 # Changelog
 
+## Update 54 - No "Showing N" line at the top of lists
+No migration needed. Run `python manage.py test`, then Ctrl+F5 twice.
+- Removed the "Showing 0" / "Showing 56" line above every list (the count is already in the bottom strip). When a filter or search is in use, the line with the filter tags and "Clear all" still appears. Same for Expiring Documents; Rent Roll keeps only "Running leases on <date>".
+
 ## Update 53 - Empty lists: Rows per page also goes to the bottom
 No migration needed. Run `python manage.py test`, then Ctrl+F5 twice.
 - Fixed: after erasing all data, the lists (Properties, Units, Tenants, Leases, Tenant Payments ...) showed "Rows per page" at the top. The move to the bottom row only ran when the list had a table. It now also runs for an empty list, using the "0 properties" line at the bottom.

@@ -100,7 +100,7 @@ class RowsPerPageMixin:
     Add to a ModelAdmin (before ModelAdmin). Gives the list:
       * 100 rows per page and a "Rows per page" choice (50 / 100 / 200);
       * quick-filter chips with counts: define `quick_chips(self)` returning [(key, "Label", tone, Q), ...];
-      * a summary line ("Showing 37 of 2,018 - Status: Vacant x - Clear all") and the search hint.
+      * a line with the filters in use ("Status: Vacant x - Clear all", only when narrowed) and the search hint; the count is in the bottom strip.
     """
 
     list_per_page = DEFAULT_PER_PAGE

@@ -118,7 +118,7 @@ class ExpiringDocumentsPage(TestCase):
         self.assertContains(page, "erp-footer-bar")  # the strip sits in the same footer as the admin lists
         self.assertEqual([n["label"] for n in page.context["pager_numbers"]], [1, 2])
         self.assertContains(page, "- 61 documents")
-        self.assertContains(page, "<span>Showing <b>61</b></span>")  # the same summary line as the other lists
+        self.assertNotContains(page, "Showing")  # the count is in the bottom strip only, as on the other lists
         self.assertContains(page, 'id="searchbar"')  # the same search box as the other lists
         self.assertContains(page, "erp-chip is-active")  # the same chip look (purple), not the old blue one
 

@@ -12,7 +12,6 @@
     <span class="erp-label erp-label-gap">Due within</span>
     {% for days, url in windows %}<a class="erp-chip{% if days == window %} is-active{% endif %}" href="{{ url }}">{{ days }} days</a>{% endfor %}
   </div>
-  <div class="erp-summary" role="status"><span>Showing <b>{{ total }}</b></span></div>
 
   <div class="erp-listwrap">
             <div class="flex flex-col flex-wrap gap-3 mb-4 sm:flex-row empty:hidden lg:border lg:border-base-200 lg:dark:border-base-800 lg:-mb-8 lg:p-3 lg:pb-11 lg:rounded-t-default">
