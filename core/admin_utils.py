@@ -170,7 +170,7 @@ def whatsapp_link(phone):
         if finders.find(name):
             return format_html(
                 '<a class="erp-wa erp-wa-official" href="https://wa.me/{}" target="_blank" rel="noopener" '
-                'title="Chat on WhatsApp" aria-label="Chat on WhatsApp"><img src="{}" alt="WhatsApp" width="24" height="24"></a>',
+                'title="Chat on WhatsApp" aria-label="Chat on WhatsApp"><img src="{}" alt="WhatsApp" width="18" height="18"></a>',
                 number, static(name),
             )
     return format_html(
@@ -178,3 +178,25 @@ def whatsapp_link(phone):
         'title="Chat on WhatsApp" aria-label="Chat on WhatsApp">{}</a>',
         number, _WHATSAPP_ICON,
     )
+
+
+def add_inline_tab(model_admin_class, inline, before):
+    """
+    Put a read-only `inline` tab on another module's page, just before its `before` tab (named by class).
+    It is not shown on the page for a new record (there is nothing to list yet).
+    """
+    current = list(model_admin_class.inlines)
+    if inline in current:
+        return
+    position = next((i for i, item in enumerate(current) if item.__name__ == before), len(current))
+    current.insert(position, inline)
+    model_admin_class.inlines = current
+    original = model_admin_class.get_inline_instances
+
+    def get_inline_instances(self, request, obj=None):
+        instances = original(self, request, obj)
+        if obj is None:
+            instances = [i for i in instances if not isinstance(i, inline)]
+        return instances
+
+    model_admin_class.get_inline_instances = get_inline_instances

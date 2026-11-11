@@ -10,7 +10,12 @@ PER_KIND = 5
 
 def _sources():
     from agreements.models import OwnerAgreement
+    from billing.models import Invoice, Receipt
+    from statements.models import OwnerStatement
+    from payables.models import Expense, PaymentVoucher, VendorBill
     from leases.models import Lease, LeasePayment
+    from hr.models import Employee
+    from maintenance.models import MaintenanceRequest, Vendor
     from properties.models import Owner, Property, Unit
     from tenants.models import Tenant
 
@@ -24,6 +29,17 @@ def _sources():
          lambda o: f"{o.item_name} · {o.get_status_display()}"),
         (OwnerAgreement, "handshake", "Owner agreement", ("owner",), lambda o: f"{o.code} · {o.owner.name}",
          lambda o: f"{o.fee_text()} · {o.get_status_display()}"),
+        (OwnerStatement, "summarize", "Owner statement", ("owner",), lambda o: f"{o.code} · {o.owner.name}",
+         lambda o: f"{o.period_start:%d %b %Y} to {o.period_end:%d %b %Y} · {o.get_status_display()}"),
+        (VendorBill, "receipt", "Vendor bill", ("vendor",), lambda o: f"{o.code} · {o.vendor.name}", lambda o: f"{o.description} · AED {o.total:,.2f}"),
+        (Expense, "shopping_cart", "Expense", (), lambda o: f"{o.code} · {o.payee}", lambda o: f"{o.description} · AED {o.total:,.2f}"),
+        (PaymentVoucher, "price_check", "Payment voucher", (), lambda o: f"{o.code} · {o.payee_name}", lambda o: f"{o.description} · AED {o.amount:,.2f}"),
+        (Receipt, "receipt_long", "Receipt", (), lambda o: f"{o.code} · {o.tenant_name}", lambda o: f"{o.description} · AED {o.total:,.2f}"),
+        (Invoice, "request_quote", "Invoice", (), lambda o: f"{o.code} · {o.tenant_name}", lambda o: f"{o.description} · AED {o.total:,.2f}"),
+        (Vendor, "engineering", "Vendor", (), lambda o: o.name, lambda o: f"{o.code or ''} · {o.get_trade_display()} · {o.phone}".strip(" ·")),
+        (Employee, "badge", "Employee", (), lambda o: o.full_name, lambda o: f"{o.code or ''} · {o.job_title}".strip(" ·")),
+        (MaintenanceRequest, "build", "Maintenance", ("property", "unit"), lambda o: f"{o.code} · {o.title}",
+         lambda o: f"{o.where} · {o.get_status_display()}"),
         (LeasePayment, "payments", "Payment", ("lease__tenant",), lambda o: f"{o.lease.code} {o.label.lower()} · {o.lease.tenant.name}",
          lambda o: f"Due {fmt_date(o.due_date)} · {o.amount:,.0f} AED · {o.get_status_display()}"),
     ]

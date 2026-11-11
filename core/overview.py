@@ -22,6 +22,8 @@ SOURCES = (
      "properties.view_propertydocument"),
     ("Unit", "properties.UnitDocument", "unit", "admin:properties_unit_change", "properties.view_unitdocument"),
     ("Lease", "leases.LeaseDocument", "lease", "admin:leases_lease_change", "leases.view_leasedocument"),
+    ("Vendor", "maintenance.VendorDocument", "vendor", "admin:maintenance_vendor_change", "maintenance.view_vendordocument"),
+    ("Employee", "hr.EmployeeDocument", "employee", "admin:hr_employee_change", "hr.view_employeedocument"),
 )
 KINDS = {label.lower(): label for label, *_ in SOURCES}
 KINDS["lease"] = "Lease"  # lease documents, and the dates leases and Ejari certificates end

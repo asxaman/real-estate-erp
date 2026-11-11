@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ title }}</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #eef0f3; font: 13px/1.5 -apple-system, "Segoe UI", Roboto, Arial, sans-serif; color: #1f2937; }
+  .bar { max-width: 860px; margin: 16px auto 0; padding: 0 16px; display: flex; gap: 10px; justify-content: space-between; }
+  .bar a, .bar button { font: inherit; padding: 8px 16px; border-radius: 8px; border: 1px solid #cbd5e1; background: #fff; color: #1f2937; text-decoration: none; cursor: pointer; }
+  .bar button { background: #4f46e5; border-color: #4f46e5; color: #fff; font-weight: 600; }
+  .sheet { max-width: 860px; margin: 12px auto 24px; background: #fff; padding: 40px 44px; border-radius: 6px; box-shadow: 0 1px 6px rgba(0,0,0,.12); page-break-after: always; }
+  .top { display: flex; justify-content: space-between; gap: 24px; border-bottom: 2px solid #1f2937; padding-bottom: 16px; }
+  .company b { font-size: 20px; display: block; }
+  .company span { display: block; color: #4b5563; font-size: 12px; white-space: pre-line; }
+  .doc { text-align: right; }
+  .doc h1 { margin: 0; font-size: 22px; letter-spacing: .04em; text-transform: uppercase; }
+  .doc span { display: block; color: #4b5563; }
+  .meta { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 24px; margin: 18px 0 8px; }
+  .meta div { display: flex; justify-content: space-between; border-bottom: 1px solid #eef0f3; padding: 3px 0; }
+  .meta span { color: #6b7280; }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-top: 14px; }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: #6b7280; border-bottom: 1px solid #d1d5db; padding: 8px 0; }
+  td { padding: 5px 0; border-bottom: 1px solid #eef0f3; }
+  .num { text-align: right; white-space: nowrap; padding-left: 12px; }
+  .tot td { font-weight: 700; border-top: 1px solid #1f2937; border-bottom: 0; }
+  .net { margin-top: 18px; display: flex; justify-content: space-between; align-items: baseline; border-top: 2px solid #1f2937; padding-top: 10px; font-size: 18px; font-weight: 700; }
+  .words { margin-top: 10px; padding: 10px 14px; background: #f3f4f6; border-radius: 6px; font-style: italic; }
+  .sign { display: flex; justify-content: space-between; gap: 40px; margin-top: 48px; }
+  .sign div { flex: 1; border-top: 1px solid #6b7280; padding-top: 4px; color: #6b7280; font-size: 12px; }
+  .foot { margin-top: 22px; font-size: 11px; color: #6b7280; text-align: center; }
+  @media print { body { background: #fff; } .bar { display: none; } .sheet { box-shadow: none; margin: 0; max-width: none; padding: 0; border-radius: 0; } @page { size: A4; margin: 14mm; } }
+  @media (max-width: 600px) { .sheet { padding: 20px; } .top, .meta, .cols { display: block; } .doc { text-align: left; margin-top: 12px; } }
+</style>
+</head>
+<body>
+<div class="bar">
+  <a href="{{ back }}">&larr; Back</a>
+  <button type="button" onclick="window.print()">Print / Save as PDF</button>
+</div>
+{% for page in pages %}{% with s=page.slip %}
+<div class="sheet">
+  <div class="top">
+    <div class="company">
+      <b>{{ company.name }}</b>
+      {% if company.address %}<span>{{ company.address }}</span>{% endif %}
+      {% if company.phone or company.email %}<span>{{ company.phone }}{% if company.phone and company.email %} · {% endif %}{{ company.email }}</span>{% endif %}
+    </div>
+    <div class="doc"><h1>Salary Slip</h1><span><b>{{ s.run.month|date:"F Y" }}</b></span><span>{{ s.run.code }}</span></div>
+  </div>
+  <div class="meta">
+    <div><span>Employee</span><b>{{ s.employee_name }}</b></div>
+    <div><span>Employee no.</span><b>{{ s.employee_code }}</b></div>
+    <div><span>Job title</span>{{ s.job_title }}</div>
+    <div><span>Days paid</span>{{ s.payable_days|floatformat:"-1" }} of 30</div>
+    <div><span>Paid by</span>{{ page.method }}{% if s.pay_method == "cheque" and s.payment_reference %} (no. {{ s.payment_reference }}){% endif %}</div>
+    <div><span>Overtime</span>{% if s.overtime_hours %}{{ s.overtime_hours|floatformat:"-1" }} hours{% else %}-{% endif %}</div>
+  </div>
+  <div class="cols">
+    <table>
+      <thead><tr><th>Earnings</th><th class="num">AED</th></tr></thead>
+      <tbody>
+        <tr><td>Basic salary</td><td class="num">{{ s.basic|floatformat:"2g" }}</td></tr>
+        {% if s.housing %}<tr><td>Housing allowance</td><td class="num">{{ s.housing|floatformat:"2g" }}</td></tr>{% endif %}
+        {% if s.transport %}<tr><td>Transport allowance</td><td class="num">{{ s.transport|floatformat:"2g" }}</td></tr>{% endif %}
+        {% if s.other_allowance %}<tr><td>Other allowance</td><td class="num">{{ s.other_allowance|floatformat:"2g" }}</td></tr>{% endif %}
+        {% if s.overtime_amount %}<tr><td>Overtime</td><td class="num">{{ s.overtime_amount|floatformat:"2g" }}</td></tr>{% endif %}
+        {% if s.other_additions %}<tr><td>{{ s.additions_note|default:"Other additions" }}</td><td class="num">{{ s.other_additions|floatformat:"2g" }}</td></tr>{% endif %}
+        <tr class="tot"><td>Total earnings</td><td class="num">{{ s.total_additions|floatformat:"2g" }}</td></tr>
+      </tbody>
+    </table>
+    <table>
+      <thead><tr><th>Deductions</th><th class="num">AED</th></tr></thead>
+      <tbody>
+        {% if s.absence_deduction %}<tr><td>Unpaid days ({{ s.unpaid_days|floatformat:"-1" }})</td><td class="num">{{ s.absence_deduction|floatformat:"2g" }}</td></tr>{% endif %}
+        {% if s.other_deductions %}<tr><td>{{ s.deductions_note|default:"Other deductions" }}</td><td class="num">{{ s.other_deductions|floatformat:"2g" }}</td></tr>{% endif %}
+        {% if not s.absence_deduction and not s.other_deductions %}<tr><td>None</td><td class="num">-</td></tr>{% endif %}
+        <tr class="tot"><td>Total deductions</td><td class="num">{{ s.total_deductions|floatformat:"2g" }}</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="net"><span>Net salary</span><span>AED {{ s.net|floatformat:"2g" }}</span></div>
+  <div class="words">{{ page.words }}</div>
+  <div class="sign"><div>Employee signature</div><div>Authorised signature</div></div>
+  <div class="foot">Issued on {{ today }}. This is a computer-generated salary slip.</div>
+</div>
+{% endwith %}{% endfor %}
+</body>
+</html>

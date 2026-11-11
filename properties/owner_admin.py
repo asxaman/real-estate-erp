@@ -387,6 +387,7 @@ class OwnerAdmin(ImportMixin, ExportPermissionMixin, SmartSearchMixin, RowsPerPa
                 ("email", "phone"),
                 "trn",
                 "address",
+                "maintenance_approval_limit",
                 "photo",
                 "notes",
             ),

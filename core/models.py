@@ -218,6 +218,14 @@ class SystemSettings(models.Model):
         "(or trade licence, for a company) are not on file. Takes effect when Leases are added.",
     )
 
+    # Maintenance
+    maintenance_approval_limit = models.DecimalField(
+        "Maintenance jobs above this amount need approval (AED)", max_digits=10, decimal_places=2, default=2000,
+        validators=[MinValueValidator(0)],
+        help_text="A maintenance job whose estimate or cost is higher than this must be approved before work starts. "
+        "An owner can have his own limit (on the owner's page); this is used for every other owner.",
+    )
+
     # Development
     development_mode = models.BooleanField(
         "Development mode", default=True,

@@ -271,6 +271,15 @@ class SystemSettingsAdmin(SuperuserOnlyMixin, TooltipHelpMixin, ModelAdmin):
             },
         ),
         (
+            "Maintenance",
+            {
+                "classes": ["tab"],
+                "description": "The approval rule for maintenance jobs. An owner can have his own limit instead "
+                "(on the owner's page, Overview tab).",
+                "fields": ("maintenance_approval_limit",),
+            },
+        ),
+        (
             "Notifications",
             {"classes": ["tab"], "fields": ("toast_seconds",)},
         ),

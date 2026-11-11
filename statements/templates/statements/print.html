@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ title }}</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #eef0f3; font: 13px/1.5 -apple-system, "Segoe UI", Roboto, Arial, sans-serif; color: #1f2937; }
+  .bar { max-width: 860px; margin: 16px auto 0; padding: 0 16px; display: flex; gap: 10px; justify-content: space-between; }
+  .bar a, .bar button { font: inherit; padding: 8px 16px; border-radius: 8px; border: 1px solid #cbd5e1; background: #fff; color: #1f2937; text-decoration: none; cursor: pointer; }
+  .bar button { background: #4f46e5; border-color: #4f46e5; color: #fff; font-weight: 600; }
+  .sheet { max-width: 860px; margin: 12px auto 32px; background: #fff; padding: 40px 44px; border-radius: 6px; box-shadow: 0 1px 6px rgba(0,0,0,.12); position: relative; }
+  .top { display: flex; justify-content: space-between; gap: 24px; border-bottom: 2px solid #1f2937; padding-bottom: 16px; }
+  .company b { font-size: 20px; display: block; }
+  .company span { display: block; color: #4b5563; font-size: 12px; white-space: pre-line; }
+  .doc { text-align: right; }
+  .doc h1 { margin: 0; font-size: 24px; letter-spacing: .04em; text-transform: uppercase; }
+  .doc span { display: block; color: #4b5563; }
+  .meta { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin: 20px 0 8px; }
+  .meta h4 { margin: 0 0 4px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: #6b7280; }
+  table { width: 100%; border-collapse: collapse; margin-top: 6px; }
+  th { text-align: left; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: #6b7280; border-bottom: 1px solid #d1d5db; padding: 8px 0; }
+  td { padding: 6px 0; border-bottom: 1px solid #eef0f3; vertical-align: top; }
+  .num { text-align: right; white-space: nowrap; padding-left: 12px; }
+  .sec td { background: #f3f4f6; font-weight: 700; padding: 8px 6px; border-bottom: 1px solid #d1d5db; }
+  .memo td { color: #6b7280; font-style: italic; }
+  .sum { margin: 18px 0 0 auto; width: 340px; }
+  .sum div { display: flex; justify-content: space-between; padding: 3px 0; }
+  .sum .grand { border-top: 2px solid #1f2937; margin-top: 6px; padding-top: 8px; font-size: 16px; font-weight: 700; }
+  .words { margin-top: 18px; padding: 10px 14px; background: #f3f4f6; border-radius: 6px; font-style: italic; }
+  .void { position: absolute; top: 160px; left: 50%; transform: translateX(-50%) rotate(-18deg); font-size: 72px; font-weight: 800; color: rgba(185,28,28,.22); border: 6px solid rgba(185,28,28,.22); padding: 0 24px; letter-spacing: .1em; pointer-events: none; }
+  .draft { display: inline-block; margin-top: 6px; padding: 2px 10px; border: 2px solid #b45309; color: #b45309; font-weight: 700; border-radius: 4px; text-transform: uppercase; font-size: 12px; }
+  .foot { margin-top: 28px; font-size: 11px; color: #6b7280; text-align: center; }
+  @media print { body { background: #fff; } .bar { display: none; } .sheet { box-shadow: none; margin: 0; max-width: none; padding: 0; border-radius: 0; } @page { size: A4; margin: 14mm; } }
+  @media (max-width: 600px) { .sheet { padding: 20px; } .top, .meta { display: block; } .doc { text-align: left; margin-top: 12px; } }
+</style>
+</head>
+<body>
+<div class="bar">
+  <a href="{{ back }}">&larr; Back</a>
+  <button type="button" onclick="window.print()">Print / Save as PDF</button>
+</div>
+<div class="sheet">
+  {% if doc.status == "voided" %}<div class="void">VOID</div>{% endif %}
+  <div class="top">
+    <div class="company">
+      <b>{{ company.name }}</b>
+      {% if company.address %}<span>{{ company.address }}</span>{% endif %}
+      {% if company.phone or company.email %}<span>{{ company.phone }}{% if company.phone and company.email %} · {% endif %}{{ company.email }}</span>{% endif %}
+      {% if company.trn %}<span>TRN: {{ company.trn }}</span>{% endif %}
+    </div>
+    <div class="doc">
+      <h1>Owner Statement</h1>
+      <span><b>{{ doc.code }}</b></span>
+      <span>{{ period }}</span>
+      {% if doc.status == "draft" %}<span class="draft">Draft</span>{% endif %}
+    </div>
+  </div>
+
+  <div class="meta">
+    <div><h4>Owner</h4><b>{{ doc.owner.name }}</b>{% if doc.owner.code %}<div>{{ doc.owner.code }}</div>{% endif %}</div>
+    <div><h4>Status</h4><b>{{ doc.get_status_display }}</b>{% if doc.paid_on %}<div>Paid on {{ doc.paid_on }}</div>{% endif %}</div>
+  </div>
+
+  {% for section in sections %}
+  <table>
+    <tbody>
+      <tr class="sec"><td colspan="2">{{ section.title }}</td><td class="num">{% if section.total is not None %}{{ section.total|floatformat:2 }}{% endif %}</td></tr>
+      {% for line in section.lines %}
+      <tr{% if section.info %} class="memo"{% endif %}><td style="width:84px;white-space:nowrap">{{ line.line_date|date:"d M Y" }}</td><td>{{ line.description }}</td><td class="num">{{ line.amount|floatformat:2 }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% empty %}
+  <p style="margin:18px 0;color:#6b7280">Nothing to list for this period.</p>
+  {% endfor %}
+
+  <div class="sum">
+    <div><span>Income (rent and guaranteed rent)</span><span>{{ doc.rent_total|add:doc.guarantee_total|floatformat:2 }}</span></div>
+    <div><span>Management fees</span><span>- {{ doc.fee_total|floatformat:2 }}</span></div>
+    <div><span>Costs charged to the owner</span><span>- {{ doc.cost_total|floatformat:2 }}</span></div>
+    {% if doc.adjustment %}<div><span>Adjustment{% if doc.adjustment_note %} ({{ doc.adjustment_note }}){% endif %}</span><span>{{ doc.adjustment|floatformat:2 }}</span></div>{% endif %}
+    <div><span><b>Net for the period</b></span><span><b>{{ doc.net_amount|floatformat:2 }}</b></span></div>
+    {% if doc.brought_forward %}<div><span>Brought forward</span><span>{{ doc.brought_forward|floatformat:2 }}</span></div>{% endif %}
+    <div class="grand"><span>To pay the owner (AED)</span><span>{{ doc.payout_due|floatformat:2 }}</span></div>
+    {% if doc.carried_forward %}<div><span>The owner owes the company (carried forward)</span><span>{{ doc.carried_forward|floatformat:2 }}</span></div>{% endif %}
+  </div>
+  <div class="words">{{ words }}</div>
+  {% if doc.status == "voided" %}<p style="color:#b91c1c"><b>Voided:</b> {{ doc.void_reason }}</p>{% endif %}
+  {% if doc.notes %}<p>{{ doc.notes }}</p>{% endif %}
+  <div class="foot">Amounts are in UAE dirhams (AED). Rent is shown before VAT. This statement was produced by the system.</div>
+</div>
+</body>
+</html>

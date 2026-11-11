@@ -37,6 +37,19 @@ AUDITED_MODELS = (
     "leases.LeaseNote",
     "agreements.OwnerAgreement",
     "agreements.AgreementProperty",
+    "statements.OwnerStatement",
+    "payables.VendorBill",
+    "payables.Expense",
+    "payables.PaymentVoucher",
+    "billing.Receipt",
+    "billing.Invoice",
+    "maintenance.Vendor",
+    "maintenance.VendorDocument",
+    "maintenance.MaintenanceRequest",
+    "hr.Employee",
+    "hr.EmployeeDocument",
+    "hr.LeaveRequest",
+    "hr.PayrollRun",
     "core.SystemSettings",
     "auth.User",
 )
@@ -49,7 +62,7 @@ TENANT_CHILD_LABELS = {"tenants.TenantContact", "tenants.TenantDocument"}
 LEASE_CHILD_LABELS = {"leases.LeasePayment", "leases.LeaseDocument", "leases.LeaseDeduction", "leases.LeaseNote"}
 # Fields whose full value must never appear in the log (only the last 4 characters).
 MASKED_FIELDS = {
-    "iban", "emirates_id_number", "passport_number", "trn", "trade_licence_number", "number",
+    "iban", "emirates_id_number", "passport_number", "trn", "trade_licence_number", "number", "wps_person_id",
 }
 # Fields whose value is not shown at all (the log still says that it changed).
 HIDDEN_FIELDS = {"date_of_birth"}
@@ -60,6 +73,8 @@ DOCUMENT_LABELS = {
     "properties.UnitDocument",
     "tenants.TenantDocument",
     "leases.LeaseDocument",
+    "maintenance.VendorDocument",
+    "hr.EmployeeDocument",
 }
 
 # Fields that are technical noise or secret; they never appear in the log.
@@ -185,6 +200,12 @@ def related_owner_id(instance):
             return instance.owner_id
         if label == "agreements.AgreementProperty":
             return instance.agreement.owner_id
+        if label == "maintenance.MaintenanceRequest":
+            return instance.property.owner_id
+        if label in ("payables.VendorBill", "payables.Expense"):
+            return instance.property.owner_id if instance.property_id else None
+        if label == "statements.OwnerStatement":
+            return instance.owner_id
     except Exception:
         return None
     return None
@@ -204,6 +225,10 @@ def related_property_id(instance):
             return instance.property_id
         if label in LEASE_CHILD_LABELS:
             return instance.lease.property_id
+        if label == "maintenance.MaintenanceRequest":
+            return instance.property_id
+        if label in ("payables.VendorBill", "payables.Expense"):
+            return instance.property_id
     except Exception:
         return None
     return None
@@ -221,6 +246,10 @@ def related_unit_id(instance):
             return instance.unit_id
         if label in LEASE_CHILD_LABELS:
             return instance.lease.unit_id
+        if label == "maintenance.MaintenanceRequest":
+            return instance.unit_id
+        if label in ("payables.VendorBill", "payables.Expense"):
+            return instance.unit_id
     except Exception:
         return None
     return None
@@ -238,6 +267,10 @@ def related_tenant_id(instance):
             return instance.tenant_id
         if label in LEASE_CHILD_LABELS:
             return instance.lease.tenant_id
+        if label == "maintenance.MaintenanceRequest":
+            return instance.tenant_id
+        if label in ("billing.Receipt", "billing.Invoice", "payables.VendorBill", "payables.Expense"):
+            return instance.tenant_id
     except Exception:
         return None
     return None
@@ -248,7 +281,7 @@ def related_lease_id(instance):
     label = instance._meta.label
     if label == "leases.Lease":
         return instance.pk
-    if label in LEASE_CHILD_LABELS:
+    if label in LEASE_CHILD_LABELS or label in ("billing.Receipt", "billing.Invoice"):
         return instance.lease_id
     return None
 

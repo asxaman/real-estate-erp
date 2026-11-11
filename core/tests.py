@@ -240,7 +240,7 @@ def valid_settings_post(**overrides):
         "company_name": "Test Realty", "company_trn": "", "company_phone": "", "company_email": "",
         "company_address": "", "date_format": "iso", "time_format": "24h", "timezone": "Asia/Dubai",
         "expiry_warning_days": "30", "max_photo_mb": "2", "max_document_mb": "10", "toast_seconds": "5",
-        "development_mode": "on",
+        "maintenance_approval_limit": "2000", "development_mode": "on",
     }
     data.update(overrides)
     return data

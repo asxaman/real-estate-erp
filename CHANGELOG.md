@@ -1,5 +1,75 @@
 # Changelog
 
+## Update 67 - New module: HR & Payroll
+**Migration needed.** Run `python manage.py makemigrations hr`, then `python manage.py migrate`, then `python manage.py test`, then Ctrl+F5 twice.
+- Left menu, new group **HR & Payroll**: Employees, Leave requests, Daily attendance, Attendance records, Payroll, Salary slips. Numbers are automatic: EMP-0001, LV-0001, PAY-0001.
+- **Employees**: personal details, job, department, joining date, weekly days off, salary (basic + housing + transport + other allowance), overtime rate, yearly leave days, and how the salary is paid (bank transfer / cheque / cash). Documents tab: passport, Emirates ID, residence visa, labour card, health insurance, contract, with expiry dates (they appear in Expiring Documents). An employee who has left is marked "Left the company" with the last working day; one with pay or leave on record is never deleted.
+- **Leave**: annual, sick, compassionate, maternity / paternity, unpaid and other paid leave. Working days are counted (the employee's days off are skipped). Annual leave is checked against the yearly entitlement, overlapping requests are refused, and a request is approved or rejected (a reason is needed to reject). Approving needs its own permission.
+- **Daily attendance**: one page for the day lists every employee; choose Present, Late, Half day, Absent, On leave or Public holiday, add overtime hours and a note, and press Save. A button marks everyone not yet marked as present. Days off are not counted unless marked. Approved leave is shown already. Attendance can be corrected until that month's payroll is approved.
+- **Payroll**: choose the month; a salary slip is made for every employee who worked in it. Pay is worked out on a 30-day month: unpaid days (absent, half days, unpaid leave, days before joining or after leaving) are deducted; overtime is paid at the hourly rate (basic / 30 / 8 x the overtime rate). On the Salary Slips tab add extra additions or deductions (advances, fines ...). Slips that need a look (days not marked, leave without an approved request) are flagged.
+- **Draft -> Approved -> Paid.** Approving locks the amounts (and the month's attendance and leave). Paid makes one **payment voucher** for every salary (cash, cheque with its number, or bank transfer). Tick "Recalculate" on a draft after changing attendance or leave.
+- **Bank (WPS) file**: for an approved payroll, "Download bank (WPS) file" makes the SIF salary file for the employees paid by bank transfer (needs the employer ID and routing codes). Check the first file with your bank.
+- **Salary slip**: print / save as PDF, one slip or all of the month's slips.
+- Search, Ctrl+K search (employees), Excel / CSV export, activity log (IBAN and ID numbers are masked).
+- Roles: a new **HR Manager** role (employees, leave, attendance, payroll drafts); the Accountant approves and pays payroll. Property Manager and Leasing Agent see nothing of HR (salaries are private).
+- Sample data and Erase include HR (the sample HR user is demo.hr).
+- Not in this update (planned): end-of-service gratuity, leave pay-out, bonuses.
+
+## Update 66 - New module: Owner Statements
+**Migration needed.** Run `python manage.py makemigrations statements`, then `python manage.py migrate`, then `python manage.py test`, then Ctrl+F5 twice.
+- Left menu, under Payables: **Owner statements** (`/admin/owner-statements/`). Numbers are automatic: STM-0001 ...
+- **Generate**: choose the owner and the period (it offers last month). The statement is built by itself from:
+  - **Rent received**: rent payments marked as paid for the owner's properties (before VAT; deposits and fees are not the owner's money).
+  - **Management fees** from the owner agreement: % of rent collected; the fixed yearly fee (for the days of the period); the % of the yearly contract rent (once, in the statement where the lease starts).
+  - **Guaranteed rent**: for a guaranteed-rent agreement the owner is credited the guaranteed amount for the days of the period, and the rent actually collected is listed "for information" (it stays with the company).
+  - **Costs charged to the owner**: vendor bills and expenses set to "Owner" (cancelled ones are left out).
+- **Nothing is missed or counted twice**: a payment, bill or expense is on one statement only. A bill entered late for an earlier month goes on the next statement. Statements follow each other without gaps or overlaps; an owner's first statement can start on any date.
+- **Adjustment** (+ or -, with a note) on a draft, for example an advance. **Brought forward**: when an owner owes the company, the debt is carried to the next statement.
+- **Draft -> Approved -> Paid.** An approved statement is locked. Setting it to Paid (with how it was paid) makes a **payment voucher** automatically. A wrong statement is voided with a reason; its items are released for a new one. A paid statement cannot be changed.
+- List actions: approve the ticked drafts, rebuild the ticked drafts (to pick up new items).
+- **Print / Save as PDF**: an A4 owner statement with your company details, the lines by section, totals and the payout in words.
+- Owner page: new read-only "Statements" tab. Search, Ctrl+K search, Excel / CSV export, activity log.
+- Roles: Accountant can generate, approve and pay out; Property Manager can generate and view but not approve; Leasing Agent has none.
+- Sample data and Erase include owner statements.
+
+## Update 65 - New module: Expenses, Vendor Bills & Payment Vouchers
+**Migration needed.** Run `python manage.py makemigrations payables`, then `python manage.py migrate`, then `python manage.py test`, then Ctrl+F5 twice.
+- Left menu, new group **Payables**: **Vendor bills** (`/admin/vendor-bills/`), **Expenses** (`/admin/expenses/`), **Payment vouchers** (`/admin/payment-vouchers/`). Numbers are automatic: BILL-0001, EXP-0001, PV-0001.
+- **Vendor bills**: an invoice received from a vendor (vendor, the vendor's own invoice number, bill and due dates, type, property / unit, amount, 5% VAT option, scan). It can be paid in one go or in parts. The list shows Paid, Part Paid, Not Paid and Overdue, with what is left to pay, and quick filters (To Pay, Overdue, Due In 7 Days, Part Paid, Paid, Cancelled). The same vendor invoice number cannot be entered twice.
+- **Record a payment**: on the bill's page, "Record a payment" opens the voucher form with the vendor and the amount left already filled in. Or tick bills and choose "Pay the selected bills in full (today, bank transfer)". You cannot pay more than what is left.
+- **From maintenance**: on the Maintenance Requests list, tick completed jobs and choose "Create vendor bills for the selected jobs". The bill takes the vendor, property, unit, final cost, who pays (owner / tenant / company) and is due 30 days after completion. A job gets one open bill.
+- **Expenses**: costs paid directly with no vendor bill (DEWA, government fees, insurance, bank charges ...). Paid to, type, date, method, reference, amount, VAT, scan. Its payment voucher is made by itself and stays in step if the expense is edited.
+- **Who pays**: every bill and expense is charged to the Company, the Owner (the property's owner) or a Tenant. Costs charged to owners are what the owner statements will use. A property owned by the company is charged to the company.
+- **Payment vouchers**: the proof of money paid out. **Print / Save as PDF** gives a clean A4 page with the company details, who was paid, how, the amount in words and signature lines.
+- Nothing is deleted. A wrong bill or expense is cancelled (with a reason); a wrong voucher is voided (with a reason), which puts the money back on the bill. An issued voucher cannot be changed.
+- Vendor page: new read-only "Bills" tab. Search, Ctrl+K search, Excel / CSV export, activity log.
+- Roles: Accountant has full access; Property Manager can enter bills and expenses and view vouchers; Leasing Agent has none.
+- Sample data and Erase include bills, expenses and vouchers.
+
+## Update 64 - New module: Tenant Receipts & Invoices
+**Migration needed.** Run `python manage.py makemigrations billing`, then `python manage.py migrate`, then `python manage.py test`, then Ctrl+F5 twice.
+- Left menu, under Tenancy: **Receipts** (`/admin/receipts/`) and **Invoices** (`/admin/invoices/`). Numbers are automatic: RCP-0001 ..., INV-0001 ...
+- **Receipts are made by themselves** when a payment is marked as paid (one at a time, in bulk, or from the lease page). Not for refunds or amounts kept from the deposit. If the payment later bounces, its receipt is voided; if its amount is changed, the old receipt is voided and a new one issued.
+- **Invoices**: on the Tenant Payments list, tick payments and choose "Create invoices for the selected payments". Already-invoiced, waived, refund and deduction lines are skipped. The list shows whether each invoice is Paid, Overdue or Not Paid Yet.
+- "Issue receipts for the selected payments" (same list) makes the receipts of paid payments that have none (for example data loaded in bulk).
+- **Print / Save as PDF**: every receipt and invoice opens as a clean A4 page with your company name, address, phone, email and TRN (System settings), the tenant, what it is for, VAT at 5% where it applies, the amount in words, and a VOID stamp when voided. An invoice with VAT is titled "Tax Invoice" when the company TRN is filled in.
+- Documents are never deleted or edited: a wrong one is voided (with a reason) and a new one issued. They keep their wording even if the tenant is renamed or the lease is removed.
+- Tenant page: new read-only tabs "Receipts" and "Invoices". Quick filters, search, Ctrl+K search, Excel / CSV export, activity log (voiding / notes).
+- Roles: Property Manager and Accountant can view, issue, void and export; Leasing Agent can view and issue.
+- Sample data and Erase include receipts and invoices.
+
+## Update 63 - New module: Vendors & Maintenance
+**Migration needed.** Run `python manage.py makemigrations core properties maintenance`, then `python manage.py migrate`, then `python manage.py test`, then Ctrl+F5 twice.
+- New left-menu group **Maintenance** with **Maintenance Requests** (`/admin/maintenance-requests/`) and **Vendors** (`/admin/vendors/`).
+- **Vendors** (VND-0001 ...): the outside companies that do the work. Trade, contact, phone, email, trade licence number, TRN, Documents tab (trade licence, insurance, VAT certificate, contract) with expiry dates, and a Jobs tab. Vendor documents also appear in Expiring Documents. A vendor with open jobs cannot be made inactive; a vendor who has done work cannot be deleted (make them inactive).
+- **Maintenance Requests** (MNT-0001 ...): property and optional unit, the problem, type of work, priority, status (New, Awaiting approval, Approved, In progress, Completed, Rejected, Cancelled), vendor, planned and finished dates, estimate, final cost, vendor invoice scan.
+- **Who pays**: Owner, Tenant or Company. The tenant is filled in by itself from the running lease. "Tenant pays" needs a tenant; a company-owned property is paid by the company.
+- **Approval**: a job above the limit waits as "Awaiting approval" and cannot start until someone with the approval permission approves it (Approval tab, Decision). The limit is the owner's own limit (Owner page, Overview tab) or, when empty, the company-wide limit (System settings, Maintenance tab, AED 2,000 to begin with). If the cost later goes above what was approved, it needs approval again. A rejected job needs a reason and can be reopened.
+- Completed jobs need the vendor and the final cost. Only jobs nobody acted on can be deleted; others are cancelled.
+- New read-only "Maintenance" tab on the Property, Unit and Tenant pages. Quick filters (Open, Awaiting Approval, In Progress, Urgent, Overdue, Completed), search, Ctrl+K search, Excel / CSV export, activity log.
+- Roles: Property Manager full access and can approve; Accountant can view and export; Leasing Agent can log and edit jobs and view vendors.
+- Sample data and Erase include vendors and jobs.
+
 ## Update 62 - The management fee now lives only in the Owner Agreement
 No migration needed. Run `python manage.py migrate` once (it turns fees already entered on properties into agreements), then `python manage.py test`, then Ctrl+F5 twice.
 - The Management Fee boxes (type, percent, fixed) are gone from the Property page. The page shows the fee read-only from the agreement that covers the property today, with a link to open it (or "No running owner agreement - Create one").

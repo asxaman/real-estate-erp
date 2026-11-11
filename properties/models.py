@@ -233,6 +233,12 @@ class Owner(models.Model):
         "Tax registration number (TRN)", max_length=20, blank=True, validators=[validate_trn],
         help_text="Optional. 15 digits. Used later on invoices and statements.",
     )
+    maintenance_approval_limit = models.DecimalField(
+        "Maintenance approval limit (AED)", max_digits=10, decimal_places=2, null=True, blank=True,
+        validators=[MinValueValidator(0)],
+        help_text="Optional. A maintenance job above this amount needs approval before work starts. "
+        "Leave empty to use the company-wide limit from System settings.",
+    )
     notes = models.TextField(blank=True)
     is_active = models.BooleanField(default=True)
     inactive_reason = models.CharField(

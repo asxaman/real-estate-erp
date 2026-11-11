@@ -19,6 +19,12 @@ FOLDER_PERMISSIONS = {
     "property_photos": ("properties.view_propertyphoto",),
     "lease_documents": ("leases.view_leasedocument",),
     "agreement_documents": ("agreements.view_owneragreement",),
+    "vendor_documents": ("maintenance.view_vendordocument",),
+    "maintenance_files": ("maintenance.view_maintenancerequest",),
+    "bill_files": ("payables.view_vendorbill",),
+    "expense_files": ("payables.view_expense",),
+    "employee_documents": ("hr.view_employeedocument",),
+    "leave_files": ("hr.view_leaverequest",),
     "profile_photos": (),  # any signed-in staff member (they appear in the sidebar and user list)
 }
 

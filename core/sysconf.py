@@ -4,6 +4,8 @@ Values from the System settings page, available anywhere without extra database 
 `ensure_current()` runs at the start of every request (core.middleware) and reads the single
 settings row. Other code calls `get("name")` or `expiry_days()`.
 """
+from decimal import Decimal
+
 from . import formats
 
 DEFAULTS = {
@@ -20,6 +22,7 @@ DEFAULTS = {
     "max_document_mb": 10,
     "require_complete_documents": False,
     "toast_seconds": 5,
+    "maintenance_approval_limit": Decimal("2000"),
     "development_mode": True,
 }
 

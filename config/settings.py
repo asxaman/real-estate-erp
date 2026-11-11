@@ -96,7 +96,12 @@ INSTALLED_APPS = [
     "properties",  # Module 1: owners, properties, units
     "tenants",  # Module 2: tenants
     "leases",  # Module 3: leases and tenant payments
+    "statements",  # Module 8: owner statements (what each owner is paid)
+    "payables",  # Module 7: expenses, vendor bills and payment vouchers
+    "billing",  # Module 6: receipts and invoices for tenant payments
+    "maintenance",  # Module 5: vendors and maintenance requests
     "agreements",  # Module 4: owner agreements (the management contract with each owner)
+    "hr",  # Module 9: HR & payroll (employees, leave, attendance, salaries)
 ]
 
 MIDDLEWARE = [
@@ -359,6 +364,111 @@ UNFOLD = {
                         "icon": "payments",
                         "link": reverse_lazy("admin:leases_leasepayment_changelist"),
                         "permission": _can("leases.view_leasepayment"),
+                    },
+                    {
+                        "title": "Receipts",
+                        "icon": "receipt_long",
+                        "link": reverse_lazy("admin:billing_receipt_changelist"),
+                        "permission": _can("billing.view_receipt"),
+                    },
+                    {
+                        "title": "Invoices",
+                        "icon": "request_quote",
+                        "link": reverse_lazy("admin:billing_invoice_changelist"),
+                        "permission": _can("billing.view_invoice"),
+                    },
+                ],
+            },
+            {
+                "title": "Maintenance",
+                "separator": True,
+                "collapsible": True,
+                "items": [
+                    {
+                        "title": "Maintenance requests",
+                        "icon": "build",
+                        "link": reverse_lazy("admin:maintenance_maintenancerequest_changelist"),
+                        "permission": _can("maintenance.view_maintenancerequest"),
+                    },
+                    {
+                        "title": "Vendors",
+                        "icon": "engineering",
+                        "link": reverse_lazy("admin:maintenance_vendor_changelist"),
+                        "permission": _can("maintenance.view_vendor"),
+                    },
+                ],
+            },
+            {
+                "title": "Payables",
+                "separator": True,
+                "collapsible": True,
+                "items": [
+                    {
+                        "title": "Vendor bills",
+                        "icon": "receipt",
+                        "link": reverse_lazy("admin:payables_vendorbill_changelist"),
+                        "permission": _can("payables.view_vendorbill"),
+                    },
+                    {
+                        "title": "Expenses",
+                        "icon": "shopping_cart",
+                        "link": reverse_lazy("admin:payables_expense_changelist"),
+                        "permission": _can("payables.view_expense"),
+                    },
+                    {
+                        "title": "Owner statements",
+                        "icon": "summarize",
+                        "link": reverse_lazy("admin:statements_ownerstatement_changelist"),
+                        "permission": _can("statements.view_ownerstatement"),
+                    },
+                    {
+                        "title": "Payment vouchers",
+                        "icon": "price_check",
+                        "link": reverse_lazy("admin:payables_paymentvoucher_changelist"),
+                        "permission": _can("payables.view_paymentvoucher"),
+                    },
+                ],
+            },
+            {
+                "title": "HR & Payroll",
+                "separator": True,
+                "collapsible": True,
+                "items": [
+                    {
+                        "title": "Employees",
+                        "icon": "badge",
+                        "link": reverse_lazy("admin:hr_employee_changelist"),
+                        "permission": _can("hr.view_employee"),
+                    },
+                    {
+                        "title": "Leave requests",
+                        "icon": "beach_access",
+                        "link": reverse_lazy("admin:hr_leaverequest_changelist"),
+                        "permission": _can("hr.view_leaverequest"),
+                    },
+                    {
+                        "title": "Daily attendance",
+                        "icon": "edit_calendar",
+                        "link": reverse_lazy("admin:hr_attendance_sheet"),
+                        "permission": _can("hr.add_attendance"),
+                    },
+                    {
+                        "title": "Attendance records",
+                        "icon": "event_available",
+                        "link": reverse_lazy("admin:hr_attendance_changelist"),
+                        "permission": _can("hr.view_attendance"),
+                    },
+                    {
+                        "title": "Payroll",
+                        "icon": "payments",
+                        "link": reverse_lazy("admin:hr_payrollrun_changelist"),
+                        "permission": _can("hr.view_payrollrun"),
+                    },
+                    {
+                        "title": "Salary slips",
+                        "icon": "request_page",
+                        "link": reverse_lazy("admin:hr_payrollslip_changelist"),
+                        "permission": _can("hr.view_payrollslip"),
                     },
                 ],
             },

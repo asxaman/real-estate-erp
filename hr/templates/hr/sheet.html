@@ -1,0 +1,61 @@
+{% extends "admin/base_site.html" %}
+
+{% block content %}
+<div class="erp-dash">
+  <form method="get" class="erp-filterbar">
+    <a class="erp-btn erp-btn-light" href="{{ list_url }}">Attendance Records</a>
+    <a class="erp-btn erp-btn-light" href="{{ prev_url }}">&larr; Previous Day</a>
+    <b>{{ day_text }}</b>
+    {% if next_url %}<a class="erp-btn erp-btn-light" href="{{ next_url }}">Next Day &rarr;</a>{% endif %}
+    {% if not is_today %}<a class="erp-btn erp-btn-light" href="?date={{ today_iso }}">Today</a>{% endif %}
+    <input type="date" name="date" value="{{ iso }}" max="{{ today_iso }}" onchange="this.form.submit()">
+    <span class="erp-dash-hello">{{ marked }} of {{ total }} marked. Choose each person's status, then press Save. Days off are not counted unless you mark them.</span>
+  </form>
+  <form method="post" class="erp-panel erp-scroll">
+    {% csrf_token %}
+    <input type="hidden" name="date" value="{{ iso }}">
+    <table class="erp-table">
+      <thead><tr><th>Employee</th><th style="min-width:190px;">Status</th><th style="width:130px;">Overtime (hours)</th><th>Notes</th></tr></thead>
+      <tbody>
+      {% for r in rows %}
+        <tr>
+          <td><b>{{ r.emp.full_name }}</b><br><small>{{ r.emp.code }} · {{ r.emp.job_title }}{% if r.day_off %} · <i>Day off</i>{% endif %}{% if r.on_leave %} · <i>Approved leave</i>{% endif %}{% if r.locked %} · <i>Payroll approved</i>{% endif %}</small></td>
+          {% if r.locked %}
+            <td colspan="3">{{ r.status|default:"-" }} (locked: this month's payroll is already approved)</td>
+          {% else %}
+            <td><select name="s_{{ r.emp.pk }}" data-att-row>
+              <option value="">Not marked</option>
+              {% for value, label in statuses %}<option value="{{ value }}"{% if value == r.status %} selected{% endif %}>{{ label }}</option>{% endfor %}
+            </select></td>
+            <td><input type="number" name="o_{{ r.emp.pk }}" value="{{ r.overtime }}" min="0" max="16" step="0.5" placeholder="0"></td>
+            <td><input type="text" name="n_{{ r.emp.pk }}" value="{{ r.notes }}" maxlength="200" placeholder="Optional"></td>
+          {% endif %}
+        </tr>
+      {% empty %}
+        <tr><td colspan="4">No employee was working on this day.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <div class="erp-filterbar" style="margin-top:12px">
+      <button type="submit" class="erp-btn erp-btn-primary">Save Attendance</button>
+      <button type="button" class="erp-btn erp-btn-light" id="att-fill">Mark Everyone Not Yet Marked As Present</button>
+    </div>
+  </form>
+</div>
+<script>
+(function () {
+  var button = document.getElementById("att-fill");
+  if (!button) { return; }
+  button.addEventListener("click", function () {
+    document.querySelectorAll("select[data-att-row]").forEach(function (select) {
+      var row = select.closest("tr");
+      var dayOff = row && /Day off/.test(row.textContent);
+      if (select.value === "" && !dayOff) {
+        select.value = "present";
+        select.dispatchEvent(new Event("change", {bubbles: true}));
+      }
+    });
+  });
+})();
+</script>
+{% endblock %}
