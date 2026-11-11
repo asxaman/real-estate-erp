@@ -3,9 +3,13 @@ from django.contrib import admin
 from django.urls import path, re_path
 from django.views.generic import RedirectView
 
+from config.admin_site import give_modules_clean_addresses, legacy_redirects
 from core.media import media_view
 from core.overview import dashboard_view, expiring_documents_view
+from core.reports import reports_view
 from core.views import banks_view, data_tools_view, formats_view
+
+give_modules_clean_addresses(admin.site)
 
 urlpatterns = [
     # Superuser-only page with the "Seed sample data" and "Erase all data" buttons.
@@ -16,6 +20,8 @@ urlpatterns = [
     # The home page and the Expiring documents page (also before "admin/").
     path("admin/", admin.site.admin_view(dashboard_view), name="dashboard"),
     path("admin/expiring-documents/", admin.site.admin_view(expiring_documents_view), name="expiring_documents"),
+    path("admin/reports/", admin.site.admin_view(reports_view), name="reports"),
+    *legacy_redirects,
     path("admin/", admin.site.urls),
     path("", RedirectView.as_view(url="/admin/", permanent=False)),
 ]

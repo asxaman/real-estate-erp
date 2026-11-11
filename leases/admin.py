@@ -841,7 +841,6 @@ class LeaseAdmin(LeaseApiMixin, ReportsMixin, ExportPermissionMixin, FilterBarMi
     def changelist_view(self, request, extra_context=None):
         extra_context = dict(extra_context or {})
         extra_context["lease_chips"] = self._chips(request)
-        extra_context["report_links"] = self.report_links()
         return super().changelist_view(request, extra_context)
 
     def _chips(self, request):
@@ -1189,9 +1188,6 @@ class LeasePaymentAdmin(PaymentApiMixin, ExportPermissionMixin, FilterBarMixin, 
         if self.has_change_permission(request):
             extra_context["bulk_url"] = reverse("admin:leases_leasepayment_bulk")
             extra_context["bulk_remove"] = request.user.has_perm("leases.delete_leasepayment")
-        extra_context["report_links"] = [
-            ("Monthly collection", reverse("admin:leases_lease_monthly")), ("Rent roll", reverse("admin:leases_lease_rentroll")),
-        ]
         return super().changelist_view(request, extra_context)
 
     def _strip(self):

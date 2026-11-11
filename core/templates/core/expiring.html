@@ -1,10 +1,11 @@
 {% extends "admin/base_site.html" %}
 
 {% block content %}
-<div class="erp-listtop">
+<div id="content-main" class="erp-listtop">
+  <span hidden data-erp-search-hint="{{ search_hint }}"></span>
   <div class="erp-chips" role="navigation" aria-label="Quick filters">
     <span class="erp-label">Show</span>
-    {% for key, text, url in states %}<a class="erp-chip{% if key == state %} is-active{% endif %}" href="{{ url }}">{{ text }}</a>{% endfor %}
+    {% for key, text, url, count in states %}<a class="erp-chip{% if key == "expired" %} erp-chip-danger{% elif key == "soon" or key == "attention" %} erp-chip-warning{% endif %}{% if key == state %} is-active{% endif %}" href="{{ url }}">{{ text }} <b>{{ count }}</b></a>{% endfor %}
   </div>
   <div class="erp-chips" role="navigation" aria-label="Belongs to and due within">
     <span class="erp-label">Belongs to</span>
@@ -13,7 +14,8 @@
     {% for days, url in windows %}<a class="erp-chip{% if days == window %} is-active{% endif %}" href="{{ url }}">{{ days }} days</a>{% endfor %}
   </div>
 
-  <div class="erp-listwrap">
+  {% if search_note %}<div class="erp-snote">{{ search_note }}</div>{% endif %}
+  <div class="erp-listwrap" id="changelist">
             <div class="flex flex-col flex-wrap gap-3 mb-4 sm:flex-row empty:hidden lg:border lg:border-base-200 lg:dark:border-base-800 lg:-mb-8 lg:p-3 lg:pb-11 lg:rounded-t-default">
       <div class="erp-toolbar-search">
         <form method="get" role="search">
@@ -33,7 +35,8 @@
     <div class="rounded-default lg:rounded-t-none lg:rounded-b-default overflow-x-auto scrollbar-default border border-base-200 shadow-xs dark:border-base-800 bg-white dark:bg-base-900">
       <table class="erp-ul w-full border-spacing-none border-separate" id="result_list">
         <thead><tr>
-          <th class="align-middle font-semibold py-2 text-start text-important whitespace-nowrap px-3" scope="col">Belongs To</th><th class="align-middle font-semibold py-2 text-start text-important whitespace-nowrap px-3" scope="col">Record</th><th class="align-middle font-semibold py-2 text-start text-important whitespace-nowrap px-3" scope="col">Document</th><th class="align-middle font-semibold py-2 text-start text-important whitespace-nowrap px-3" scope="col">Number</th><th class="align-middle font-semibold py-2 text-start text-important whitespace-nowrap px-3" scope="col">Expires On</th><th class="align-middle font-semibold py-2 text-start text-important whitespace-nowrap px-3" scope="col">Status</th><th class="align-middle font-semibold py-2 text-start text-important whitespace-nowrap px-3" scope="col">File</th>
+          {% for h in headings %}<th class="align-middle font-semibold py-2 text-start text-important whitespace-nowrap px-3" scope="col"><a class="erp-sortlink" href="{{ h.url }}">{{ h.label }}{% if h.icon %}<span class="material-symbols-outlined md-18">{{ h.icon }}</span>{% endif %}</a></th>{% endfor %}
+          <th class="align-middle font-semibold py-2 text-start text-important whitespace-nowrap px-3" scope="col">File</th>
         </tr></thead>
         <tbody>
         {% for row in page %}

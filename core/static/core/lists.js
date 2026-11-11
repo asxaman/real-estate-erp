@@ -381,6 +381,7 @@
     function targetUrl() {
       var url = new URL(window.location.href);
       url.searchParams.delete("p");
+      url.searchParams.delete("page");  // (custom list pages call their page number "page")
       var value = input.value.trim();
       if (value) { url.searchParams.set("q", value); } else { url.searchParams.delete("q"); }
       return url;
@@ -398,6 +399,10 @@
       var caret = input.selectionStart;
       freshForm.replaceWith(liveForm);  // keep the box you are typing in
       live.replaceWith(fresh);
+      // the strip at the bottom (count, page numbers) is outside the refreshed part: refresh it too
+      var liveFoot = document.querySelector("#main > .z-40:last-child");
+      var freshFoot = doc.querySelector("#main > .z-40:last-child");
+      if (liveFoot && freshFoot) { liveFoot.replaceWith(freshFoot); }
       if (document.activeElement !== input) {
         input.focus();
         try { input.setSelectionRange(caret, caret); } catch (e) { /* ignore */ }

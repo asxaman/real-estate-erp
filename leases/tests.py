@@ -731,7 +731,7 @@ class ReportsAndLook(Setup):
     def test_payment_strip_and_filters(self):
         url = reverse("admin:leases_leasepayment_changelist")
         page = self.client.get(url)
-        for text in ("Due this week", "Overdue", "Collected this month", "Bounced cheques", "Monthly collection"):
+        for text in ("Due this week", "Overdue", "Collected this month", "Bounced cheques"):
             self.assertContains(page, text)
         for query in ("?received=month", "?received=lastmonth", "?due=week", "?due=overdue", "?status__exact=bounced"):
             self.assertEqual(self.client.get(url + query).status_code, 200, query)

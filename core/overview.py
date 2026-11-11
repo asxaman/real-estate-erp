@@ -179,6 +179,49 @@ def _days_text(days):
     return f"in {days} day{'s' if days != 1 else ''}"
 
 
+SORTS = {
+    "kind": lambda r: (r["kind"], r["who"].lower()),
+    "who": lambda r: r["who"].lower(),
+    "document": lambda r: (r["document"], r["who"].lower()),
+    "number": lambda r: (str(r["number"] or ""), r["who"].lower()),
+    "expiry": lambda r: (r["expiry"], r["kind"], r["who"].lower()),
+    "state": lambda r: (r["days"], r["who"].lower()),
+}
+
+
+def _search_rows(rows, term):
+    """Rows where every typed word is found (any order) in the type, name, document or number. Numbers match by their digits,
+    so 784199010000001 finds 784-1990-1000000-1. When nothing matches, similar names are shown (a typo still finds the record).
+    Returns (rows, used_similar_names)."""
+    import re
+
+    from .search import MAX_WORDS, phone_digits, similar
+
+    words = term.lower().split()[:MAX_WORDS]
+    for row in rows:
+        if "_text" not in row:
+            row["_text"] = f'{row["kind"]} {row["who"]} {row["document"]} {row["number"] or ""}'.lower()
+            row["_digits"] = re.sub(r"\D", "", str(row["number"] or ""))
+
+    def found(row):
+        for word in words:
+            digits = phone_digits(word)
+            if word not in row["_text"] and not (digits and digits in row["_digits"]):
+                return False
+        return True
+
+    hits = [r for r in rows if found(r)]
+    if hits or len(term) < 4:
+        return hits, False
+    wanted = [w for w in words if len(w) >= 3]
+    close = []
+    for row in rows:
+        present = {w for w in re.split(r"[\s\-_/.,()·]+", row["_text"]) if w}
+        if wanted and all(any(similar(w, p) or w in p for p in present) for w in wanted):
+            close.append(row)
+    return close, bool(close)
+
+
 def expiring_documents_view(request):
     window = request.GET.get("days")
     window = int(window) if window and window.isdigit() and int(window) in WINDOWS else sysconf.expiry_days()
@@ -188,10 +231,26 @@ def expiring_documents_view(request):
     state = state if state in ("attention", "expired", "soon", "all") else "attention"
     search = request.GET.get("q", "").strip()
 
-    rows = collect_documents(request, window, kind, state)
+    everything = collect_documents(request, window, kind, "all")
+    counts = {
+        "attention": sum(1 for r in everything if r["state"] != "valid"),
+        "expired": sum(1 for r in everything if r["state"] == "expired"),
+        "soon": sum(1 for r in everything if r["state"] == "soon"),
+        "all": len(everything),
+    }
+    rows = everything if state == "all" else [
+        r for r in everything if (r["state"] != "valid" if state == "attention" else r["state"] == state)
+    ]
+    note = ""
     if search:
-        needle = search.lower()
-        rows = [r for r in rows if needle in f'{r["who"]} {r["document"]} {r["number"]}'.lower()]
+        rows, similar_used = _search_rows(rows, search)
+        if similar_used:
+            note = f"Nothing matches “{search}” exactly, so similar names are shown."
+    order = request.GET.get("o", "")
+    order = order if order in SORTS else ""
+    descending = request.GET.get("d") == "desc"
+    if order:
+        rows = sorted(rows, key=SORTS[order], reverse=descending)
 
     can_export = any(
         request.user.has_perm(p) for p in ("properties.export_owner", "properties.export_property", "tenants.export_tenant")
@@ -215,7 +274,7 @@ def expiring_documents_view(request):
 
     def link(**changes):
         params = {"state": state, "kind": kind, "days": window if window != sysconf.expiry_days() else "", "q": search,
-                  "per": per if per != DEFAULT_PER_PAGE else ""}
+                  "per": per if per != DEFAULT_PER_PAGE else "", "o": order, "d": "desc" if order and descending else ""}
         params.update(changes)
         from urllib.parse import urlencode
 
@@ -234,16 +293,28 @@ def expiring_documents_view(request):
         "state": state,
         "kind": kind,
         "window": window,
-        "search": search, "per": per, "search_placeholder": "Search name, document or number",
+        "search": search, "per": per, "search_placeholder": "Search…",
         "hidden": [("state", state), ("kind", kind), ("days", window)],
         "states": [
-            (key, text, link(state=key, page=""))
+            (key, text, link(state=key, page=""), counts[key])
             for key, text in (("attention", "Needs attention"), ("expired", "Expired"),
                               ("soon", "Expiring soon"), ("all", "All with an expiry date"))
         ],
         "kinds": [("", "Everyone", link(kind="", page=""))]
         + [(label.lower(), f"{label}s", link(kind=label.lower(), page="")) for label in available],
         "windows": [(days, link(days=days, page="")) for days in WINDOWS],
+        "state_counts": counts,
+        "search_note": note,
+        "search_hint": "name, document type or document number",
+        "headings": [
+            {
+                "label": label, "key": key,
+                "url": link(o=key, d="" if (order == key and descending) else ("desc" if order == key else ""), page=""),
+                "icon": ("arrow_downward" if descending else "arrow_upward") if order == key else "",
+            }
+            for key, label in (("kind", "Belongs To"), ("who", "Record"), ("document", "Document"), ("number", "Number"),
+                               ("expiry", "Expires On"), ("state", "Status"))
+        ],
         "export_url": link(export="csv") if can_export else "",
         "per_options": [(n, link(per=n, page=""), n == per) for n in PER_PAGE_CHOICES],
         "jump_url": link(page="__P__"),

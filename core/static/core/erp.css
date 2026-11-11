@@ -924,3 +924,24 @@ html.dark .erp-jump-go:hover { background: #1f2937; }
 td.field-tabular .flex.flex-col.grow { position: relative; }
 td.field-tabular .mt-2.text-red-600 { position: absolute; top: 100%; left: 0; right: 0; margin-top: 4px; line-height: 1.3; z-index: 1; }
 tr.form-row:has(td.errors) > td { padding-bottom: 42px; }
+.erp-sortlink { display: inline-flex; align-items: center; gap: 4px; color: inherit; text-decoration: none; }
+.erp-sortlink:hover { color: #9333ea; }
+.erp-sortlink .material-symbols-outlined { color: #9333ea; }
+.erp-reportgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
+.erp-reportcard { display: flex; flex-direction: column; gap: 6px; padding: 18px; border: 1px solid #e5e7eb; border-radius: 10px; background: #fff; text-decoration: none; color: inherit; }
+.erp-reportcard:hover { border-color: #9333ea; box-shadow: 0 1px 6px rgba(147, 51, 234, .15); }
+.erp-reportcard .material-symbols-outlined { color: #9333ea; font-size: 28px; }
+.erp-reportcard b { font-size: 16px; }
+.erp-reportcard small { color: #6b7280; font-size: 13px; line-height: 1.4; }
+html.dark .erp-reportcard { background: #111827; border-color: #1f2937; }
+html.dark .erp-reportcard small { color: #9ca3af; }
+.erp-drawer-original { display: none !important; }
+.erp-drawer { position: fixed; top: 50%; left: 0; transform: translateY(-50%); z-index: 61; width: 18px; height: 64px; padding: 0;
+  display: flex; align-items: center; justify-content: center; cursor: pointer; background: #fff; color: #6b7280;
+  border: 1px solid #e5e7eb; border-left: 0; border-radius: 0 10px 10px 0; box-shadow: 1px 1px 4px rgba(0, 0, 0, .08);
+  transition: width .12s, color .12s, background .12s; }
+.erp-drawer:hover { width: 24px; color: #fff; background: #9333ea; border-color: #9333ea; }
+.erp-drawer .material-symbols-outlined { font-size: 18px; }
+html.dark .erp-drawer { background: #111827; border-color: #374151; color: #9ca3af; }
+html.dark .erp-drawer:hover { background: #9333ea; border-color: #9333ea; color: #fff; }
+@media print { .erp-drawer { display: none !important; } }

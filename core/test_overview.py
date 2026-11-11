@@ -99,6 +99,40 @@ class ExpiringDocumentsPage(TestCase):
         self.assertEqual(len(self.rows("?days=bogus&kind=nonsense&state=nonsense")), 2)  # bad values are ignored
         self.assertEqual([r["who"] for r in self.rows("?state=all&q=visa")], ["Overview Tenant"])
 
+    def test_search_is_like_the_other_lists(self):
+        page = self.client.get(self.url)
+        self.assertContains(page, "data-erp-search-hint")  # gives the search box its "i" icon and live search
+        self.assertContains(page, 'id="changelist"')
+        self.assertContains(page, 'id="content-main"')
+        self.assertContains(page, 'placeholder="Search…"')
+
+    def test_word_search_any_order_and_typos(self):
+        names = lambda q: [r["who"] for r in self.rows("?state=all&q=" + q)]
+        self.assertEqual(names("tenant+visa"), ["Overview Tenant"])  # words in any order, across columns
+        self.assertEqual(names("visa+tenant"), ["Overview Tenant"])
+        self.assertEqual(names("nothingmatches"), [])
+        near = self.client.get(self.url, {"state": "all", "q": "Overvew"})  # a typo still finds it
+        self.assertEqual(len(near.context["page"].object_list) > 0, True)
+        self.assertContains(near, "similar names are shown")
+
+    def test_number_search_ignores_dashes(self):
+        owner = Owner.objects.get(name="Overview Owner")
+        OwnerDocument.objects.create(
+            owner=owner, doc_type="emirates_id", number="784-1990-1234567-1", expiry_date=timezone.localdate() - timedelta(days=2)
+        )
+        self.assertEqual(len(self.rows("?state=expired&q=784199012345671")), 1)
+        self.assertEqual(len(self.rows("?state=expired&q=1234567")), 1)
+
+    def test_chip_counts_and_sorting(self):
+        page = self.client.get(self.url)
+        self.assertEqual(page.context["state_counts"], {"attention": 2, "expired": 1, "soon": 1, "all": 4})
+        self.assertContains(page, "erp-sortlink")
+        asc = [r["who"] for r in self.rows("?state=all&o=who")]
+        desc = [r["who"] for r in self.rows("?state=all&o=who&d=desc")]
+        self.assertEqual(asc, sorted(asc, key=str.lower))
+        self.assertEqual(desc, asc[::-1])
+        self.assertEqual(len(self.rows("?o=bogus")), 2)  # an unknown sort is ignored
+
     def test_csv_download(self):
         response = self.client.get(self.url + "?state=all&export=csv")
         self.assertIn("attachment", response["Content-Disposition"])
@@ -156,3 +190,68 @@ class NewPermissionsForExistingRoles(TestCase):
         self.assertTrue(manager.permissions.filter(codename="delete_propertydocument").exists())
         self.assertTrue(accountant.permissions.filter(codename="view_unitdocument").exists())
         self.assertFalse(accountant.permissions.filter(codename="change_unitdocument").exists())
+
+
+class ReportsPage(TestCase):
+    def setUp(self):
+        self.boss = User.objects.create_superuser("rep", "r@example.com", "pw-12345-xyz")
+        self.client.force_login(self.boss)
+
+    def test_reports_page_lists_the_reports(self):
+        page = self.client.get(reverse("reports"))
+        self.assertEqual(page.status_code, 200)
+        self.assertContains(page, "Rent Roll")
+        self.assertContains(page, "Monthly Collection")
+        self.assertContains(page, reverse("admin:leases_lease_rentroll"))
+
+    def test_reports_are_no_longer_in_the_lease_and_payment_lists(self):
+        for name in ("admin:leases_lease_changelist", "admin:leases_leasepayment_changelist"):
+            html = self.client.get(reverse(name)).content.decode()
+            self.assertNotIn(reverse("admin:leases_lease_rentroll"), html, name)
+            self.assertNotIn(reverse("admin:leases_lease_monthly"), html, name)
+            self.assertNotIn("erp-reports", html, name)
+
+    def test_menu_has_reports_and_staff_without_rights_see_none(self):
+        self.assertContains(self.client.get("/admin/"), reverse("reports"))
+        User.objects.create_user("plain2", password="pw-12345-xyz", is_staff=True)
+        self.client.force_login(User.objects.get(username="plain2"))
+        self.assertContains(self.client.get(reverse("reports")), "no reports available")
+
+
+class CleanAddresses(TestCase):
+    def setUp(self):
+        self.boss = User.objects.create_superuser("addr", "a@example.com", "pw-12345-xyz")
+        self.client.force_login(self.boss)
+
+    def test_every_module_has_its_own_plain_address(self):
+        expected = {
+            "admin:properties_owner_changelist": "/admin/owners/",
+            "admin:properties_property_changelist": "/admin/properties/",
+            "admin:properties_unit_changelist": "/admin/units/",
+            "admin:tenants_tenant_changelist": "/admin/tenants/",
+            "admin:leases_lease_changelist": "/admin/leases/",
+            "admin:leases_leasepayment_changelist": "/admin/tenant-payments/",
+            "admin:auth_user_changelist": "/admin/users/",
+            "admin:core_systemsettings_changelist": "/admin/system-settings/",
+        }
+        for name, address in expected.items():
+            self.assertEqual(reverse(name), address)
+            if name != "admin:core_systemsettings_changelist":  # (that one goes straight to the settings form)
+                self.assertEqual(self.client.get(address).status_code, 200, address)
+
+    def test_old_addresses_still_work(self):
+        response = self.client.get("/admin/leases/leasepayment/?status__exact=bounced")
+        self.assertEqual(response.status_code, 301)
+        self.assertEqual(response["Location"], "/admin/tenant-payments/?status__exact=bounced")
+        self.assertEqual(self.client.get("/admin/properties/owner/add/")["Location"], "/admin/owners/add/")
+        self.assertEqual(self.client.get("/admin/properties/property/7/change/")["Location"], "/admin/properties/7/change/")
+
+    def test_the_reports_live_under_reports(self):
+        self.assertEqual(reverse("admin:leases_lease_rentroll"), "/admin/reports/rent-roll/")
+        self.assertEqual(reverse("admin:leases_lease_monthly"), "/admin/reports/monthly/")
+        for name in ("admin:leases_lease_rentroll", "admin:leases_lease_monthly"):
+            self.assertContains(self.client.get(reverse(name)), 'href="' + reverse("reports") + '"')  # the Back to Reports button
+
+    def test_lease_reports_keep_working(self):
+        self.assertEqual(self.client.get(reverse("admin:leases_lease_rentroll")).status_code, 200)
+        self.assertEqual(self.client.get(reverse("admin:leases_lease_monthly")).status_code, 200)

@@ -1892,3 +1892,55 @@
     init();
   }
 })();
+
+/* The drawer handle: a small tab fixed at the middle of the left edge that opens and closes the side panel, so it is always
+   in reach however far the page is scrolled. It presses Unfold's own button (kept in the page, hidden), so both behave the same. */
+(function () {
+  "use strict";
+  function setUp() {
+    var main = document.getElementById("main");
+    // the button in the top bar (the side panel has one of its own for phones: that one is left alone)
+    var original = main && main.querySelector('[x-on\\:click="sidebarToggle()"]');
+    var panel = document.querySelector('[x-show="sidebarOpen"]');
+    if (!original || !panel || document.querySelector(".erp-drawer")) { return; }
+    var holder = original.parentElement;
+    if (holder) {
+      holder.classList.add("erp-drawer-original");
+      var line = holder.nextElementSibling;  // the thin divider next to the old button
+      if (line && line.classList.contains("w-px")) { line.classList.add("erp-drawer-original"); }
+    }
+    var handle = document.createElement("button");
+    handle.type = "button";
+    handle.className = "erp-drawer";
+    var icon = document.createElement("span");
+    icon.className = "material-symbols-outlined";
+    handle.appendChild(icon);
+    document.body.appendChild(handle);
+
+    function place() {
+      // sits on the right edge of the side panel when it is open (also when the panel lies over the page on a
+      // narrow window), and on the left edge of the screen when it is closed
+      var box = panel.getBoundingClientRect();
+      var open = window.getComputedStyle(panel).display !== "none" && box.width > 20;
+      var left = open ? Math.max(0, Math.round(box.right)) : 0;
+      handle.style.left = Math.min(left, window.innerWidth - 24) + "px";
+      icon.textContent = open ? "chevron_left" : "chevron_right";
+      handle.setAttribute("aria-label", open ? "Hide the side panel" : "Show the side panel");
+      handle.setAttribute("aria-expanded", open ? "true" : "false");
+    }
+    handle.addEventListener("click", function () {
+      original.click();
+      [0, 60, 150, 320, 600].forEach(function (ms) { window.setTimeout(place, ms); });
+    });
+    window.addEventListener("resize", place);
+    if (window.ResizeObserver) { new ResizeObserver(place).observe(panel); }
+    if (window.MutationObserver) { new MutationObserver(place).observe(panel, { attributes: true, attributeFilter: ["style", "class"] }); }
+    place();
+    window.setTimeout(place, 400);
+  }
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", setUp);
+  } else {
+    setUp();
+  }
+})();

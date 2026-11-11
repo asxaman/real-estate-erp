@@ -1,5 +1,30 @@
 # Changelog
 
+## Update 58 - Drawer handle for the side panel
+No migration needed. Ctrl+F5 twice.
+- The button that opens and closes the left panel moved from the top bar to a small handle fixed at the middle of the left edge. It stays in reach however far the page is scrolled, on every page.
+## Update 57c - Reports have their own addresses
+No migration needed. Restart the server, run `python manage.py test`, then Ctrl+F5 twice.
+- Rent Roll is now `/admin/reports/rent-roll/` and Monthly Collection `/admin/reports/monthly/` (they used to sit under `/admin/leases/`).
+- Both pages say "Back to Reports" and go back to the Reports page (Rent Roll said "Back to Leases" and Monthly Collection went to Leases).
+
+## Update 57 - One clean address per module
+No migration needed. Run `python manage.py test`, then Ctrl+F5 twice.
+- Every module now has its own plain address instead of looking like it sits inside another one: Owners `/admin/owners/`, Properties `/admin/properties/`, Units `/admin/units/`, Tenants `/admin/tenants/`, Leases `/admin/leases/`, Tenant Payments `/admin/tenant-payments/`, Users `/admin/users/`, System Settings `/admin/system-settings/`. The grouping stays only in the left menu.
+- Old addresses (for example `/admin/leases/leasepayment/`) still work and send you to the new one, so bookmarks do not break.
+- Nothing in the database or the app folders changed.
+- (57b) Fixed the first try, which made modules open a "Page not found": Unfold supplies its own admin site, so the addresses are now rewritten on that site.
+## Update 56 - New "Reports" module
+No migration needed. Run `python manage.py test`, then Ctrl+F5 twice.
+- New menu section "Reports" with a Reports page that lists every report (Rent Roll, Monthly Collection). Click a card to open the report.
+- Removed the "Reports: Rent roll, Monthly collection" links from the top of the Leases and Tenant Payments lists.
+- Future reports only need one line in `core/reports.py` and appear on the page automatically (shown only to users allowed to see them).
+## Update 55 - Expiring Documents now behaves like the other lists
+No migration needed. Run `python manage.py test`, then Ctrl+F5 twice.
+- Search box has the "i" icon (what you can search by), live as-you-type search, and yellow highlight of the matches, like every other list.
+- Smarter search: several words in any order across type, name, document and number; numbers match without dashes or spaces; a small typo still finds the record (with a "similar names are shown" note).
+- The Show chips (Needs Attention, Expired, Expiring Soon, All) now show counts; column headings can be clicked to sort.
+- Fixed in all lists: after a live search the bottom strip (count and page numbers) now refreshes too, and the page number resets.
 ## Update 54 - No "Showing N" line at the top of lists
 No migration needed. Run `python manage.py test`, then Ctrl+F5 twice.
 - Removed the "Showing 0" / "Showing 56" line above every list (the count is already in the bottom strip). When a filter or search is in use, the line with the filter tags and "Clear all" still appears. Same for Expiring Documents; Rent Roll keeps only "Running leases on <date>".

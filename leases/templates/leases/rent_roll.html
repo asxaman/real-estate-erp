@@ -18,7 +18,7 @@
           </div>
         </form>
       </div>
-        <a class="bg-white border-base-200 hover:text-primary-600 dark:bg-base-900 dark:border-base-700 dark:hover:text-primary-500 border cursor-pointer flex font-medium gap-2 group items-center px-3 py-2 rounded-default shadow-xs text-sm lg:ml-auto md:mt-0" href="{{ list_url }}">Back to Leases <span class="material-symbols-outlined md-18 ml-auto">arrow_back</span></a>
+        <a class="bg-white border-base-200 hover:text-primary-600 dark:bg-base-900 dark:border-base-700 dark:hover:text-primary-500 border cursor-pointer flex font-medium gap-2 group items-center px-3 py-2 rounded-default shadow-xs text-sm lg:ml-auto md:mt-0" href="{{ list_url }}">Back to Reports <span class="material-symbols-outlined md-18 ml-auto">arrow_back</span></a>
         {% if can_export %}
         <a class="bg-white border-base-200 hover:text-primary-600 dark:bg-base-900 dark:border-base-700 dark:hover:text-primary-500 border cursor-pointer flex font-medium gap-2 group items-center px-3 py-2 rounded-default shadow-xs text-sm lg:ml-auto md:mt-0" href="?export=xlsx{% if export_query %}&{{ export_query }}{% endif %}">Excel <span class="material-symbols-outlined md-18 ml-auto">download</span></a>
         <a class="bg-white border-base-200 hover:text-primary-600 dark:bg-base-900 dark:border-base-700 dark:hover:text-primary-500 border cursor-pointer flex font-medium gap-2 group items-center px-3 py-2 rounded-default shadow-xs text-sm lg:ml-auto md:mt-0" href="?export=csv{% if export_query %}&{{ export_query }}{% endif %}">CSV <span class="material-symbols-outlined md-18 ml-auto">download</span></a>

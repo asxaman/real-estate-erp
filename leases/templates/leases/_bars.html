@@ -1,8 +1,3 @@
-<div class="erp-toolbar">
-  <div class="erp-reports">
-    {% if report_links %}<span>Reports</span>{% for label, url in report_links %}<a href="{{ url }}">{{ label }}</a>{% endfor %}{% endif %}
-  </div>
-</div>
 {% if filter_bar or per_options %}
 <div class="erp-fbar" role="group" aria-label="Filters">
   {% for f in filter_bar %}

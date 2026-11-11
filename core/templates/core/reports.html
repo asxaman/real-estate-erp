@@ -1,0 +1,19 @@
+{% extends "admin/base_site.html" %}
+
+{% block content %}
+<div class="erp-dash">
+  {% if reports %}
+  <div class="erp-reportgrid">
+    {% for r in reports %}
+    <a class="erp-reportcard" href="{{ r.url }}">
+      <span class="material-symbols-outlined">{{ r.icon }}</span>
+      <b>{{ r.title }}</b>
+      <small>{{ r.text }}</small>
+    </a>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="erp-panel"><div class="erp-empty">There are no reports available for your role.</div></div>
+  {% endif %}
+</div>
+{% endblock %}

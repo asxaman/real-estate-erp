@@ -278,11 +278,11 @@ UNFOLD = {
     "SHOW_VIEW_ON_SITE": False,
     # Our own small style/behaviour layer (info icons, compact forms).
     # Bump the ?v= number whenever these files change so browsers reload them.
-    "STYLES": [lambda request: static("core/erp.css") + "?v=50"],
+    "STYLES": [lambda request: static("core/erp.css") + "?v=54"],
     "SCRIPTS": [
-        lambda request: static("core/erp.js") + "?v=32",
+        lambda request: static("core/erp.js") + "?v=34",
         lambda request: static("core/leases.js") + "?v=16",
-        lambda request: static("core/lists.js") + "?v=9",
+        lambda request: static("core/lists.js") + "?v=10",
     ],
     "SIDEBAR": {
         "show_search": True,
@@ -352,6 +352,19 @@ UNFOLD = {
                         "icon": "payments",
                         "link": reverse_lazy("admin:leases_leasepayment_changelist"),
                         "permission": _can("leases.view_leasepayment"),
+                    },
+                ],
+            },
+            {
+                "title": "Reports",
+                "separator": True,
+                "collapsible": True,
+                "items": [
+                    {
+                        "title": "Reports",
+                        "icon": "assessment",
+                        "link": reverse_lazy("reports"),
+                        "permission": _can("leases.view_lease"),
                     },
                 ],
             },

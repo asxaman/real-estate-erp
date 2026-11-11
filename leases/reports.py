@@ -119,17 +119,10 @@ class ReportsMixin:
     def get_urls(self):
         wrap = self.admin_site.admin_view
         custom = [
-            path("rent-roll/", wrap(self.rent_roll_view), name="leases_lease_rentroll"),
-            path("monthly/", wrap(self.monthly_view), name="leases_lease_monthly"),
+            # (the Rent Roll and Monthly Collection reports are at /admin/reports/..., see config/admin_site.py)
             path("<int:pk>/print/<str:kind>/", wrap(self.print_view), name="leases_lease_print"),
         ]
         return custom + super().get_urls()
-
-    def report_links(self):
-        return [
-            ("Rent roll", reverse("admin:leases_lease_rentroll")),
-            ("Monthly collection", reverse("admin:leases_lease_monthly")),
-        ]
 
     def _page(self, request, template, title, **context):
         return TemplateResponse(request, template, {**self.admin_site.each_context(request), "title": title, **context})
@@ -178,7 +171,7 @@ class ReportsMixin:
             next_url=link(page=page.next_page_number()) if page.has_next() else "",
             export_query=urlencode({"q": search}) if search else "",
             can_export=self.has_export_permission(request),
-            list_url=reverse("admin:leases_lease_changelist"),
+            list_url=reverse("reports"),
         )
 
     def monthly_view(self, request):
@@ -197,7 +190,7 @@ class ReportsMixin:
         return self._page(
             request, "leases/monthly.html", f"Monthly collection {year}", rows=rows, total=total, year=year,
             prev_url=f"{base}?year={year - 1}", next_url=f"{base}?year={year + 1}",
-            list_url=reverse("admin:leases_lease_changelist"),
+            list_url=reverse("reports"),
         )
 
     def print_view(self, request, pk, kind):
