@@ -11,8 +11,10 @@ from payables.models import PaymentVoucher
 
 from .models import (
     Attendance,
+    Bonus,
     Employee,
     EmployeeDocument,
+    FinalSettlement,
     LeaveRequest,
     PayrollRun,
     PayrollSlip,
@@ -32,12 +34,14 @@ def _all(*models):
 
 # role -> permission codenames (a role that does not exist is skipped, except the HR Manager, which is made)
 ROLE_PERMISSIONS = {
-    HR_ROLE: _all("employee", "employeedocument", "leaverequest", "attendance", "payrollrun")
-    + ["view_payrollslip", "change_payrollslip", "approve_leaverequest", "export_employee", "export_leaverequest", "export_attendance",
+    HR_ROLE: _all("employee", "employeedocument", "leaverequest", "attendance", "payrollrun", "bonus", "finalsettlement")
+    + ["export_bonus", "export_finalsettlement", "view_payrollslip", "change_payrollslip", "approve_leaverequest", "export_employee", "export_leaverequest", "export_attendance",
        "export_payrollrun", "export_payrollslip"],
     "Accountant": ["view_employee", "view_employeedocument", "view_leaverequest", "view_attendance", "add_payrollrun", "change_payrollrun",
                    "view_payrollrun", "view_payrollslip", "change_payrollslip", "approve_payrollrun", "export_payrollrun", "export_payrollslip",
-                   "export_employee"],
+                   "export_employee",
+                   "view_bonus", "change_bonus", "approve_bonus", "view_finalsettlement", "change_finalsettlement", "approve_finalsettlement",
+                   "export_bonus", "export_finalsettlement"],
     "Property Manager": [],
     "Leasing Agent": [],
 }
@@ -154,13 +158,29 @@ def seed_hr() -> str:
     draft = PayrollRun(month=month_start(today), notes="Sample data")
     draft.full_clean()
     draft.save()
+    # An approved bonus for this month (added to the draft payroll), and a draft settlement for someone who has just left
+    bonus = Bonus(employee=rashid, kind="commission", pay_month=month_start(today), amount=D("1500"), reason="Q3 leasing target", status="approved",
+                  approved_by=user, approved_on=today)
+    bonus.full_clean()
+    bonus.save()
+    leaver = Employee(full_name="Omar Latif", job_title="Property inspector", department="maintenance", nationality="Egypt", basic_salary=D("3500"),
+                      housing_allowance=D("1200"), transport_allowance=D("300"), pay_method="cash", join_date=today - timedelta(days=4 * 365 + 120),
+                      status="terminated", end_date=today - timedelta(days=2), end_reason="Resigned", phone="+971 50 000 2099", email="omar@example.com", gender="M")
+    leaver.full_clean()
+    leaver.save()
+    settlement = FinalSettlement(employee=leaver, notes="Sample data")
+    settlement.full_clean()
+    settlement.save()
     return f"{Employee.objects.count()} employees, {LeaveRequest.objects.count()} leave requests, {Attendance.objects.count()} attendance records, {PayrollRun.objects.count()} payroll runs"
 
 
 def erase_hr() -> str:
     counts = (PayrollRun.objects.count(), LeaveRequest.objects.count(), Attendance.objects.count(), Employee.objects.count())
     salary_vouchers = PayrollSlip.objects.exclude(voucher=None).values_list("voucher_id", flat=True)
-    PaymentVoucher.objects.filter(pk__in=list(salary_vouchers)).delete()
+    settlement_vouchers = FinalSettlement.objects.exclude(voucher=None).values_list("voucher_id", flat=True)
+    PaymentVoucher.objects.filter(pk__in=list(salary_vouchers) + list(settlement_vouchers)).delete()
+    FinalSettlement.objects.all().delete()
+    Bonus.objects.all().delete()
     PayrollRun.objects.all().delete()
     LeaveRequest.objects.all().delete()
     Attendance.objects.all().delete()

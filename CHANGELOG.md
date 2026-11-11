@@ -1,5 +1,20 @@
 # Changelog
 
+## Update 68 - HR & Payroll: Bonuses and Final Settlements (gratuity, unused leave)
+**Migration needed.** Run `python manage.py makemigrations hr`, then `python manage.py migrate`, then `python manage.py test`, then Ctrl+F5 twice.
+- Left menu, HR & Payroll: **Bonuses** (`/admin/bonuses/`) and **Final settlements** (`/admin/final-settlements/`). Numbers: BON-0001, EOS-0001.
+- **Bonuses**: bonus, commission, incentive or other one-off payment for an employee, with the salary month it is paid with. Once **approved** it is added to that month's salary slip (a draft payroll updates by itself; an approved payroll is locked, so choose a later month). It also shows on the printed slip and goes into the bank (WPS) file as variable pay. Cancel instead of deleting.
+- **Final settlement** for an employee who has left (set them to "Left the company" with the last working day first):
+  - **Gratuity** (UAE labour law): 21 days of basic pay for each of the first 5 years, 30 days for each year after, in proportion for part years, nothing under 1 year, never more than 2 years' basic pay. A day is basic salary / 30. Approved unpaid leave does not count as service.
+  - **Unused annual leave**: leave earned over the service (yearly entitlement in proportion) minus annual leave taken, paid at the daily basic rate.
+  - Add other additions (pay in place of notice ...) and deductions (loans, phone ...) with notes.
+  - Draft -> Approved -> Paid. Approving locks the amounts; Paid makes a **payment voucher** (cash, cheque with number, or transfer). One open settlement per employee.
+  - **Print / Save as PDF** with a signature line for the employee.
+  - The last month's salary is still paid through Payroll (the slip is pro-rated to the last working day).
+- Roles: HR Manager creates bonuses and settlements; the Accountant approves them and records the payment.
+- Sample data includes an approved bonus and a draft settlement.
+- Not yet: salary advances / loans with instalments, and leave pay-out while still employed.
+
 ## Update 67 - New module: HR & Payroll
 **Migration needed.** Run `python manage.py makemigrations hr`, then `python manage.py migrate`, then `python manage.py test`, then Ctrl+F5 twice.
 - Left menu, new group **HR & Payroll**: Employees, Leave requests, Daily attendance, Attendance records, Payroll, Salary slips. Numbers are automatic: EMP-0001, LV-0001, PAY-0001.

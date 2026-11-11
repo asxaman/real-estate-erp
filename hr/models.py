@@ -670,6 +670,8 @@ class PayrollSlip(models.Model):
 
     overtime_hours = models.DecimalField("Overtime (hours)", max_digits=6, decimal_places=1, default=0)
     overtime_amount = models.DecimalField("Overtime pay", max_digits=10, decimal_places=2, default=0)
+    bonus_amount = models.DecimalField("Bonuses", max_digits=10, decimal_places=2, default=0, editable=False)
+    bonus_note = models.CharField(max_length=200, blank=True, editable=False)
     other_additions = models.DecimalField("Other additions", max_digits=10, decimal_places=2, default=0, validators=MONEY)
     additions_note = models.CharField("Additions: what for", max_length=120, blank=True)
     other_deductions = models.DecimalField("Other deductions", max_digits=10, decimal_places=2, default=0, validators=MONEY)
@@ -705,14 +707,14 @@ class PayrollSlip(models.Model):
 
     @property
     def total_additions(self):
-        return self.gross + self.overtime_amount + self.other_additions
+        return self.gross + self.overtime_amount + self.bonus_amount + self.other_additions
 
     @property
     def total_deductions(self):
         return self.absence_deduction + self.other_deductions
 
     def recalculate(self):
-        self.net = cents(self.gross + self.overtime_amount + self.other_additions - self.absence_deduction - self.other_deductions)
+        self.net = cents(self.gross + self.overtime_amount + self.bonus_amount + self.other_additions - self.absence_deduction - self.other_deductions)
 
     def clean(self):
         self.recalculate()
@@ -793,6 +795,9 @@ class PayrollSlip(models.Model):
         self.absence_deduction = cents(self.gross * (D(SALARY_DAYS) - payable) / SALARY_DAYS)
         self.overtime_hours = overtime
         self.overtime_amount = cents(overtime * employee.overtime_hour_rate)
+        bonuses = list(employee.bonuses.filter(pay_month=first, status="approved"))
+        self.bonus_amount = sum((b.amount for b in bonuses), D("0"))
+        self.bonus_note = ", ".join(f"{b.get_kind_display()}" + (f" ({b.reason})" if b.reason else "") for b in bonuses)[:200]
         notes = []
         if counts["unmarked"]:
             notes.append(f"{counts['unmarked']} working day(s) not marked in attendance (counted as worked)")
@@ -802,3 +807,255 @@ class PayrollSlip(models.Model):
             notes.append("no IBAN")
         self.warning = "; ".join(notes)[:250]
         self.recalculate()
+
+
+# ---------------------------------------------------------------------------------------
+# Bonuses
+# ---------------------------------------------------------------------------------------
+class Bonus(models.Model):
+    """A one-off extra payment (bonus, commission ...) that is added to the salary slip of the month it is paid with."""
+
+    class Kind(models.TextChoices):
+        BONUS = "bonus", "Bonus"
+        COMMISSION = "commission", "Commission"
+        INCENTIVE = "incentive", "Incentive"
+        OTHER = "other", "Other"
+
+    class Status(models.TextChoices):
+        PENDING = "pending", "Waiting for approval"
+        APPROVED = "approved", "Approved"
+        CANCELLED = "cancelled", "Cancelled"
+
+    code = models.CharField("Bonus no.", max_length=20, unique=True, null=True, blank=True, editable=False)
+    employee = models.ForeignKey(Employee, on_delete=models.PROTECT, related_name="bonuses")
+    kind = models.CharField("Type", max_length=10, choices=Kind.choices, default=Kind.BONUS)
+    pay_month = models.DateField("Paid with the salary of", help_text="The salary month whose slip this is added to.")
+    amount = models.DecimalField("Amount (AED)", max_digits=10, decimal_places=2)
+    reason = models.CharField(max_length=120, blank=True)
+    status = models.CharField(max_length=10, choices=Status.choices, default=Status.PENDING)
+    approved_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+", editable=False)
+    approved_on = models.DateField(null=True, blank=True, editable=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-pay_month", "-id"]
+        verbose_name = "bonus"
+        verbose_name_plural = "Bonuses"
+        permissions = [
+            ("approve_bonus", "Can approve bonuses"),
+            ("export_bonus", "Can export bonuses to Excel / CSV"),
+        ]
+
+    def __str__(self):
+        return f"{self.code or 'New'} · {self.employee.full_name}"
+
+    def _locked(self, month):
+        return PayrollSlip.objects.filter(employee_id=self.employee_id, run__month=month, run__status__in=("approved", "paid")).exists()
+
+    def clean(self):
+        errors = {}
+        S = self.Status
+        old = type(self).objects.filter(pk=self.pk).first() if self.pk else None
+        if self.pay_month:
+            self.pay_month = month_start(self.pay_month)
+        if self.amount is not None and self.amount <= 0:
+            errors["amount"] = "The amount must be more than zero."
+        if self.employee_id and self.pay_month:
+            emp = self.employee
+            if emp.join_date > month_end(self.pay_month):
+                errors["pay_month"] = f"This employee joined on {emp.join_date:%d %b %Y}."
+            elif emp.end_date and emp.end_date < self.pay_month:
+                errors["pay_month"] = f"This employee left on {emp.end_date:%d %b %Y}."
+            same = old is not None and (old.pay_month, old.amount, old.status, old.kind) == (self.pay_month, self.amount, self.status, self.kind)
+            if not errors and not same and (self._locked(self.pay_month) or (old is not None and self._locked(old.pay_month))):
+                errors["pay_month"] = f"Payroll for {self.pay_month:%B %Y} is already approved. Choose a later month."
+        if old is not None:
+            if old.status == S.CANCELLED and self.status != S.CANCELLED:
+                errors["status"] = "A cancelled bonus stays cancelled. Make a new one."
+            elif old.status == S.APPROVED and self.status == S.PENDING:
+                errors["status"] = "An approved bonus cannot go back to waiting. Cancel it and make a new one."
+        if errors:
+            raise ValidationError(errors)
+
+    def save(self, *args, **kwargs):
+        old = type(self).objects.filter(pk=self.pk).first() if self.pk else None
+        if self.pay_month:
+            self.pay_month = month_start(self.pay_month)
+        if self.code:
+            super().save(*args, **kwargs)
+        else:
+            save_with_unique_code(self, lambda: _next_code(Bonus, "BON"), lambda: super(Bonus, self).save(*args, **kwargs))
+        # a draft payroll for the month picks the change up by itself
+        months = {self.pay_month} | ({old.pay_month} if old is not None else set())
+        for run in PayrollRun.objects.filter(month__in=months, status="draft"):
+            run.rebuild()
+
+
+# ---------------------------------------------------------------------------------------
+# Final settlement (end of service)
+# ---------------------------------------------------------------------------------------
+class FinalSettlement(models.Model):
+    """What an employee who leaves is owed: gratuity (UAE labour law) and unused annual leave, less any deductions."""
+
+    class Status(models.TextChoices):
+        DRAFT = "draft", "Draft"
+        APPROVED = "approved", "Approved"
+        PAID = "paid", "Paid"
+        CANCELLED = "cancelled", "Cancelled"
+
+    code = models.CharField("Settlement no.", max_length=20, unique=True, null=True, blank=True, editable=False)
+    employee = models.ForeignKey(Employee, on_delete=models.PROTECT, related_name="settlements")
+    join_date = models.DateField(null=True, blank=True, editable=False)
+    last_day = models.DateField(null=True, blank=True, editable=False)
+    service_days = models.PositiveIntegerField(default=0, editable=False)
+    unpaid_leave_days = models.PositiveIntegerField(default=0, editable=False)
+    service_years = models.DecimalField(max_digits=6, decimal_places=2, default=0, editable=False)
+    basic_salary = models.DecimalField(max_digits=10, decimal_places=2, default=0, editable=False)
+    gratuity = models.DecimalField("End-of-service gratuity", max_digits=12, decimal_places=2, default=0, editable=False)
+    leave_days_due = models.DecimalField(max_digits=6, decimal_places=1, default=0, editable=False)
+    leave_pay = models.DecimalField("Unused leave pay", max_digits=12, decimal_places=2, default=0, editable=False)
+    other_additions = models.DecimalField(
+        "Other additions", max_digits=12, decimal_places=2, default=0, validators=MONEY,
+        help_text="For example pay in place of notice, or the last month's salary if it is not in a payroll.",
+    )
+    additions_note = models.CharField("Additions: what for", max_length=120, blank=True)
+    other_deductions = models.DecimalField("Other deductions", max_digits=12, decimal_places=2, default=0, validators=MONEY)
+    deductions_note = models.CharField("Deductions: what for", max_length=120, blank=True)
+    net = models.DecimalField("Total to pay (AED)", max_digits=12, decimal_places=2, default=0, editable=False)
+    status = models.CharField(max_length=10, choices=Status.choices, default=Status.DRAFT)
+    approved_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="+", editable=False)
+    approved_on = models.DateField(null=True, blank=True, editable=False)
+    pay_method = models.CharField("Paid by", max_length=10, choices=Employee.PayMethod.choices, default=Employee.PayMethod.TRANSFER)
+    payment_reference = models.CharField("Cheque no. / transfer reference", max_length=60, blank=True)
+    paid_on = models.DateField(null=True, blank=True)
+    voucher = models.ForeignKey(PaymentVoucher, on_delete=models.SET_NULL, null=True, blank=True, related_name="+", editable=False)
+    cancel_reason = models.CharField("Reason for cancelling", max_length=200, blank=True)
+    notes = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-id"]
+        verbose_name = "final settlement"
+        verbose_name_plural = "Final settlements"
+        constraints = [models.UniqueConstraint(fields=["employee"], condition=~Q(status="cancelled"), name="one_open_settlement_per_employee",
+                                               violation_error_message="This employee already has a final settlement.")]
+        permissions = [
+            ("approve_finalsettlement", "Can approve final settlements and record their payment"),
+            ("export_finalsettlement", "Can export final settlements to Excel / CSV"),
+        ]
+
+    def __str__(self):
+        return f"{self.code or 'New'} · {self.employee.full_name}"
+
+    @property
+    def service_text(self):
+        years, days = divmod(self.service_days, 365)
+        return f"{years} year(s) {days} day(s)"
+
+    # ---- the calculation -------------------------------------------------------------------------
+    def calculate(self):
+        emp = self.employee
+        self.join_date, self.last_day = emp.join_date, emp.end_date
+        if not self.last_day:
+            return
+        total = (self.last_day - self.join_date).days + 1
+        unpaid = 0
+        for leave in emp.leaves.filter(status="approved", kind="unpaid", start_date__lte=self.last_day):
+            start, end = max(leave.start_date, self.join_date), min(leave.end_date, self.last_day)
+            unpaid += max(0, (end - start).days + 1)
+        self.unpaid_leave_days = unpaid
+        self.service_days = max(0, total - unpaid)
+        years = D(self.service_days) / D(365)
+        self.service_years = years.quantize(D("0.01"), rounding=ROUND_HALF_UP)
+        self.basic_salary = emp.basic_salary
+        daily = emp.basic_salary / SALARY_DAYS
+        if years < 1:
+            gratuity = D("0")
+        else:
+            # 21 days of basic pay for each of the first 5 years, 30 days for each year after; never more than 2 years' basic pay
+            gratuity = min(years, D(5)) * 21 * daily + max(years - 5, D("0")) * 30 * daily
+            gratuity = min(gratuity, emp.basic_salary * 24)
+        self.gratuity = cents(gratuity)
+        accrued = D(emp.annual_leave_days) * self.service_days / D(365)
+        taken = sum(
+            emp.working_days_between(l.start_date, min(l.end_date, self.last_day))
+            for l in emp.leaves.filter(status="approved", kind="annual", start_date__lte=self.last_day)
+        )
+        self.leave_days_due = max(D("0"), accrued - taken).quantize(D("0.1"), rounding=ROUND_HALF_UP)
+        self.leave_pay = cents(self.leave_days_due * daily)
+        self.recalculate()
+
+    def recalculate(self):
+        self.net = cents(self.gratuity + self.leave_pay + self.other_additions - self.other_deductions)
+
+    # ---- rules -----------------------------------------------------------------------------------
+    def clean(self):
+        errors = {}
+        S = self.Status
+        old = type(self).objects.filter(pk=self.pk).first() if self.pk else None
+        if self.employee_id:
+            emp = self.employee
+            if old is None and (emp.status != Employee.Status.TERMINATED or not emp.end_date):
+                errors["employee"] = "Only an employee who has left can have a final settlement. Set them to 'Left the company' with the last working day first."
+            elif self.status in (S.DRAFT, S.APPROVED) or old is None:
+                self.calculate()
+                if self.net < 0:
+                    errors["other_deductions"] = "The deductions are more than the amount due."
+        if old is not None:
+            errors.update(self._transition_errors(old))
+        if errors:
+            raise ValidationError(errors)
+
+    def _transition_errors(self, old):
+        S = self.Status
+        errors = {}
+        allowed = {S.DRAFT: (S.DRAFT, S.APPROVED, S.CANCELLED), S.APPROVED: (S.APPROVED, S.DRAFT, S.PAID, S.CANCELLED),
+                   S.PAID: (S.PAID,), S.CANCELLED: (S.CANCELLED,)}
+        if self.status not in allowed[S(old.status)]:
+            errors["status"] = {S.PAID: "A paid settlement cannot be changed. Void its payment voucher if the payment was wrong.",
+                                S.CANCELLED: "A cancelled settlement stays cancelled. Make a new one."}.get(S(old.status), "This status change is not allowed.")
+            return errors
+        if old.status != S.DRAFT and (old.other_additions, old.other_deductions) != (self.other_additions, self.other_deductions):
+            errors["other_deductions"] = "This settlement is approved. Put it back to Draft before changing the amounts."
+        if self.status == S.PAID and old.status != S.PAID:
+            if self.paid_on is None:
+                errors["paid_on"] = "Enter the date it was paid."
+            elif self.paid_on > timezone.localdate():
+                errors["paid_on"] = "The payment date cannot be in the future."
+            if self.pay_method == "cheque" and not self.payment_reference.strip():
+                errors["payment_reference"] = "Enter the cheque number."
+        if self.status == S.CANCELLED and old.status != S.CANCELLED and not (self.cancel_reason or "").strip():
+            errors["cancel_reason"] = "Write the reason for cancelling this settlement."
+        return errors
+
+    def save(self, *args, **kwargs):
+        adding = self._state.adding
+        old = None if adding else FinalSettlement.objects.filter(pk=self.pk).first()
+        if adding or old.status == self.Status.DRAFT:
+            self.calculate()
+        if self.status != self.Status.CANCELLED:
+            self.cancel_reason = ""
+        if self.status == self.Status.PAID and not self.paid_on:
+            self.paid_on = timezone.localdate()
+        if self.code:
+            super().save(*args, **kwargs)
+        else:
+            save_with_unique_code(self, lambda: _next_code(FinalSettlement, "EOS"), lambda: super(FinalSettlement, self).save(*args, **kwargs))
+        if old is not None and old.status == self.Status.APPROVED and self.status == self.Status.PAID:
+            self._record_payment()
+
+    def _record_payment(self):
+        from core.audit import suppressed
+
+        if self.voucher_id or self.net <= 0:
+            return
+        voucher = PaymentVoucher(
+            payee_name=self.employee.full_name, description=f"End of service settlement {self.code}, {self.employee.code}"[:250], amount=self.net,
+            method=self.pay_method, voucher_date=self.paid_on or timezone.localdate(),
+            cheque_number=self.payment_reference[:30] if self.pay_method == "cheque" else "",
+            reference=self.payment_reference[:60] if self.pay_method != "cheque" else "", notes=f"Settlement {self.code}",
+        )
+        with suppressed():
+            voucher.save()
+        type(self).objects.filter(pk=self.pk).update(voucher=voucher)
+        self.voucher = voucher

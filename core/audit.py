@@ -50,6 +50,8 @@ AUDITED_MODELS = (
     "hr.EmployeeDocument",
     "hr.LeaveRequest",
     "hr.PayrollRun",
+    "hr.Bonus",
+    "hr.FinalSettlement",
     "core.SystemSettings",
     "auth.User",
 )

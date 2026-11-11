@@ -470,6 +470,18 @@ UNFOLD = {
                         "link": reverse_lazy("admin:hr_payrollslip_changelist"),
                         "permission": _can("hr.view_payrollslip"),
                     },
+                    {
+                        "title": "Bonuses",
+                        "icon": "card_giftcard",
+                        "link": reverse_lazy("admin:hr_bonus_changelist"),
+                        "permission": _can("hr.view_bonus"),
+                    },
+                    {
+                        "title": "Final settlements",
+                        "icon": "logout",
+                        "link": reverse_lazy("admin:hr_finalsettlement_changelist"),
+                        "permission": _can("hr.view_finalsettlement"),
+                    },
                 ],
             },
             {

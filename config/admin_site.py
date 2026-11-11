@@ -30,6 +30,8 @@ ROUTES = {
     "hr/attendance": "attendance",
     "hr/payrollrun": "payroll",
     "hr/payrollslip": "salary-slips",
+    "hr/bonus": "bonuses",
+    "hr/finalsettlement": "final-settlements",
     "auth/user": "users",
     "auth/group": "groups",
     "core/systemsettings": "system-settings",

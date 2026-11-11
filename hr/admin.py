@@ -25,8 +25,10 @@ from properties.owner_admin import DocumentFormSet, ReadOnlyInline
 
 from .models import (
     Attendance,
+    Bonus,
     Employee,
     EmployeeDocument,
+    FinalSettlement,
     LeaveRequest,
     PayrollRun,
     PayrollSlip,
@@ -36,6 +38,8 @@ from .models import (
 
 D = Decimal
 METHOD_TEXT = dict(Employee.PayMethod.choices)
+SETTLE_TONES = {"draft": "warning", "approved": "info", "paid": "success", "cancelled": "neutral"}
+BONUS_TONES = {"pending": "warning", "approved": "success", "cancelled": "neutral"}
 RUN_TONES = {"draft": "warning", "approved": "info", "paid": "success", "cancelled": "neutral"}
 LEAVE_TONES = {"pending": "warning", "approved": "success", "rejected": "danger", "cancelled": "neutral"}
 ATT_TONES = {"present": "success", "late": "warning", "half_day": "warning", "absent": "danger", "leave": "info", "holiday": "neutral"}
@@ -1037,6 +1041,8 @@ class PayrollSlipAdmin(ExportPermissionMixin, SmartSearchMixin, RowsPerPageMixin
         rows = [("Basic salary", obj.basic), ("Housing allowance", obj.housing), ("Transport allowance", obj.transport), ("Other allowance", obj.other_allowance)]
         if obj.overtime_amount:
             rows.append((f"Overtime ({obj.overtime_hours:g} h)", obj.overtime_amount))
+        if obj.bonus_amount:
+            rows.append((f"Bonus: {obj.bonus_note}".strip(": "), obj.bonus_amount))
         if obj.other_additions:
             rows.append((f"Additions: {obj.additions_note}".strip(": "), obj.other_additions))
         lines = [format_html("<tr><td>{}</td><td style='text-align:right'>{}</td></tr>", label, f"{value:,.2f}") for label, value in rows if value]
@@ -1081,3 +1087,335 @@ def slip_rows(queryset):
         yield [s.run.code, s.run.title, s.run.get_status_display(), s.employee_code, s.employee_name, s.basic, s.housing, s.transport, s.other_allowance,
                s.payable_days, s.absence_deduction, s.overtime_hours, s.overtime_amount, s.other_additions, s.other_deductions, s.net,
                METHOD_TEXT[s.pay_method], s.bank_name, s.iban]
+
+
+# ---------------------------------------------------------------------------------------
+# Bonuses
+# ---------------------------------------------------------------------------------------
+BONUS_HEADERS = ["Bonus no.", "Employee no.", "Employee", "Type", "Paid with salary of", "Amount (AED)", "Reason", "Status", "Approved on"]
+
+
+def bonus_rows(queryset):
+    for b in queryset.select_related("employee"):
+        yield [b.code, b.employee.code, b.employee.full_name, b.get_kind_display(), b.pay_month.strftime("%B %Y"), b.amount, b.reason,
+               b.get_status_display(), b.approved_on or ""]
+
+
+def bonus_month_choices(current=None):
+    today = timezone.localdate()
+    first = month_start(today)
+    names = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
+    out = []
+    for back in range(-1, 13):
+        year, month = first.year, first.month - back
+        while month < 1:
+            month, year = month + 12, year - 1
+        while month > 12:
+            month, year = month - 12, year + 1
+        out.append((f"{year}-{month:02d}-01", f"{names[month - 1]} {year}"))
+    if current and current.isoformat() not in dict(out):
+        out.append((current.isoformat(), current.strftime("%B %Y")))
+    return out
+
+
+class BonusForm(ShowHiddenErrors, forms.ModelForm):
+    pay_month = forms.TypedChoiceField(label="Paid with the salary of", coerce=date.fromisoformat, widget=None)
+
+    class Meta:
+        model = Bonus
+        fields = "__all__"
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        current = self.instance.pay_month if self.instance.pk else None
+        field = self.fields["pay_month"]
+        field.choices = bonus_month_choices(current)
+        field.widget = select_widget()
+        field.widget.choices = field.choices
+        field.help_text = "The salary month whose slip this is added to."
+        if current:
+            self.initial["pay_month"] = current.isoformat()
+        else:
+            self.initial["pay_month"] = f"{timezone.localdate():%Y-%m-01}"
+        if "reason" in self.fields:
+            self.fields["reason"].widget.attrs["placeholder"] = "e.g. Target achieved in Q3"
+        if "employee" in self.fields:
+            self.fields["employee"].queryset = Employee.objects.filter(
+                Q(status="active") | Q(pk=self.instance.employee_id if self.instance.pk else None))
+
+
+@admin.register(Bonus)
+class BonusAdmin(ExportPermissionMixin, SmartSearchMixin, RowsPerPageMixin, TooltipHelpMixin, ModelAdmin):
+    form = BonusForm
+    compressed_fields = True
+    autocomplete_fields = ["employee"]
+    list_display = ("code", "employee_link", "type_text", "month", "amount_text", "state")
+    list_display_links = ("code",)
+    list_filter = ("kind", "status")
+    list_select_related = ("employee",)
+    search_fields = ("code", "employee__full_name", "employee__code", "reason")
+    search_text = ("code", "employee__full_name", "employee__code", "reason")
+    search_codes = (("code", "BON", 4),)
+    search_fuzzy = ("employee__full_name",)
+    search_hint = "bonus number (BON-12) or employee name"
+    actions = ["approve_selected", "export_excel", "export_csv"]
+
+    def get_fieldsets(self, request, obj=None):
+        if obj is None:
+            return ((None, {"fields": ("employee", "kind", "pay_month", "amount", "reason"),
+                            "description": "An approved bonus is added to the employee's salary slip for the chosen month."}),)
+        return ((None, {"fields": ("employee", "kind", "pay_month", "amount", "reason", "status")}),)
+
+    def get_readonly_fields(self, request, obj=None):
+        if obj is None:
+            return ()
+        locked = ["employee"]
+        if obj.status == "cancelled":
+            locked += ["kind", "pay_month", "amount", "reason", "status"]
+        if not request.user.has_perm("hr.approve_bonus"):
+            locked += ["status"]
+        return locked
+
+    def save_model(self, request, obj, form, change):
+        if change and "status" in form.changed_data and obj.status == "approved":
+            obj.approved_by, obj.approved_on = request.user, timezone.localdate()
+        super().save_model(request, obj, form, change)
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    def get_actions(self, request):
+        actions = super().get_actions(request)
+        actions.pop("delete_selected", None)
+        if not request.user.has_perm("hr.approve_bonus"):
+            actions.pop("approve_selected", None)
+        return actions
+
+    @admin.action(description="Approve selected bonuses")
+    def approve_selected(self, request, queryset):
+        done = 0
+        for bonus in queryset.filter(status="pending").select_related("employee"):
+            bonus.status, bonus.approved_by, bonus.approved_on = "approved", request.user, timezone.localdate()
+            try:
+                bonus.full_clean()
+            except ValidationError as error:
+                self.message_user(request, f"{bonus.code} was not approved: " + " ".join(error.messages), messages.WARNING)
+                continue
+            bonus.save()
+            done += 1
+        if done:
+            self.message_user(request, f"{done} bonus(es) approved.", messages.SUCCESS)
+
+    def quick_chips(self):
+        return [
+            ("pending", "Waiting For Approval", "warning", Q(status="pending")),
+            ("approved", "Approved", "success", Q(status="approved")),
+            ("month", "This Month", "info", Q(pay_month=month_start(timezone.localdate()))),
+            ("cancelled", "Cancelled", "neutral", Q(status="cancelled")),
+        ]
+
+    @admin.display(description="Employee", ordering="employee__full_name")
+    def employee_link(self, obj):
+        return format_html('<a href="{}" style="font-weight:600">{}</a>', reverse("admin:hr_employee_change", args=[obj.employee_id]), obj.employee.full_name)
+
+    @admin.display(description="Type", ordering="kind")
+    def type_text(self, obj):
+        return obj.get_kind_display()
+
+    @admin.display(description="Salary of", ordering="pay_month")
+    def month(self, obj):
+        return f"{obj.pay_month:%B %Y}"
+
+    @admin.display(description="Amount", ordering="amount")
+    def amount_text(self, obj):
+        return money(obj.amount)
+
+    @admin.display(description="Status", ordering="status")
+    def state(self, obj):
+        return badge(obj.get_status_display(), BONUS_TONES[obj.status])
+
+    @admin.action(description="Export selected bonuses to Excel", permissions=["export"])
+    def export_excel(self, request, queryset):
+        return exports.excel_response("Bonuses", BONUS_HEADERS, bonus_rows(queryset), "bonuses")
+
+    @admin.action(description="Export selected bonuses to CSV", permissions=["export"])
+    def export_csv(self, request, queryset):
+        return exports.csv_response(BONUS_HEADERS, bonus_rows(queryset), "bonuses")
+
+
+# ---------------------------------------------------------------------------------------
+# Final settlements
+# ---------------------------------------------------------------------------------------
+SETTLE_HEADERS = ["Settlement no.", "Employee no.", "Employee", "Joined", "Last working day", "Service (years)", "Basic (AED)", "Gratuity (AED)",
+                  "Unused leave (days)", "Unused leave pay (AED)", "Other additions (AED)", "Other deductions (AED)", "Total to pay (AED)", "Status", "Paid on"]
+
+
+def settlement_rows(queryset):
+    for e in queryset.select_related("employee"):
+        yield [e.code, e.employee.code, e.employee.full_name, e.join_date, e.last_day, e.service_years, e.basic_salary, e.gratuity, e.leave_days_due,
+               e.leave_pay, e.other_additions, e.other_deductions, e.net, e.get_status_display(), e.paid_on or ""]
+
+
+class SettlementForm(ShowHiddenErrors, forms.ModelForm):
+    class Meta:
+        model = FinalSettlement
+        fields = "__all__"
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if "employee" in self.fields and not self.instance.pk:
+            self.fields["employee"].queryset = Employee.objects.filter(status="terminated", end_date__isnull=False).exclude(
+                pk__in=FinalSettlement.objects.exclude(status="cancelled").values("employee_id"))
+        for name in ("notes",):
+            if name in self.fields:
+                self.fields[name].widget.attrs["rows"] = 3
+        if "payment_reference" in self.fields:
+            self.fields["payment_reference"].widget.attrs["placeholder"] = "cheque number or transfer reference"
+
+
+@admin.register(FinalSettlement)
+class FinalSettlementAdmin(ExportPermissionMixin, SmartSearchMixin, RowsPerPageMixin, TooltipHelpMixin, ModelAdmin):
+    form = SettlementForm
+    compressed_fields = True
+    autocomplete_fields = ["employee"]
+    list_display = ("code", "employee_link", "last", "service", "gratuity_text", "leave_text", "net_text", "state")
+    list_display_links = ("code",)
+    list_filter = ("status",)
+    list_select_related = ("employee",)
+    search_fields = ("code", "employee__full_name", "employee__code")
+    search_text = ("code", "employee__full_name", "employee__code")
+    search_codes = (("code", "EOS", 4),)
+    search_fuzzy = ("employee__full_name",)
+    search_hint = "settlement number (EOS-12) or employee name"
+    actions = ["export_excel", "export_csv"]
+
+    def get_urls(self):
+        info = self.model._meta.app_label, self.model._meta.model_name
+        mine = [path("<path:object_id>/print/", self.admin_site.admin_view(self.print_view), name="%s_%s_print" % info)]
+        return mine + super().get_urls()
+
+    def get_fieldsets(self, request, obj=None):
+        if obj is None:
+            return ((None, {"fields": ("employee", "notes"),
+                            "description": "Only employees who have left the company (with a last working day) are listed. The gratuity and the unused leave are worked out for you."}),)
+        fieldsets = [(None, {"fields": ("settlement_view",)})]
+        if obj.status == "draft":
+            fieldsets.append(("Adjustments And Status", {"classes": ["tab"], "fields": (("other_additions", "additions_note"), ("other_deductions", "deductions_note"),
+                                                                                       "status", "cancel_reason", "notes")}))
+        elif obj.status == "approved":
+            fieldsets.append(("Payment", {"classes": ["tab"], "description": "To record the payment, set Status to Paid and fill in how it was paid. A payment voucher is made for you.",
+                              "fields": ("pay_method", "payment_reference", "paid_on", "status", "cancel_reason", "notes")}))
+        else:
+            fieldsets.append(("Details", {"classes": ["tab"], "fields": ("pay_method", "payment_reference", "paid_on", "cancel_reason", "notes")}))
+        return fieldsets
+
+    def get_readonly_fields(self, request, obj=None):
+        if obj is None:
+            return ()
+        locked = ["settlement_view", "employee"]
+        if obj.status in ("paid", "cancelled"):
+            locked += ["status", "pay_method", "payment_reference", "paid_on", "cancel_reason", "other_additions", "additions_note",
+                       "other_deductions", "deductions_note", "notes"]
+        if not request.user.has_perm("hr.approve_finalsettlement"):
+            locked += ["status", "pay_method", "payment_reference", "paid_on", "cancel_reason"]
+        return locked
+
+    def save_model(self, request, obj, form, change):
+        if change and "status" in form.changed_data and obj.status == "approved":
+            obj.approved_by, obj.approved_on = request.user, timezone.localdate()
+        super().save_model(request, obj, form, change)
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    def get_actions(self, request):
+        actions = super().get_actions(request)
+        actions.pop("delete_selected", None)
+        return actions
+
+    def response_post_save_add(self, request, obj):
+        self.message_user(request, f"Settlement {obj.code} was worked out. Check it, then approve it.", messages.SUCCESS)
+        return HttpResponseRedirect(reverse("admin:hr_finalsettlement_change", args=[obj.pk]))
+
+    def quick_chips(self):
+        return [
+            ("draft", "Draft", "warning", Q(status="draft")),
+            ("topay", "Approved (To Pay)", "info", Q(status="approved")),
+            ("paid", "Paid", "success", Q(status="paid")),
+            ("cancelled", "Cancelled", "neutral", Q(status="cancelled")),
+        ]
+
+    @admin.display(description="Employee", ordering="employee__full_name")
+    def employee_link(self, obj):
+        return format_html('<a href="{}" style="font-weight:600">{}</a>', reverse("admin:hr_employee_change", args=[obj.employee_id]), obj.employee.full_name)
+
+    @admin.display(description="Last day", ordering="last_day")
+    def last(self, obj):
+        return fmt_date(obj.last_day)
+
+    @admin.display(description="Service")
+    def service(self, obj):
+        return obj.service_text
+
+    @admin.display(description="Gratuity", ordering="gratuity")
+    def gratuity_text(self, obj):
+        return money(obj.gratuity)
+
+    @admin.display(description="Unused leave", ordering="leave_pay")
+    def leave_text(self, obj):
+        return money(obj.leave_pay)
+
+    @admin.display(description="Total", ordering="net")
+    def net_text(self, obj):
+        return money(obj.net)
+
+    @admin.display(description="Status", ordering="status")
+    def state(self, obj):
+        return badge(obj.get_status_display(), SETTLE_TONES[obj.status])
+
+    def breakdown(self, obj):
+        rows = [
+            (f"Gratuity ({obj.service_text}, basic AED {obj.basic_salary:,.2f})", obj.gratuity),
+            (f"Unused annual leave ({obj.leave_days_due:g} days)", obj.leave_pay),
+        ]
+        if obj.other_additions:
+            rows.append((f"Additions: {obj.additions_note}".strip(": "), obj.other_additions))
+        lines = [format_html("<tr><td>{}</td><td style='text-align:right'>{}</td></tr>", label, f"{value:,.2f}") for label, value in rows]
+        if obj.other_deductions:
+            lines.append(format_html("<tr><td>{}</td><td style='text-align:right'>- {}</td></tr>",
+                                     f"Deductions: {obj.deductions_note}".strip(": "), f"{obj.other_deductions:,.2f}"))
+        return lines
+
+    @admin.display(description="")
+    def settlement_view(self, obj):
+        if obj is None or not obj.pk:
+            return ""
+        stats = [(money(obj.net), "Total to pay"), (obj.service_text, "Service"), (fmt_date(obj.last_day), "Last working day")]
+        return format_html(
+            '<div class="erp-owner-header"><div class="erp-oh-main"><div class="erp-oh-name">{} · <a href="{}">{}</a></div><div class="erp-oh-pills">{}</div>'
+            '<div class="erp-oh-sub">{}</div></div><div class="erp-oh-stats">{}</div></div>'
+            '<table class="erp-table" style="max-width:560px;margin:12px 0"><tbody>{}</tbody></table>'
+            '<p style="margin:12px 0"><a class="erp-qbtn erp-qbtn-primary" href="{}" target="_blank">Print / Save as PDF</a></p>',
+            obj.code, reverse("admin:hr_employee_change", args=[obj.employee_id]), obj.employee.full_name, badge(obj.get_status_display(), SETTLE_TONES[obj.status]),
+            "The last month's salary is paid through Payroll, not here.", format_html_join("", '<div class="erp-oh-stat"><b>{}</b><span>{}</span></div>', stats),
+            format_html_join("", "{}", ((l,) for l in self.breakdown(obj))), reverse("admin:hr_finalsettlement_print", args=[obj.pk]),
+        )
+
+    def print_view(self, request, object_id):
+        from django.template.loader import render_to_string
+
+        obj = self.get_object(request, object_id)
+        if obj is None or not self.has_view_permission(request, obj):
+            raise Http404
+        html = render_to_string("hr/settlement_print.html", {
+            "s": obj, "back": reverse("admin:hr_finalsettlement_change", args=[obj.pk]), "title": f"Final settlement {obj.employee.full_name}",
+            "company": company(), "words": amount_in_words(obj.net), "method": METHOD_TEXT[obj.pay_method], "today": fmt_date(timezone.localdate())}, request)
+        return HttpResponse(html)
+
+    @admin.action(description="Export selected settlements to Excel", permissions=["export"])
+    def export_excel(self, request, queryset):
+        return exports.excel_response("Final settlements", SETTLE_HEADERS, settlement_rows(queryset), "final-settlements")
+
+    @admin.action(description="Export selected settlements to CSV", permissions=["export"])
+    def export_csv(self, request, queryset):
+        return exports.csv_response(SETTLE_HEADERS, settlement_rows(queryset), "final-settlements")

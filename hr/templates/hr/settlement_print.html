@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ title }}</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #eef0f3; font: 13px/1.5 -apple-system, "Segoe UI", Roboto, Arial, sans-serif; color: #1f2937; }
+  .bar { max-width: 860px; margin: 16px auto 0; padding: 0 16px; display: flex; gap: 10px; justify-content: space-between; }
+  .bar a, .bar button { font: inherit; padding: 8px 16px; border-radius: 8px; border: 1px solid #cbd5e1; background: #fff; color: #1f2937; text-decoration: none; cursor: pointer; }
+  .bar button { background: #4f46e5; border-color: #4f46e5; color: #fff; font-weight: 600; }
+  .sheet { max-width: 860px; margin: 12px auto 24px; background: #fff; padding: 40px 44px; border-radius: 6px; box-shadow: 0 1px 6px rgba(0,0,0,.12); page-break-after: always; }
+  .top { display: flex; justify-content: space-between; gap: 24px; border-bottom: 2px solid #1f2937; padding-bottom: 16px; }
+  .company b { font-size: 20px; display: block; }
+  .company span { display: block; color: #4b5563; font-size: 12px; white-space: pre-line; }
+  .doc { text-align: right; }
+  .doc h1 { margin: 0; font-size: 22px; letter-spacing: .04em; text-transform: uppercase; }
+  .doc span { display: block; color: #4b5563; }
+  .meta { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 24px; margin: 18px 0 8px; }
+  .meta div { display: flex; justify-content: space-between; border-bottom: 1px solid #eef0f3; padding: 3px 0; }
+  .meta span { color: #6b7280; }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-top: 14px; }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: #6b7280; border-bottom: 1px solid #d1d5db; padding: 8px 0; }
+  td { padding: 5px 0; border-bottom: 1px solid #eef0f3; }
+  .num { text-align: right; white-space: nowrap; padding-left: 12px; }
+  .tot td { font-weight: 700; border-top: 1px solid #1f2937; border-bottom: 0; }
+  .net { margin-top: 18px; display: flex; justify-content: space-between; align-items: baseline; border-top: 2px solid #1f2937; padding-top: 10px; font-size: 18px; font-weight: 700; }
+  .words { margin-top: 10px; padding: 10px 14px; background: #f3f4f6; border-radius: 6px; font-style: italic; }
+  .sign { display: flex; justify-content: space-between; gap: 40px; margin-top: 48px; }
+  .sign div { flex: 1; border-top: 1px solid #6b7280; padding-top: 4px; color: #6b7280; font-size: 12px; }
+  .foot { margin-top: 22px; font-size: 11px; color: #6b7280; text-align: center; }
+  @media print { body { background: #fff; } .bar { display: none; } .sheet { box-shadow: none; margin: 0; max-width: none; padding: 0; border-radius: 0; } @page { size: A4; margin: 14mm; } }
+  @media (max-width: 600px) { .sheet { padding: 20px; } .top, .meta, .cols { display: block; } .doc { text-align: left; margin-top: 12px; } }
+</style>
+</head>
+<body>
+<div class="bar">
+  <a href="{{ back }}">&larr; Back</a>
+  <button type="button" onclick="window.print()">Print / Save as PDF</button>
+</div>
+<div class="sheet">
+  <div class="top">
+    <div class="company">
+      <b>{{ company.name }}</b>
+      {% if company.address %}<span>{{ company.address }}</span>{% endif %}
+      {% if company.phone or company.email %}<span>{{ company.phone }}{% if company.phone and company.email %} · {% endif %}{{ company.email }}</span>{% endif %}
+    </div>
+    <div class="doc"><h1>Final Settlement</h1><span><b>{{ s.code }}</b></span>{% if s.status == "draft" %}<span>(Draft)</span>{% endif %}</div>
+  </div>
+  <div class="meta">
+    <div><span>Employee</span><b>{{ s.employee.full_name }}</b></div>
+    <div><span>Employee no.</span><b>{{ s.employee.code }}</b></div>
+    <div><span>Job title</span>{{ s.employee.job_title }}</div>
+    <div><span>Basic salary</span>AED {{ s.basic_salary|floatformat:"2g" }}</div>
+    <div><span>Joined</span>{{ s.join_date|date:"d M Y" }}</div>
+    <div><span>Last working day</span>{{ s.last_day|date:"d M Y" }}</div>
+    <div><span>Service</span>{{ s.service_text }}{% if s.unpaid_leave_days %} (without {{ s.unpaid_leave_days }} unpaid leave days){% endif %}</div>
+    <div><span>Paid by</span>{{ method }}{% if s.payment_reference %} ({{ s.payment_reference }}){% endif %}</div>
+  </div>
+  <div class="cols" style="grid-template-columns:1fr">
+    <table>
+      <thead><tr><th>Item</th><th class="num">AED</th></tr></thead>
+      <tbody>
+        <tr><td>End-of-service gratuity</td><td class="num">{{ s.gratuity|floatformat:"2g" }}</td></tr>
+        <tr><td>Unused annual leave ({{ s.leave_days_due|floatformat:"-1" }} days)</td><td class="num">{{ s.leave_pay|floatformat:"2g" }}</td></tr>
+        {% if s.other_additions %}<tr><td>{{ s.additions_note|default:"Other additions" }}</td><td class="num">{{ s.other_additions|floatformat:"2g" }}</td></tr>{% endif %}
+        {% if s.other_deductions %}<tr><td>Less: {{ s.deductions_note|default:"Other deductions" }}</td><td class="num">- {{ s.other_deductions|floatformat:"2g" }}</td></tr>{% endif %}
+      </tbody>
+    </table>
+  </div>
+  <div class="net"><span>Total to pay</span><span>AED {{ s.net|floatformat:"2g" }}</span></div>
+  <div class="words">{{ words }}</div>
+  <p style="margin-top:14px;color:#4b5563">I confirm that I have received the amount above in full settlement of my end-of-service dues.</p>
+  <div class="sign"><div>Employee signature and date</div><div>Authorised signature</div></div>
+  <div class="foot">Issued on {{ today }}. The final month's salary, if any, is paid through payroll.</div>
+</div>
+</body>
+</html>

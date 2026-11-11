@@ -67,6 +67,7 @@
         {% if s.transport %}<tr><td>Transport allowance</td><td class="num">{{ s.transport|floatformat:"2g" }}</td></tr>{% endif %}
         {% if s.other_allowance %}<tr><td>Other allowance</td><td class="num">{{ s.other_allowance|floatformat:"2g" }}</td></tr>{% endif %}
         {% if s.overtime_amount %}<tr><td>Overtime</td><td class="num">{{ s.overtime_amount|floatformat:"2g" }}</td></tr>{% endif %}
+        {% if s.bonus_amount %}<tr><td>Bonus{% if s.bonus_note %} ({{ s.bonus_note }}){% endif %}</td><td class="num">{{ s.bonus_amount|floatformat:"2g" }}</td></tr>{% endif %}
         {% if s.other_additions %}<tr><td>{{ s.additions_note|default:"Other additions" }}</td><td class="num">{{ s.other_additions|floatformat:"2g" }}</td></tr>{% endif %}
         <tr class="tot"><td>Total earnings</td><td class="num">{{ s.total_additions|floatformat:"2g" }}</td></tr>
       </tbody>

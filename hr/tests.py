@@ -14,7 +14,9 @@ from properties.models_constants import iban_is_valid
 
 from . import seed
 from .admin import build_sif, month_choices
-from .models import Attendance, Employee, EmployeeDocument, LeaveRequest, PayrollRun, PayrollSlip, employee_month_locked
+from .models import (
+    Attendance, Bonus, Employee, EmployeeDocument, FinalSettlement, LeaveRequest, PayrollRun, PayrollSlip, employee_month_locked,
+)
 
 D = Decimal
 JUNE = date(2025, 6, 1)  # a Sunday: Monday 2 June is the first working day, 21 working days in the month
@@ -557,16 +559,18 @@ class Pages(TestCase):
         self.assertEqual(reverse("admin:hr_attendance_changelist"), "/admin/attendance/")
         self.assertEqual(reverse("admin:hr_payrollrun_changelist"), "/admin/payroll/")
         self.assertEqual(reverse("admin:hr_payrollslip_changelist"), "/admin/salary-slips/")
+        self.assertEqual(reverse("admin:hr_bonus_changelist"), "/admin/bonuses/")
+        self.assertEqual(reverse("admin:hr_finalsettlement_changelist"), "/admin/final-settlements/")
 
     def test_lists_chips_and_search(self):
         make_leave(self.emp, date(2025, 6, 9), date(2025, 6, 10))
         mark(self.emp, date(2025, 6, 2))
         make_run()
-        for name in ("hr_employee", "hr_leaverequest", "hr_attendance", "hr_payrollrun", "hr_payrollslip"):
+        for name in ("hr_employee", "hr_leaverequest", "hr_attendance", "hr_payrollrun", "hr_payrollslip", "hr_bonus", "hr_finalsettlement"):
             url = reverse(f"admin:{name}_changelist")
             self.assertEqual(self.client.get(url).status_code, 200, name)
             for chip in ("active", "away", "docs", "left", "pending", "now", "coming", "closed", "today", "month", "absent", "late", "overtime",
-                         "draft", "topay", "paid", "cancelled", "unpaid", "check"):
+                         "draft", "topay", "paid", "cancelled", "unpaid", "check", "pending", "approved"):
                 self.assertEqual(self.client.get(url, {"chip": chip}).status_code, 200, f"{name} {chip}")
             self.assertEqual(self.client.get(url, {"q": "Page"}).status_code, 200)
         self.assertContains(self.client.get(reverse("admin:hr_employee_changelist"), {"q": "EMP-1"}), "Page Employee")
@@ -660,13 +664,195 @@ class Pages(TestCase):
 class SampleData(TestCase):
     def test_seed_and_erase(self):
         message = seed.seed_hr()
-        self.assertIn("5 employees", message)
-        self.assertEqual(Employee.objects.count(), 5)
+        self.assertIn("6 employees", message)
+        self.assertEqual(Employee.objects.count(), 6)
+        self.assertEqual(FinalSettlement.objects.count(), 1)
+        self.assertEqual(Bonus.objects.filter(status="approved").count(), 1)
         self.assertEqual(PayrollRun.objects.filter(status="paid").count(), 1)
         self.assertEqual(PayrollRun.objects.filter(status="draft").count(), 1)
         self.assertTrue(PaymentVoucher.objects.exists())
         self.assertTrue(User.objects.filter(username="demo.hr").exists())
         self.assertIn("nothing new", seed.seed_hr())  # running it again adds nothing
-        self.assertEqual(Employee.objects.count(), 5)
+        self.assertEqual(Employee.objects.count(), 6)
         seed.erase_hr()
         self.assertEqual((Employee.objects.count(), PayrollRun.objects.count(), PayrollSlip.objects.count(), PaymentVoucher.objects.count()), (0, 0, 0, 0))
+
+
+END = date(2025, 12, 31)
+
+
+def leaver(years, basic="3000", **kwargs):
+    """An employee who worked exactly `years` x 365 days up to 31 Dec 2025 and has left."""
+    emp = make_employee(basic_salary=D(basic), join_date=END - timedelta(days=int(years * 365) - 1), **kwargs)
+    return emp
+
+
+def leave_company(emp, end=END):
+    Employee.objects.filter(pk=emp.pk).update(status="terminated", end_date=end)
+    emp.refresh_from_db()
+    return emp
+
+
+def make_settlement(emp):
+    settlement = FinalSettlement(employee=emp)
+    settlement.full_clean()
+    settlement.save()
+    return settlement
+
+
+class Gratuity(TestCase):
+    def test_under_a_year_gets_nothing(self):
+        s = make_settlement(leave_company(leaver(0.99)))
+        self.assertEqual(s.gratuity, D("0.00"))
+
+    def test_first_five_years_are_21_days_a_year(self):
+        s = make_settlement(leave_company(leaver(3)))  # basic 3,000: a day is 100
+        self.assertEqual((s.service_days, s.service_years, s.gratuity), (1095, D("3.00"), D("6300.00")))
+
+    def test_years_after_five_are_30_days_a_year(self):
+        s = make_settlement(leave_company(leaver(7)))
+        self.assertEqual(s.gratuity, D("16500.00"))  # 5 x 2,100 + 2 x 3,000
+
+    def test_part_of_a_year_counts_in_proportion(self):
+        s = make_settlement(leave_company(leaver(2.5)))  # 912 days
+        self.assertEqual(s.gratuity, D("5247.12"))  # 912 / 365 x 21 x 100
+
+    def test_never_more_than_two_years_of_basic_pay(self):
+        s = make_settlement(leave_company(leaver(40)))
+        self.assertEqual(s.gratuity, D("72000.00"))
+
+    def test_unpaid_leave_is_not_service(self):
+        emp = leaver(3)
+        make_leave(emp, date(2025, 3, 3), date(2025, 3, 12), kind="unpaid", status="approved")  # 10 calendar days
+        s = make_settlement(leave_company(emp))
+        self.assertEqual((s.unpaid_leave_days, s.service_days), (10, 1085))
+
+    def test_unused_leave_is_paid_at_the_daily_basic_rate(self):
+        emp = leaver(3)  # 30 days a year: 90 earned
+        make_leave(emp, date(2025, 6, 2), date(2025, 6, 13), status="approved")  # 10 working days taken
+        s = make_settlement(leave_company(emp))
+        self.assertEqual((s.leave_days_due, s.leave_pay), (D("80.0"), D("8000.00")))
+        self.assertEqual(s.net, D("14300.00"))
+
+    def test_leave_taken_is_never_more_than_earned(self):
+        emp = leaver(1)
+        make_leave(emp, date(2025, 6, 2), date(2025, 6, 13), status="approved")
+        emp.annual_leave_days = 5  # earned 5, took 10: nothing to pay, never a negative
+        emp.save()
+        s = make_settlement(leave_company(emp))
+        self.assertEqual((s.leave_days_due, s.leave_pay), (D("0.0"), D("0.00")))
+
+    def test_only_someone_who_has_left_can_have_one(self):
+        emp = make_employee()
+        with self.assertRaises(ValidationError):
+            make_settlement(emp)
+
+    def test_one_open_settlement_per_employee(self):
+        emp = leave_company(leaver(3))
+        first = make_settlement(emp)
+        with self.assertRaises(ValidationError):
+            make_settlement(emp)
+        first.status, first.cancel_reason = "cancelled", "Made by mistake"
+        first.full_clean()
+        first.save()
+        make_settlement(emp)
+
+    def test_additions_and_deductions(self):
+        s = make_settlement(leave_company(leaver(3)))
+        s.other_additions, s.additions_note = D("1000"), "Notice pay"
+        s.other_deductions, s.deductions_note = D("300"), "Phone"
+        s.full_clean()
+        s.save()
+        self.assertEqual(s.net, D("6300.00") + s.leave_pay + D("700"))
+        s.other_deductions = D("999999")
+        with self.assertRaises(ValidationError):
+            s.full_clean()
+
+    def test_approve_lock_and_pay_makes_a_voucher(self):
+        s = make_settlement(leave_company(leaver(3, pay_method="cheque")))
+        s.status = "approved"
+        s.full_clean()
+        s.save()
+        s.other_deductions = D("50")
+        with self.assertRaises(ValidationError):
+            s.full_clean()  # amounts are locked once approved
+        s.other_deductions = D("0")
+        s.status, s.paid_on, s.pay_method = "paid", date(2026, 1, 5), "cheque"
+        with self.assertRaises(ValidationError):
+            s.full_clean()  # a cheque number is needed
+        s.payment_reference = "CH-77"
+        s.full_clean()
+        s.save()
+        voucher = PaymentVoucher.objects.get()
+        self.assertEqual((voucher.amount, voucher.method, voucher.cheque_number), (s.net, "cheque", "CH-77"))
+        s.refresh_from_db()
+        self.assertEqual(s.voucher_id, voucher.pk)
+        s.status = "draft"
+        with self.assertRaises(ValidationError):
+            s.full_clean()  # paid stays paid
+
+    def test_cancelling_needs_a_reason(self):
+        s = make_settlement(leave_company(leaver(3)))
+        s.status = "cancelled"
+        with self.assertRaises(ValidationError):
+            s.full_clean()
+
+
+class Bonuses(TestCase):
+    def setUp(self):
+        self.emp = make_employee()
+
+    def make(self, month=JUNE, amount="500", status="approved", **kwargs):
+        bonus = Bonus(employee=self.emp, kind="bonus", pay_month=month, amount=D(amount), status=status, **kwargs)
+        bonus.full_clean()
+        bonus.save()
+        return bonus
+
+    def test_number_and_month_are_tidied(self):
+        bonus = self.make(month=date(2025, 6, 17))
+        self.assertEqual((bonus.code, bonus.pay_month), ("BON-0001", JUNE))
+
+    def test_an_approved_bonus_is_added_to_the_slip(self):
+        self.make(reason="Target")
+        slip = slip_of(make_run(), self.emp)
+        self.assertEqual((slip.bonus_amount, slip.net), (D("500"), D("5000.00")))
+        self.assertIn("Target", slip.bonus_note)
+
+    def test_a_waiting_or_cancelled_bonus_is_not_added(self):
+        self.make(status="pending")
+        self.make(status="cancelled")
+        self.assertEqual(slip_of(make_run(), self.emp).bonus_amount, D("0"))
+
+    def test_a_draft_payroll_follows_a_new_bonus_by_itself(self):
+        run = make_run()
+        self.make()
+        self.assertEqual(slip_of(run, self.emp).net, D("5000.00"))
+        bonus = Bonus.objects.get()
+        bonus.status = "cancelled"
+        bonus.full_clean()
+        bonus.save()
+        self.assertEqual(slip_of(run, self.emp).net, D("4500.00"))
+
+    def test_a_bonus_cannot_change_in_an_approved_payroll_month(self):
+        bonus = self.make()
+        move(make_run(), "approved")
+        bonus.amount = D("900")
+        with self.assertRaises(ValidationError):
+            bonus.full_clean()
+        with self.assertRaises(ValidationError):
+            self.make(amount="100")  # a new one for the locked month
+
+    def test_amount_and_employment_are_checked(self):
+        with self.assertRaises(ValidationError):
+            self.make(amount="0")
+        with self.assertRaises(ValidationError):
+            self.make(month=date(2023, 6, 1))  # before the employee joined
+
+    def test_bonus_goes_to_the_bank_file_as_variable_pay(self):
+        emp = make_employee(pay_method="transfer", iban=seed.make_iban("026", 888), bank_name="Emirates NBD",
+                            wps_person_id="12345678901237", routing_code="033000001")
+        Bonus.objects.create(employee=emp, kind="bonus", pay_month=JUNE, amount=D("250"), status="approved")
+        run = make_run(employer_id="1234567", employer_routing="033000001")
+        move(run, "approved")
+        text, _ = build_sif(run)
+        self.assertIn(",30,4500.00,250.00,0", text)
