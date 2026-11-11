@@ -62,15 +62,15 @@ def make_actions(label_plural):
 def change_owner(modeladmin, request, queryset):
     """
     Move the selected properties to another owner. First shows a page to pick the owner
-    (and the management fee when the owner is not the company), then checks every property
+    then checks every property
     and changes all of them or none.
     """
-    from .models import Owner, Property
+    from .models import Owner
 
     owners = Owner.objects.filter(is_active=True).order_by("-is_company", "name")
     properties = list(queryset.select_related("owner"))
     post = request.POST
-    errors, form = [], {k: post.get(k, "") for k in ("owner", "fee_type", "fee_percent", "fee_fixed")}
+    errors, form = [], {"owner": post.get("owner", "")}
 
     if post.get("apply"):
         owner = owners.filter(pk=form["owner"]).first() if form["owner"].isdigit() else None
@@ -83,13 +83,6 @@ def change_owner(modeladmin, request, queryset):
                     errors.append(f"{prop.code}: already belongs to {owner.name}.")
                     continue
                 prop.owner = owner
-                if not owner.is_company and form["fee_type"]:
-                    prop.management_fee_type = form["fee_type"]
-                    if form["fee_type"] == Property.FeeType.PERCENT:
-                        prop.management_fee_percent = form["fee_percent"] or 0
-                        prop.management_fee_fixed = None
-                    else:
-                        prop.management_fee_fixed = form["fee_fixed"] or None
                 try:
                     prop.full_clean(exclude=["created_at"])
                 except ValidationError as exc:
@@ -112,7 +105,6 @@ def change_owner(modeladmin, request, queryset):
         "owners": owners,
         "form": form,
         "errors": errors,
-        "fee_types": Property.FeeType.choices,
         "company_ids": [str(o.pk) for o in owners if o.is_company],
         "selected": [str(p.pk) for p in properties],
         "back_url": request.path,

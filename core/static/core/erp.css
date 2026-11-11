@@ -945,3 +945,8 @@ html.dark .erp-reportcard small { color: #9ca3af; }
 html.dark .erp-drawer { background: #111827; border-color: #374151; color: #9ca3af; }
 html.dark .erp-drawer:hover { background: #9333ea; border-color: #9333ea; color: #fff; }
 @media print { .erp-drawer { display: none !important; } }
+/* side panel docked beside the page from 1024px (Unfold: from 1280px); see erp.js */
+@media (min-width: 1024px) {
+  [x-show="sidebarOpen"] { position: relative !important; }
+  #nav-sidebar [x-on\:click="sidebarToggle()"] { display: none !important; }
+}

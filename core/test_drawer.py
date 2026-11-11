@@ -35,3 +35,10 @@ class DrawerHandle(TestCase):
             self.assertIn("sidebarToggle()", html, name)
             self.assertIn('x-show="sidebarOpen"', html, name)
             self.assertIn("erp.js", html, name)
+
+    def test_the_side_panel_is_docked_from_1024_pixels(self):
+        self.assertIn("var DOCK_FROM = 1024;", self.script)
+        self.assertIn('"alpine:init"', self.script)  # Unfold's own rule (1280) is adjusted before the page is built
+        self.assertIn('data.themeBindings["x-resize.window"]', self.script)
+        block = self.styles[self.styles.index("@media (min-width: 1024px) {\n  [x-show=\"sidebarOpen\"]"):]
+        self.assertIn("position: relative !important", block[:300])

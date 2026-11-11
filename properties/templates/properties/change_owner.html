@@ -38,18 +38,8 @@
         </select>
       </label>
 
-      <div id="erp-fee-box" style="display: none; gap: 12px; border: 1px dashed rgba(128,128,128,.5); border-radius: 10px; padding: 14px 16px;">
-        <div style="opacity:.85;">Management fee for the new owner. Leave all blank to keep each property's current fee
-          (a property that has none cannot be moved until a fee is given).</div>
-        <div class="erp-filterbar">
-          <select name="fee_type" id="erp-fee-type" class="erp-search">
-            <option value="">Keep current fee</option>
-            {% for value, label in fee_types %}<option value="{{ value }}"{% if form.fee_type == value %} selected{% endif %}>{{ label }}</option>{% endfor %}
-          </select>
-          <input class="erp-search" type="number" step="0.01" min="0" max="100" name="fee_percent" id="erp-fee-percent" placeholder="Percent, e.g. 5" value="{{ form.fee_percent }}">
-          <input class="erp-search" type="number" step="0.01" min="0" name="fee_fixed" id="erp-fee-fixed" placeholder="AED per year, e.g. 6000" value="{{ form.fee_fixed }}">
-        </div>
-      </div>
+      <div style="opacity:.85;">The management fee is not set here. It comes from the owner agreement: a property that an agreement
+        covers must have that agreement ended first, and the new owner needs his own agreement (Owner Agreements).</div>
 
       <div class="erp-filterbar">
         <button type="submit" class="erp-btn">Move properties</button>
@@ -59,23 +49,4 @@
   </div>
 </div>
 
-<script>
-  (function () {
-    var owner = document.getElementById("erp-new-owner");
-    var box = document.getElementById("erp-fee-box");
-    var type = document.getElementById("erp-fee-type");
-    var percent = document.getElementById("erp-fee-percent");
-    var fixed = document.getElementById("erp-fee-fixed");
-    function refresh() {
-      var option = owner.options[owner.selectedIndex];
-      var showFee = option && option.value && !option.getAttribute("data-company");
-      box.style.display = showFee ? "grid" : "none";
-      percent.style.display = type.value === "percent" ? "" : "none";
-      fixed.style.display = type.value === "fixed" ? "" : "none";
-    }
-    owner.addEventListener("change", refresh);
-    type.addEventListener("change", refresh);
-    refresh();
-  })();
-</script>
 {% endblock %}

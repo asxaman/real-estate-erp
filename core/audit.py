@@ -35,6 +35,8 @@ AUDITED_MODELS = (
     "leases.LeaseDocument",
     "leases.LeaseDeduction",
     "leases.LeaseNote",
+    "agreements.OwnerAgreement",
+    "agreements.AgreementProperty",
     "core.SystemSettings",
     "auth.User",
 )
@@ -179,6 +181,10 @@ def related_owner_id(instance):
             return instance.property.owner_id
         if label in LEASE_CHILD_LABELS:
             return instance.lease.property.owner_id
+        if label == "agreements.OwnerAgreement":
+            return instance.owner_id
+        if label == "agreements.AgreementProperty":
+            return instance.agreement.owner_id
     except Exception:
         return None
     return None

@@ -585,7 +585,8 @@ class Property(models.Model):
         "someone signs in each day. You can still change it by hand (for example to Under maintenance).",
     )
 
-    # Management fee - not used when the owner is "Company Owned"
+    # Old management-fee boxes. The fee now lives in the owner agreement (the agreements app); these are kept only so
+    # that fees entered before agreements existed are not lost (they are turned into agreements once, see agreements/seed.py).
     management_fee_type = models.CharField(
         "Fee type", max_length=10, choices=FeeType.choices, blank=True, default=FeeType.PERCENT
     )
@@ -726,23 +727,14 @@ class Property(models.Model):
         elif self.owner_id and not self.owner.is_active and self.is_active and _changed_in_db(self, "is_active"):
             errors["is_active"] = "The owner of this property is inactive. Make the owner active first."
 
-        # Management fee: none for company-owned, required for properties managed for others.
-        if self.owner_id:
-            if self.owner.is_company:
-                self.management_fee_type = ""
-                self.management_fee_percent = 0
-                self.management_fee_fixed = None
-            elif self.management_fee_type == self.FeeType.PERCENT:
-                self.management_fee_fixed = None
-                if not self.management_fee_percent:
-                    errors["management_fee_percent"] = "Enter a fee greater than 0."
-            elif self.management_fee_type == self.FeeType.FIXED:
-                self.management_fee_percent = 0
-                if not self.management_fee_fixed:
-                    errors["management_fee_fixed"] = "Enter an amount greater than 0."
-            else:
-                errors["management_fee_type"] = (
-                    "Choose how the owner is charged: a percentage or a fixed amount."
+        # The management fee now lives in the owner agreement (the fields above are only kept for old data).
+        # A property that an agreement covers cannot move to another owner until that agreement is ended.
+        if self.pk and self.owner_id and _changed_in_db(self, "owner_id"):
+            covering = self.agreement_lines.select_related("agreement").order_by("-agreement__start_date").first()
+            if covering is not None:
+                errors["owner"] = (
+                    f"This property is covered by owner agreement {covering.agreement.code}. "
+                    "End that agreement first (or take the property off it), then change the owner."
                 )
 
         if errors:

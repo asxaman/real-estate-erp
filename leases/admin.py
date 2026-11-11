@@ -777,7 +777,7 @@ class LeaseAdmin(LeaseApiMixin, ReportsMixin, ExportPermissionMixin, FilterBarMi
                 f"{who} {verb} {count} payment line{'s' if count != 1 else ''}"
                 + (f", {received} already received or held" if received else "")
                 + ". A lease with payments is kept for the records. If it ended early, terminate it instead. "
-                "If it was made by mistake, remove its unreceived payments first (Tenant payments: tick them, then Remove Ticked); "
+                "If it was made by mistake, remove its unreceived payments first (Tenant payments: tick them, then choose Remove the Selected Payments in the Actions list); "
                 "received payments can never be removed."
             )
         return to_delete, model_count, perms_needed, protected
@@ -1118,7 +1118,7 @@ class LeasePaymentAdmin(PaymentApiMixin, ExportPermissionMixin, FilterBarMixin, 
     search_codes = (("lease__code", "LSE", 4),)
     search_fuzzy = ("lease__tenant__name",)
     search_hint = "lease number (LSE-12), tenant name or phone, cheque number, bank, unit (RMT-101), building"
-    actions = ["mark_paid", "mark_bounced", "bulk_edit_selected", "bulk_delete_selected", "export_excel", "export_csv"]
+    actions = ["mark_paid", "bulk_deposit_selected", "mark_bounced", "bulk_edit_selected", "bulk_delete_selected", "export_excel", "export_csv"]
     fields = ("lease", "kind", "part", "due_date", "amount", "method", "cheque_number", "bank_name", "cheque_date", "deposited_on", "status", "paid_on", "notes")
     readonly_fields = ("lease", "kind", "part")
     # Payments of one lease sit together (by lease number); click "Due on" to see everything by date instead.
@@ -1227,11 +1227,16 @@ class LeasePaymentAdmin(PaymentApiMixin, ExportPermissionMixin, FilterBarMixin, 
     @admin.action(description="Edit the selected payments (dates, amount, cheque numbers ...)", permissions=["change"])
     def bulk_edit_selected(self, request, queryset):
         # The list page opens a pop-up for this choice (leases.js); this only runs when scripts are switched off.
-        self.message_user(request, "Use the “Edit ticked” button above the list.", messages.INFO)
+        self.message_user(request, "This needs scripts switched on in the browser.", messages.INFO)
+
+    @admin.action(description="Mark the selected cheques as deposited", permissions=["change"])
+    def bulk_deposit_selected(self, request, queryset):
+        # (also a pop-up opened by leases.js, asking for the deposit date)
+        self.message_user(request, "This needs scripts switched on in the browser.", messages.INFO)
 
     @admin.action(description="Remove the selected payments", permissions=["bulk_remove"])
     def bulk_delete_selected(self, request, queryset):
-        self.message_user(request, "Use the “Remove ticked” button above the list.", messages.INFO)
+        self.message_user(request, "This needs scripts switched on in the browser.", messages.INFO)
 
     def has_bulk_remove_permission(self, request):
         return request.user.has_perm("leases.delete_leasepayment")

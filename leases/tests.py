@@ -1272,9 +1272,9 @@ class ScaleTools(Setup):
 
     def test_bulk_buttons_only_show_for_people_who_can_change_payments(self):
         make_lease(self.tenant, self.flat)
-        self.assertContains(self.client.get(self.url("leasepayment_changelist")), "data-erp-bulk")
+        self.assertContains(self.client.get(self.url("leasepayment_changelist")), 'class="erp-bulk"')
         self.staff("view_leasepayment")
-        self.assertNotContains(self.client.get(self.url("leasepayment_changelist")), "data-erp-bulk")
+        self.assertNotContains(self.client.get(self.url("leasepayment_changelist")), 'class="erp-bulk"')
 
     def test_two_people_recording_the_same_payment_do_not_double_record(self):
         lease = make_lease(self.tenant, self.flat)

@@ -1,5 +1,32 @@
 # Changelog
 
+## Update 62 - The management fee now lives only in the Owner Agreement
+No migration needed. Run `python manage.py migrate` once (it turns fees already entered on properties into agreements), then `python manage.py test`, then Ctrl+F5 twice.
+- The Management Fee boxes (type, percent, fixed) are gone from the Property page. The page shows the fee read-only from the agreement that covers the property today, with a link to open it (or "No running owner agreement - Create one").
+- Fees that were already entered on properties are turned into Owner Agreements once, automatically (check them in Owner Agreements: they are marked "Created from the management fee that was on the property"). Nothing is lost and it never runs twice.
+- Change Owner (bulk): the fee box is gone. A property that an agreement covers cannot be moved to another owner until that agreement is ended; the page says which one.
+- Import: the three fee columns are no longer in the template and are ignored if a file still has them. Export: the "Management fee" column shows the fee of the running agreement (for example "AGR-0003: 5% of rent collected").
+- A property no longer needs a fee to be saved.
+## Update 61 - New module: Owner Agreements
+**Migration needed.** Run `python manage.py makemigrations agreements`, then `python manage.py migrate`, then `python manage.py test`, then Ctrl+F5 twice.
+- New module **Owner Agreements** (left menu, under Property Management; address `/admin/owner-agreements/`): the management contract between the company and an owner. Numbers are given automatically (AGR-0001 ...).
+- One agreement belongs to one owner and covers one or more of his properties (tab "Properties Covered").
+- Fees (tab "Fees"): % of rent collected, fixed fee per year, % of the annual contract rent (any mix of these), or a guaranteed rent to the owner (stands alone).
+- Dates: start, end (optional), renews automatically, notice period, signed on. "Owner is paid": monthly, every 3 or 6 months, once a year, or as each rent is collected.
+- Status: Draft, Active, Terminated (with date and reason). The list shows Running, Ending Soon, Not Started, Expired, Draft, Terminated with counts.
+- Rules: a property must belong to the agreement's owner; a property cannot be under two agreements in the same period; an active agreement must cover at least one property; only a Draft can be deleted (a signed one is terminated instead); company-owned properties need no agreement.
+- The Owner page and the Property page have a new read-only tab "Agreements". Search box (Ctrl+K) finds agreements. Excel / CSV export. Changes are recorded in the activity log.
+- Roles: Property Manager has full access, Accountant can view and export, Leasing Agent can view.
+- Sample data: "Seed sample data" creates agreements from the fees on the sample properties; "Erase all data" removes them.
+- Not changed yet: the Management Fee boxes on the Property page are still there. They will be removed in the next step, once agreements are confirmed working.
+## Update 60 - Tenant Payments: the "With the ticked rows" buttons are gone
+No migration needed. Run `python manage.py test`, then Ctrl+F5 twice.
+- Removed the row "With the ticked rows: Mark as Paid, Mark Cheques as Deposited, Edit Ticked, Remove Ticked" above the Tenant Payments list.
+- Nothing is lost: tick rows and use the Actions list that appears (mark as paid, mark cheques as deposited, mark as bounced, edit, remove, export). Each row also keeps its own Record and Edit buttons.
+## Update 59 - Same layout on a laptop as on a large monitor
+No migration needed. Run `python manage.py test`, then Ctrl+F5 twice.
+- The side panel now stays docked beside the page, open by default, from 1024 pixels wide (it was 1280). A laptop whose screen Windows scales to 150% gets the same layout as a large monitor.
+- Open or closed is remembered on these screens too. Below 1024 pixels (tablets, phones) the panel still floats over the page and starts closed.
 ## Update 58 - Drawer handle for the side panel
 No migration needed. Ctrl+F5 twice.
 - The button that opens and closes the left panel moved from the top bar to a small handle fixed at the middle of the left edge. It stays in reach however far the page is scrolled, on every page.

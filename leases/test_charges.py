@@ -384,8 +384,10 @@ class BulkEditAndRemove(Setup):
 
     def test_the_list_offers_the_new_actions(self):
         page = self.client.get(reverse("admin:leases_leasepayment_changelist"))
-        self.assertContains(page, 'data-erp-bulk="edit"')
-        self.assertContains(page, 'data-erp-bulk="delete"')
+        self.assertNotContains(page, "With the ticked rows")  # the row of buttons above the list is gone
+        self.assertNotContains(page, "data-erp-bulk=")
+        self.assertContains(page, 'class="erp-bulk" data-url=')  # the Actions list still knows where to send
+        self.assertContains(page, "bulk_deposit_selected")
         self.assertContains(page, "bulk_edit_selected")
         self.assertContains(page, "bulk_delete_selected")
 

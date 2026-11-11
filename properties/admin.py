@@ -4,6 +4,7 @@ from django import forms
 from django.contrib import admin, messages
 from django.db.models import Count, Exists, OuterRef, Prefetch, Q, Sum, Value
 from django.db.models.functions import Concat
+from django.urls import reverse
 from django.utils import timezone
 from django.utils.html import format_html, format_html_join
 from django.utils.safestring import mark_safe
@@ -203,8 +204,6 @@ class PropertyAdminForm(forms.ModelForm):
             "total_floors": "e.g. 10",
             "bathrooms": "1 to 10",
             "annual_rent": "e.g. 85000",
-            "management_fee_percent": "e.g. 5",
-            "management_fee_fixed": "e.g. 6000",
             "map_link": "https://maps.google.com/...",
             "address": "Street, area, city",
             "community": "e.g. Al Reem Island",
@@ -258,7 +257,7 @@ class PropertyAdmin(PhotoUploadMixin, ImportMixin, ExportPermissionMixin, SmartS
     import_notes = [
         "Required: Code, Name, Type.",
         "Owner is the exact owner name (blank = Company Owned).",
-        "Fee type (Percent or Fixed) and the fee are needed for properties with another owner.",
+        "The management fee is no longer imported: it is set in Owner Agreements.",
         "See the \"Allowed values\" sheet in the template for Type, Emirate and Status.",
         "Optional columns: Area / community, Parking spaces, Title deed no., Plot no., Makani no. (10 digits), Utility premise no.",
         "To change existing properties, tick \"Update existing records\": only Code is needed, plus the columns you want to change.",
@@ -362,7 +361,7 @@ class PropertyAdmin(PhotoUploadMixin, ImportMixin, ExportPermissionMixin, SmartS
                 ("makani_number", "dewa_premise_number"),
                 ("apartment_type", "bathrooms"),  # conditional
                 ("annual_rent", "status"),  # conditional
-                ("management_fee_type", "management_fee_percent", "management_fee_fixed"),  # conditional
+                "agreement_fee",
             ),
         },
     )
@@ -373,7 +372,28 @@ class PropertyAdmin(PhotoUploadMixin, ImportMixin, ExportPermissionMixin, SmartS
         return (self._header, self._overview, self._details)
 
     def get_readonly_fields(self, request, obj=None):
-        return ("summary_header",)
+        return ("summary_header", "agreement_fee")
+
+    @admin.display(description="Management fee")
+    def agreement_fee(self, obj):
+        """Read-only: the fee of the owner agreement that covers this property today."""
+        if obj is None or not obj.pk:
+            return "Set in the property's owner agreement (Owner Agreements) once the property is saved."
+        if obj.is_company_owned:
+            return "None (company owned)"
+        from agreements.models import agreement_for
+
+        agreement = agreement_for(obj)
+        if agreement is None:
+            return format_html(
+                '<span style="color:#92400e;font-weight:600;">No running owner agreement. '
+                '<a href="{}?owner={}">Create one</a></span>',
+                reverse("admin:agreements_owneragreement_add"), obj.owner_id,
+            )
+        return format_html(
+            '<a href="{}">{}</a> · {}', reverse("admin:agreements_owneragreement_change", args=[agreement.pk]),
+            agreement.code, agreement.fee_text(),
+        )
 
     @admin.display(description="")
     def summary_header(self, obj):

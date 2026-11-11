@@ -1299,7 +1299,7 @@
   function bulkDialog(kind, url) {
     var ids = ticked();
     if (!ids.length) {
-      openDialog({ title: "Nothing is ticked", subtitle: "Tick the payments in the list first, then press the button again.", buttons: [] });
+      openDialog({ title: "Nothing is ticked", subtitle: "Tick the payments in the list first, then choose the action again.", buttons: [] });
       return;
     }
     if (kind === "delete") { bulkDeleteDialog(ids, url); return; }
@@ -1336,7 +1336,7 @@
     var choice = form && form.querySelector ? form.querySelector('select[name="action"]') : null;
     var bar = document.querySelector(".erp-bulk");
     if (!choice || !bar) { return; }
-    var kind = choice.value === "bulk_edit_selected" ? "edit" : choice.value === "bulk_delete_selected" ? "delete" : "";
+    var kind = { bulk_edit_selected: "edit", bulk_delete_selected: "delete", bulk_deposit_selected: "deposited" }[choice.value] || "";
     if (!kind) { return; }
     e.preventDefault();
     e.stopPropagation();

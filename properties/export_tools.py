@@ -1,7 +1,9 @@
 """Excel / CSV export for properties and units."""
+from django.utils import timezone
+
 from core import exports
 
-from .models import Property, Unit
+from .models import Unit
 
 PROPERTY_EXPORT_HEADERS = [
     "Code", "Name", "Type", "Owner", "Emirate", "Active", "Address", "Year built", "Total floors",
@@ -16,17 +18,24 @@ UNIT_EXPORT_HEADERS = [
 ]
 
 
-def _fee(prop):
-    if prop.is_company_owned:
-        return "None (company owned)"
-    if prop.management_fee_type == Property.FeeType.PERCENT:
-        return f"{prop.management_fee_percent}%"
-    if prop.management_fee_type == Property.FeeType.FIXED:
-        return f"{prop.management_fee_fixed} AED / year"
-    return ""
+def _fee_texts(queryset):
+    """property id -> the fee of the owner agreement that covers it today (one query for the whole list)."""
+    from agreements.models import AgreementProperty, OwnerAgreement, running_q
+
+    today = timezone.localdate()
+    found = {}
+    lines = (
+        AgreementProperty.objects.filter(property__in=queryset.values("pk"))
+        .filter(agreement__in=OwnerAgreement.objects.filter(running_q(today)))
+        .select_related("agreement").order_by("agreement__start_date", "agreement_id")
+    )
+    for line in lines:
+        found[line.property_id] = f"{line.agreement.code}: {line.agreement.fee_text()}"  # the latest start wins
+    return found
 
 
 def property_rows(queryset):
+    fees = _fee_texts(queryset)
     for prop in queryset.select_related("owner"):
         if prop.has_units:
             if hasattr(prop, "_unit_count"):  # already counted by the list page
@@ -41,7 +50,7 @@ def property_rows(queryset):
             prop.get_emirate_display(), "Yes" if prop.is_active else "No", prop.address,
             prop.year_built or "", prop.total_floors or "", units, vacant,
             prop.annual_rent if prop.annual_rent is not None else "",
-            prop.get_status_display() if prop.status else "", _fee(prop), prop.notes,
+            prop.get_status_display() if prop.status else "", "None (company owned)" if prop.is_company_owned else fees.get(prop.pk, ""), prop.notes,
             prop.community, prop.parking_spaces if prop.parking_spaces is not None else "",
             prop.title_deed_number, prop.plot_number, prop.makani_number, prop.dewa_premise_number,
             prop.inactive_reason,

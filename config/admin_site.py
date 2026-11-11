@@ -16,6 +16,7 @@ ROUTES = {
     "tenants/tenant": "tenants",
     "leases/lease": "leases",
     "leases/leasepayment": "tenant-payments",
+    "agreements/owneragreement": "owner-agreements",
     "auth/user": "users",
     "auth/group": "groups",
     "core/systemsettings": "system-settings",

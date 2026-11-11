@@ -96,6 +96,7 @@ INSTALLED_APPS = [
     "properties",  # Module 1: owners, properties, units
     "tenants",  # Module 2: tenants
     "leases",  # Module 3: leases and tenant payments
+    "agreements",  # Module 4: owner agreements (the management contract with each owner)
 ]
 
 MIDDLEWARE = [
@@ -278,10 +279,10 @@ UNFOLD = {
     "SHOW_VIEW_ON_SITE": False,
     # Our own small style/behaviour layer (info icons, compact forms).
     # Bump the ?v= number whenever these files change so browsers reload them.
-    "STYLES": [lambda request: static("core/erp.css") + "?v=54"],
+    "STYLES": [lambda request: static("core/erp.css") + "?v=55"],
     "SCRIPTS": [
-        lambda request: static("core/erp.js") + "?v=34",
-        lambda request: static("core/leases.js") + "?v=16",
+        lambda request: static("core/erp.js") + "?v=36",
+        lambda request: static("core/leases.js") + "?v=17",
         lambda request: static("core/lists.js") + "?v=10",
     ],
     "SIDEBAR": {
@@ -327,6 +328,12 @@ UNFOLD = {
                         "icon": "meeting_room",
                         "link": reverse_lazy("admin:properties_unit_changelist"),
                         "permission": _can("properties.view_unit"),
+                    },
+                    {
+                        "title": "Owner agreements",
+                        "icon": "handshake",
+                        "link": reverse_lazy("admin:agreements_owneragreement_changelist"),
+                        "permission": _can("agreements.view_owneragreement"),
                     },
                 ],
             },

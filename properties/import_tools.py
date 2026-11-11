@@ -125,7 +125,7 @@ def _getter(columns):
 PROPERTY_HEADERS = [
     "Code", "Name", "Type", "Owner", "Emirate", "Address", "Map link", "Year built",
     "Total floors", "Apartment type", "Bathrooms", "Annual rent (AED)", "Status",
-    "Fee type", "Fee percent", "Fee fixed (AED)", "Notes",
+    "Notes",
     "Area / community", "Parking spaces", "Title deed no.", "Plot no.", "Makani no.", "Utility premise no.",
 ]
 _PROPERTY_ALIASES = {
@@ -142,9 +142,6 @@ _PROPERTY_ALIASES = {
     "bathrooms": "bathrooms",
     "annual rent aed": "annual_rent", "annual rent": "annual_rent", "rent": "annual_rent",
     "status": "status",
-    "fee type": "fee_type", "management fee type": "fee_type",
-    "fee percent": "fee_percent", "fee": "fee_percent", "management fee": "fee_percent",
-    "fee fixed aed": "fee_fixed", "fee fixed": "fee_fixed",
     "notes": "notes", "note": "notes",
     "area community": "community", "community": "community", "area": "community",
     "parking spaces": "parking_spaces", "parking": "parking_spaces",
@@ -196,25 +193,6 @@ def _property_values(get, row, owners, company, choices):
         if get(row, key):
             values[attr] = _pick(get(row, key), options, label)
 
-    fee_text = get(row, "fee_type").lower()
-    fee_percent = _number(get(row, "fee_percent"), "Fee percent")
-    fee_fixed = _number(get(row, "fee_fixed"), "Fee fixed (AED)")
-    if fee_text or fee_percent is not None or fee_fixed is not None:
-        if fee_text.startswith(("perc", "%")):
-            fee_type = Property.FeeType.PERCENT
-        elif fee_text.startswith("fix"):
-            fee_type = Property.FeeType.FIXED
-        elif fee_text:
-            raise RowError(f'Fee type "{get(row, "fee_type")}" is not valid. Use Percent or Fixed.')
-        elif fee_fixed:
-            fee_type = Property.FeeType.FIXED
-        elif fee_percent:
-            fee_type = Property.FeeType.PERCENT
-        else:
-            fee_type = ""
-        values["management_fee_type"] = fee_type
-        values["management_fee_percent"] = fee_percent if fee_percent is not None else 0
-        values["management_fee_fixed"] = fee_fixed
     return values
 
 
@@ -251,10 +229,7 @@ def parse_property_file(upload, update=False):
             else:
                 if not values.get("property_type"):
                     raise RowError("Type is required.")
-                fields = dict(
-                    owner=company, emirate=Property.Emirate.ABU_DHABI, management_fee_type="",
-                    management_fee_percent=0,
-                )
+                fields = dict(owner=company, emirate=Property.Emirate.ABU_DHABI)
                 fields.update(values)
                 prop = Property(code=code, **fields)
                 if not prop.has_units and not prop.status:
@@ -392,13 +367,12 @@ def property_template_response():
     return _template(
         "Properties", PROPERTY_HEADERS,
         ["RMT", "Rimal Tower", "Residential Building", "", "Abu Dhabi", "Corniche Road", "", 2015, 12,
-         "", "", "", "", "", "", "", "", "", "", "", "", "", ""],
+         "", "", "", "", "", "", "", "", "", "", ""],
         "properties-import-template.xlsx",
         [
             ("Type", [label for _, label in Property.PropertyType.choices]),
             ("Emirate", [label for _, label in Property.Emirate.choices]),
             ("Status", [label for _, label in Property.Status.choices] + ["(standalone only; blank = Vacant)"]),
-            ("Fee type", ["Percent", "Fixed", "(not needed for Company Owned)"]),
             ("Owner", ["Exact owner name; blank = Company Owned"]),
         ],
     )

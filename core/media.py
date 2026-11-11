@@ -18,6 +18,7 @@ FOLDER_PERMISSIONS = {
     "unit_photos": ("properties.view_unitphoto",),
     "property_photos": ("properties.view_propertyphoto",),
     "lease_documents": ("leases.view_leasedocument",),
+    "agreement_documents": ("agreements.view_owneragreement",),
     "profile_photos": (),  # any signed-in staff member (they appear in the sidebar and user list)
 }
 

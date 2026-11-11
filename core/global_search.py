@@ -9,6 +9,7 @@ PER_KIND = 5
 
 
 def _sources():
+    from agreements.models import OwnerAgreement
     from leases.models import Lease, LeasePayment
     from properties.models import Owner, Property, Unit
     from tenants.models import Tenant
@@ -21,6 +22,8 @@ def _sources():
         (Owner, "account_circle", "Owner", (), lambda o: o.name, lambda o: f"{o.code or ''} · {o.phone}".strip(" ·")),
         (Lease, "description", "Lease", ("tenant", "unit__property", "property"), lambda o: f"{o.code} · {o.tenant.name}",
          lambda o: f"{o.item_name} · {o.get_status_display()}"),
+        (OwnerAgreement, "handshake", "Owner agreement", ("owner",), lambda o: f"{o.code} · {o.owner.name}",
+         lambda o: f"{o.fee_text()} · {o.get_status_display()}"),
         (LeasePayment, "payments", "Payment", ("lease__tenant",), lambda o: f"{o.lease.code} {o.label.lower()} · {o.lease.tenant.name}",
          lambda o: f"Due {fmt_date(o.due_date)} · {o.amount:,.0f} AED · {o.get_status_display()}"),
     ]

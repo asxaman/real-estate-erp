@@ -248,7 +248,6 @@
   function propertyFormExtras(form) {
     var typeSelect = form.querySelector('[name="property_type"]');
     var ownerSelect = form.querySelector('[name="owner"]');
-    var feeSelect = form.querySelector('[name="management_fee_type"]');
     var activeBox = form.querySelector('[name="is_active"]');
 
     // Pill next to the "Property type" label
@@ -296,7 +295,6 @@
       });
 
       var type = typeSelect ? typeSelect.value : "";
-      var feeType = feeSelect ? feeSelect.value : "";
       var isBuilding = BUILDING_TYPES.indexOf(type) !== -1;
       var isStandalone = !!type && !isBuilding;
 
@@ -313,16 +311,6 @@
       if (!isStandalone) {
         hide.push("annual_rent", "status");
       }
-      if (ownerIsCompany()) {
-        hide.push("management_fee_type", "management_fee_percent", "management_fee_fixed");
-      } else {
-        if (feeType !== "percent") {
-          hide.push("management_fee_percent");
-        }
-        if (feeType !== "fixed") {
-          hide.push("management_fee_fixed");
-        }
-      }
       hideFields(form, hide);
     }
 
@@ -333,7 +321,7 @@
 
     // Native change events, plus a light check every 300 ms because the searchable
     // Owner dropdown does not always fire a native change event.
-    [typeSelect, ownerSelect, feeSelect, activeBox].forEach(function (el) {
+    [typeSelect, ownerSelect, activeBox].forEach(function (el) {
       if (el) {
         el.addEventListener("change", refresh);
       }
@@ -344,7 +332,6 @@
         typeSelect ? typeSelect.value : "",
         ownerSelect ? ownerSelect.value : "",
         ownerIsCompany() ? "company" : "other",
-        feeSelect ? feeSelect.value : "",
         activeBox ? activeBox.checked : "",
       ].join("|");
       if (state !== lastState) {
@@ -1943,4 +1930,41 @@
   } else {
     setUp();
   }
+})();
+
+/* The side panel stays docked (beside the page, open by default, choice remembered) from 1024 pixels wide, not only above
+   1280 as Unfold has it. A laptop whose screen is scaled by Windows (1920 wide at 150% = 1280) then gets the same layout as
+   a large monitor. Below 1024 (tablets, phones) the panel still floats over the page and starts closed. */
+(function () {
+  "use strict";
+  var DOCK_FROM = 1024;
+  function wide() { return window.innerWidth >= DOCK_FROM; }
+  function stored() {
+    try { return window.localStorage.getItem("sidebarOpen"); } catch (err) { return null; }
+  }
+  document.addEventListener("alpine:init", function () {
+    var original = window.theme;
+    if (typeof original !== "function" || original.erpWrapped) { return; }
+    var wrapped = function () {
+      var data = original.apply(this, arguments);
+      data.sidebarOpen = function () {
+        return wide() ? stored() !== "0" : false;
+      };
+      data.sidebarToggle = function () {
+        var now = typeof this.sidebarOpen === "function" ? this.sidebarOpen() : this.sidebarOpen;
+        this.sidebarOpen = !now;
+        if (wide()) {
+          try { window.localStorage.setItem("sidebarOpen", this.sidebarOpen ? "1" : "0"); } catch (err) { /* private window */ }
+        }
+      };
+      if (data.themeBindings) {  // (Unfold re-decides this when the window is resized, and once when the page opens)
+        data.themeBindings["x-resize.window"] = function () {
+          this.sidebarOpen = wide() ? stored() !== "0" : false;
+        };
+      }
+      return data;
+    };
+    wrapped.erpWrapped = true;
+    window.theme = wrapped;
+  });
 })();

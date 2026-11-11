@@ -86,19 +86,11 @@ class PropertyRules(TestCase):
         prop.save()
         self.assertEqual(Property.objects.get(pk=prop.pk).code, "RMT")
 
-    def test_company_owned_has_no_fee(self):
-        prop = standalone(owner=Owner.company(), management_fee_percent=Decimal("7"))
-        prop.full_clean()
-        self.assertEqual(prop.management_fee_type, "")
-        self.assertEqual(prop.management_fee_percent, 0)
-
-    def test_other_owner_needs_a_fee(self):
-        with self.assertRaises(ValidationError) as ctx:
-            standalone(management_fee_type="").full_clean()
-        self.assertIn("management_fee_type", ctx.exception.message_dict)
-        with self.assertRaises(ValidationError) as ctx:
-            standalone(management_fee_percent=Decimal("0")).full_clean()
-        self.assertIn("management_fee_percent", ctx.exception.message_dict)
+    def test_the_fee_is_no_longer_asked_on_the_property(self):
+        # the fee boxes are gone: a property needs no fee to be valid (the fee lives in the owner agreement)
+        standalone(management_fee_type="").full_clean()
+        standalone(management_fee_percent=Decimal("0")).full_clean()
+        standalone(owner=Owner.company()).full_clean()
 
     def test_standalone_needs_a_status(self):
         with self.assertRaises(ValidationError) as ctx:
@@ -448,7 +440,7 @@ class PropertyUnitImport(TestCase):
             "ABC,Three,Spaceship,Alpha\n"
             "VIL1,Four,Villa,Alpha\n"
         ))
-        self.assertEqual(len(errors), 4)  # unknown owner, bad code, bad type, missing fee
+        self.assertEqual(len(errors), 3)  # unknown owner, bad code, bad type (a missing fee is no longer an error)
         self.assertEqual(Property.objects.count(), 0)
 
     def test_unit_file(self):
@@ -1087,23 +1079,27 @@ class BulkActions(TestCase):
         response = self.run_action("property", "change_owner", ids, apply="1", owner=new.pk)
         self.assertEqual(response.status_code, 302)
         self.assertEqual(set(Property.objects.filter(pk__in=ids).values_list("owner_id", flat=True)), {new.pk})
-        # moving to the company clears the fee
+        # moving to the company, and back to a managed owner, needs no fee any more
         self.run_action("property", "change_owner", ids, apply="1", owner=Owner.company().pk)
         prop = Property.objects.get(pk=ids[0])
         self.assertTrue(prop.is_company_owned)
-        self.assertEqual(prop.management_fee_type, "")
-        # company-owned properties have no fee, so moving them to a managed owner needs one: nothing moves
         response = self.run_action("property", "change_owner", ids, apply="1", owner=new.pk)
-        self.assertEqual(response.status_code, 200)
-        self.assertIn("Nothing was changed", response.content.decode())
-        self.assertEqual(set(Property.objects.filter(pk__in=ids).values_list("owner_id", flat=True)), {Owner.company().pk})
-        # with a fee it works
-        response = self.run_action(
-            "property", "change_owner", ids, apply="1", owner=new.pk, fee_type="fixed", fee_fixed="6000"
-        )
         self.assertEqual(response.status_code, 302)
-        prop = Property.objects.get(pk=ids[0])
-        self.assertEqual((prop.owner_id, prop.management_fee_type, prop.management_fee_fixed), (new.pk, "fixed", 6000))
+        self.assertEqual(set(Property.objects.filter(pk__in=ids).values_list("owner_id", flat=True)), {new.pk})
+
+    def test_a_property_under_an_agreement_cannot_change_owner(self):
+        from agreements.models import AgreementProperty, OwnerAgreement
+
+        old, props = self._props()
+        new = make_owner("Agreement New Owner")
+        agreement = OwnerAgreement.objects.create(
+            owner=old, start_date=timezone.localdate(), fee_percent_collected=Decimal("5"), status="active",
+        )
+        AgreementProperty.objects.create(agreement=agreement, property=props[0])
+        response = self.run_action("property", "change_owner", [props[0].pk], apply="1", owner=new.pk)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(agreement.code, response.content.decode())
+        self.assertEqual(Property.objects.get(pk=props[0].pk).owner_id, old.pk)
 
     def test_inactive_owner_cannot_be_chosen(self):
         old, props = self._props()
