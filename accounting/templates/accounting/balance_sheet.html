@@ -1,0 +1,31 @@
+{% extends "admin/base_site.html" %}
+
+{% block content %}
+<div class="erp-dash">
+  <form method="get" class="erp-filterbar">
+    {% for label, url in links %}<a class="erp-btn erp-btn-light" href="{{ url }}">{{ label }}</a>{% endfor %}
+    <label>As of <input type="date" name="to" value="{{ end }}"></label>
+    <button type="submit" class="erp-btn erp-btn-primary">Show</button>
+    <span class="erp-dash-hello">{% if balanced %}Assets equal liabilities plus equity.{% else %}<b>Out of balance by {{ difference|floatformat:2 }} AED - please check the manual entries.</b>{% endif %}</span>
+  </form>
+  <div class="erp-panel erp-scroll">
+    <h3>Balance Sheet As Of {{ end_text }}</h3>
+    <table class="erp-table">
+      <thead><tr><th>Account</th><th style="text-align:right">AED</th></tr></thead>
+      <tbody>
+        <tr><td colspan="2"><b>Assets</b></td></tr>
+        {% for r in assets %}<tr><td><a href="{{ r.url }}">{{ r.account.code }}</a> {{ r.account.name }}</td><td style="text-align:right">{{ r.value|floatformat:2 }}</td></tr>{% empty %}<tr><td colspan="2">Nothing yet.</td></tr>{% endfor %}
+        <tr><td><b>Total Assets</b></td><td style="text-align:right"><b>{{ asset_total|floatformat:2 }}</b></td></tr>
+        <tr><td colspan="2"><b>Liabilities</b></td></tr>
+        {% for r in liabilities %}<tr><td><a href="{{ r.url }}">{{ r.account.code }}</a> {{ r.account.name }}</td><td style="text-align:right">{{ r.value|floatformat:2 }}</td></tr>{% empty %}<tr><td colspan="2">Nothing yet.</td></tr>{% endfor %}
+        <tr><td><b>Total Liabilities</b></td><td style="text-align:right"><b>{{ liability_total|floatformat:2 }}</b></td></tr>
+        <tr><td colspan="2"><b>Equity</b></td></tr>
+        {% for r in equity %}<tr><td><a href="{{ r.url }}">{{ r.account.code }}</a> {{ r.account.name }}</td><td style="text-align:right">{{ r.value|floatformat:2 }}</td></tr>{% endfor %}
+        <tr><td>Profit / (Loss) To Date</td><td style="text-align:right">{{ profit|floatformat:2 }}</td></tr>
+        <tr><td><b>Total Equity</b></td><td style="text-align:right"><b>{{ equity_total|floatformat:2 }} + {{ profit|floatformat:2 }}</b></td></tr>
+        <tr><td><b>Total Liabilities And Equity</b></td><td style="text-align:right"><b>{{ right_total|floatformat:2 }}</b></td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,29 @@
+{% extends "admin/base_site.html" %}
+
+{% block content %}
+<div class="erp-dash">
+  <form method="get" class="erp-filterbar">
+    {% for label, url in links %}<a class="erp-btn erp-btn-light" href="{{ url }}">{{ label }}</a>{% endfor %}
+    <label>From <input type="date" name="from" value="{{ start }}"></label>
+    <label>To <input type="date" name="to" value="{{ end }}"></label>
+    <button type="submit" class="erp-btn erp-btn-primary">Show</button>
+    <span class="erp-dash-hello">Choose the return period (default: this quarter).</span>
+  </form>
+  <div class="erp-panel erp-scroll">
+    <h3>VAT Return: {{ start_text }} to {{ end_text }}</h3>
+    <table class="erp-table">
+      <thead><tr><th>Item</th><th style="text-align:right">Amount (AED)</th><th style="text-align:right">VAT (AED)</th></tr></thead>
+      <tbody>
+        <tr><td colspan="3"><b>Sales And Other Outputs</b></td></tr>
+        <tr><td>Standard-rated supplies (5%)</td><td style="text-align:right">{{ sales_std|floatformat:2 }}</td><td style="text-align:right">{{ output_vat|floatformat:2 }}</td></tr>
+        <tr><td>Exempt / zero-rated / no VAT (for example residential rent, deposits)</td><td style="text-align:right">{{ sales_other|floatformat:2 }}</td><td style="text-align:right">0.00</td></tr>
+        <tr><td colspan="3"><b>Expenses And Other Inputs</b></td></tr>
+        <tr><td>Standard-rated expenses (5%)</td><td style="text-align:right">{{ purchases_std|floatformat:2 }}</td><td style="text-align:right">{{ input_vat|floatformat:2 }}</td></tr>
+        <tr><td colspan="3"><b>Net VAT</b></td></tr>
+        <tr><td><b>{% if refund %}VAT Refundable To You{% else %}VAT Payable To The FTA{% endif %}</b></td><td></td><td style="text-align:right"><b>{{ due_abs|floatformat:2 }}</b></td></tr>
+      </tbody>
+    </table>
+    <p><small>Worked out from posted ledger entries (VAT payable and VAT receivable accounts). Check the figures against the FTA return before filing.</small></p>
+  </div>
+</div>
+{% endblock %}

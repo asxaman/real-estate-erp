@@ -78,10 +78,21 @@ TOOLS_OFF_MESSAGE = (
 )
 
 
+def _ledger_paused():
+    """While bulk seeding or erasing, the ledger is not posted record by record (the Accounting step does it once)."""
+    try:
+        from accounting.posting import paused
+    except ImportError:
+        from contextlib import nullcontext
+
+        return nullcontext()
+    return paused()
+
+
 def run_seeders() -> list[str]:
     """Run every registered seeder inside one transaction (all or nothing)."""
     messages = []
-    with suppressed(), transaction.atomic():  # not logged record by record
+    with suppressed(), _ledger_paused(), transaction.atomic():  # not logged record by record
         for step in sorted(_seeders.values(), key=lambda s: s.order):
             messages.append(f"{step.label}: {step.func()}")
     return messages
@@ -96,7 +107,7 @@ def run_erasers(include_users: bool = False) -> list[str]:
     (group) is deleted as well.
     """
     messages = []
-    with suppressed(), transaction.atomic():  # not logged record by record
+    with suppressed(), _ledger_paused(), transaction.atomic():  # not logged record by record
         for step in sorted(_erasers.values(), key=lambda s: s.order, reverse=True):
             messages.append(f"{step.label}: {step.func()}")
         # Development phase only: the history of changes goes too (it holds personal numbers).

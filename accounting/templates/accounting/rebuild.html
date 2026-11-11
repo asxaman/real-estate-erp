@@ -1,0 +1,14 @@
+{% extends "admin/base_site.html" %}
+
+{% block content %}
+<div class="erp-dash">
+  <form method="post" class="erp-panel">
+    {% csrf_token %}
+    <p>This posts every tenant payment, vendor bill, expense, payment voucher, payroll, final settlement and owner statement to the ledger, and removes postings whose record no longer exists. Manual journal entries are not touched. It is safe to run again at any time.</p>
+    <div class="erp-filterbar">
+      <button type="submit" class="erp-btn erp-btn-primary">Refresh Ledger</button>
+      <a class="erp-btn erp-btn-light" href="{{ back }}">Cancel</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

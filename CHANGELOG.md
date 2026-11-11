@@ -1,5 +1,25 @@
 # Changelog
 
+## Update 70 - Accounting part 2: Profit and Loss, Balance Sheet, VAT return
+**No migration needed.** Run `python manage.py test`, then Ctrl+F5 twice.
+- Left menu, Accounting: **Profit and loss**, **Balance sheet**, **VAT return** (also linked from each Accounting page).
+- **Profit and loss**: income and expenses for any dates (default: this year to today), net profit or loss, each line opens its ledger.
+- **Balance sheet**: assets, liabilities and equity as of any date, with the profit to date included in equity and a balanced check.
+- **VAT return (UAE 5%)**: for any period (default: this quarter): standard-rated sales and output VAT, exempt/other income (for example residential rent), standard-rated expenses and input VAT, and the net VAT payable or refundable. Check against the FTA return before filing.
+- Fix: a final settlement is now always posted to the ledger in balance.
+
+## Update 69 - New module: Accounting (part 1: chart of accounts, general ledger, trial balance)
+**Migration needed.** Run `python manage.py makemigrations accounting`, then `python manage.py migrate`, then `python manage.py test`, then Ctrl+F5 twice. After that open **Accounting > Trial balance** and press **Refresh ledger** once to post the records you already have.
+- Left menu, new group **Accounting**: Chart of accounts, Journal entries, General ledger, Trial balance.
+- **Chart of accounts**: 30 ready accounts (cash, bank, VAT, payables, owners' funds, security deposits, income, expenses, salaries). Add your own; the built-in ones cannot be deleted or re-typed. Balances are shown live.
+- **Automatic postings** (double entry, JV-0001...): paid tenant payments (rent, deposits, fees, VAT, refunds), vendor bills, expenses, payment vouchers, approved/paid payrolls and settlements, and owner statements. They follow the record: edit or cancel the record and the entry updates. They cannot be edited by hand.
+- **Manual journal entries** for opening balances and adjustments; they must balance. A wrong one is **voided** with a reason, never deleted.
+- **General ledger**: pick an account and dates; opening balance, running balance and links to each entry.
+- **Trial balance**: as of any date, grouped by type, with a balanced check.
+- **Refresh ledger** re-posts everything from the records (safe to repeat).
+- Roles: Accountant has full access; other roles see nothing.
+- Not yet (Part 2): profit and loss, balance sheet and the UAE 5% VAT return. Owner statement adjustments are not posted yet; costs charged to a tenant are treated as company expense.
+
 ## Update 68 - HR & Payroll: Bonuses and Final Settlements (gratuity, unused leave)
 **Migration needed.** Run `python manage.py makemigrations hr`, then `python manage.py migrate`, then `python manage.py test`, then Ctrl+F5 twice.
 - Left menu, HR & Payroll: **Bonuses** (`/admin/bonuses/`) and **Final settlements** (`/admin/final-settlements/`). Numbers: BON-0001, EOS-0001.

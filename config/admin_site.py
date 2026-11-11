@@ -32,6 +32,8 @@ ROUTES = {
     "hr/payrollslip": "salary-slips",
     "hr/bonus": "bonuses",
     "hr/finalsettlement": "final-settlements",
+    "accounting/account": "chart-of-accounts",
+    "accounting/journalentry": "journal-entries",
     "auth/user": "users",
     "auth/group": "groups",
     "core/systemsettings": "system-settings",

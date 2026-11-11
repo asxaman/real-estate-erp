@@ -52,6 +52,8 @@ AUDITED_MODELS = (
     "hr.PayrollRun",
     "hr.Bonus",
     "hr.FinalSettlement",
+    "accounting.Account",
+    "accounting.JournalEntry",
     "core.SystemSettings",
     "auth.User",
 )

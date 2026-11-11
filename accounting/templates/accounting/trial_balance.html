@@ -1,0 +1,36 @@
+{% extends "admin/base_site.html" %}
+
+{% block content %}
+<div class="erp-dash">
+  <form method="get" class="erp-filterbar">
+    <a class="erp-btn erp-btn-light" href="{{ ledger_url }}">General Ledger</a>
+    <label>As of <input type="date" name="to" value="{{ end }}"></label>
+    <button type="submit" class="erp-btn erp-btn-primary">Show</button>
+    {% if can_rebuild %}<a class="erp-btn erp-btn-light" href="{{ rebuild_url }}">Refresh Ledger</a>{% endif %}
+    <span class="erp-dash-hello">
+      {% if balanced %}Debits and credits agree.{% else %}<b>Out of balance by {{ difference|floatformat:2 }} AED - please check the manual entries.</b>{% endif %}
+    </span>
+  </form>
+  <div class="erp-panel erp-scroll">
+    <table class="erp-table">
+      <thead><tr><th>Account No.</th><th>Account</th><th style="text-align:right">Debit (AED)</th><th style="text-align:right">Credit (AED)</th></tr></thead>
+      <tbody>
+      {% for g in groups %}
+        <tr><td colspan="4"><b>{{ g.label }}</b></td></tr>
+        {% for r in g.rows %}
+        <tr>
+          <td><a href="{{ r.url }}">{{ r.account.code }}</a></td>
+          <td>{{ r.account.name }}</td>
+          <td style="text-align:right">{% if r.debit %}{{ r.debit|floatformat:2 }}{% endif %}</td>
+          <td style="text-align:right">{% if r.credit %}{{ r.credit|floatformat:2 }}{% endif %}</td>
+        </tr>
+        {% endfor %}
+      {% empty %}
+        <tr><td colspan="4">Nothing is posted yet. Press Refresh Ledger to post the existing records.</td></tr>
+      {% endfor %}
+        <tr><td colspan="2"><b>Total as of {{ end_text }}</b></td><td style="text-align:right"><b>{{ grand_dr|floatformat:2 }}</b></td><td style="text-align:right"><b>{{ grand_cr|floatformat:2 }}</b></td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

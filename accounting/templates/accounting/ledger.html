@@ -1,0 +1,39 @@
+{% extends "admin/base_site.html" %}
+
+{% block content %}
+<div class="erp-dash">
+  <form method="get" class="erp-filterbar">
+    <a class="erp-btn erp-btn-light" href="{{ chart_url }}">Chart Of Accounts</a>
+    <a class="erp-btn erp-btn-light" href="{{ trial_url }}">Trial Balance</a>
+    <select name="account" onchange="this.form.submit()">
+      {% for a in accounts %}<option value="{{ a.pk }}"{% if chosen and a.pk == chosen.pk %} selected{% endif %}>{{ a.code }} - {{ a.name }}</option>{% endfor %}
+    </select>
+    <label>From <input type="date" name="from" value="{{ start }}"></label>
+    <label>To <input type="date" name="to" value="{{ end }}"></label>
+    <button type="submit" class="erp-btn erp-btn-primary">Show</button>
+  </form>
+  <div class="erp-panel erp-scroll">
+    {% if chosen %}
+    <table class="erp-table">
+      <thead><tr><th>Date</th><th>Entry</th><th>Description</th><th style="text-align:right">Debit (AED)</th><th style="text-align:right">Credit (AED)</th><th style="text-align:right">Balance (AED)</th></tr></thead>
+      <tbody>
+        <tr><td colspan="5"><i>Opening balance</i></td><td style="text-align:right"><b>{{ opening|floatformat:2 }}</b></td></tr>
+        {% for r in rows %}
+        <tr>
+          <td>{{ r.entry.date|date:"d/m/Y" }}</td>
+          <td><a href="{{ r.url }}">{{ r.entry.code }}</a></td>
+          <td>{{ r.line.description|default:r.entry.description }}</td>
+          <td style="text-align:right">{% if r.line.debit %}{{ r.line.debit|floatformat:2 }}{% endif %}</td>
+          <td style="text-align:right">{% if r.line.credit %}{{ r.line.credit|floatformat:2 }}{% endif %}</td>
+          <td style="text-align:right">{{ r.balance|floatformat:2 }}</td>
+        </tr>
+        {% empty %}
+        <tr><td colspan="6">No postings in this period.</td></tr>
+        {% endfor %}
+        <tr><td colspan="3"><b>Totals / Closing balance</b></td><td style="text-align:right"><b>{{ total_dr|floatformat:2 }}</b></td><td style="text-align:right"><b>{{ total_cr|floatformat:2 }}</b></td><td style="text-align:right"><b>{{ closing|floatformat:2 }}</b></td></tr>
+      </tbody>
+    </table>
+    {% else %}<p>No accounts yet.</p>{% endif %}
+  </div>
+</div>
+{% endblock %}

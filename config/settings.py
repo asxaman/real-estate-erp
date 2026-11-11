@@ -102,6 +102,7 @@ INSTALLED_APPS = [
     "maintenance",  # Module 5: vendors and maintenance requests
     "agreements",  # Module 4: owner agreements (the management contract with each owner)
     "hr",  # Module 9: HR & payroll (employees, leave, attendance, salaries)
+    "accounting",  # Module 10: chart of accounts, general ledger, trial balance
 ]
 
 MIDDLEWARE = [
@@ -482,6 +483,27 @@ UNFOLD = {
                         "link": reverse_lazy("admin:hr_finalsettlement_changelist"),
                         "permission": _can("hr.view_finalsettlement"),
                     },
+                ],
+            },
+            {
+                "title": "Accounting",
+                "separator": True,
+                "collapsible": True,
+                "items": [
+                    {"title": "Chart of accounts", "icon": "account_tree", "link": reverse_lazy("admin:accounting_account_changelist"),
+                     "permission": _can("accounting.view_account")},
+                    {"title": "Journal entries", "icon": "menu_book", "link": reverse_lazy("admin:accounting_journalentry_changelist"),
+                     "permission": _can("accounting.view_journalentry")},
+                    {"title": "General ledger", "icon": "receipt_long", "link": reverse_lazy("admin:accounting_account_ledger"),
+                     "permission": _can("accounting.view_journalentry")},
+                    {"title": "Trial balance", "icon": "balance", "link": reverse_lazy("admin:accounting_account_trialbalance"),
+                     "permission": _can("accounting.view_journalentry")},
+                    {"title": "Profit and loss", "icon": "trending_up", "link": reverse_lazy("admin:accounting_account_profitloss"),
+                     "permission": _can("accounting.view_journalentry")},
+                    {"title": "Balance sheet", "icon": "account_balance", "link": reverse_lazy("admin:accounting_account_balancesheet"),
+                     "permission": _can("accounting.view_journalentry")},
+                    {"title": "VAT return", "icon": "request_quote", "link": reverse_lazy("admin:accounting_account_vatreturn"),
+                     "permission": _can("accounting.view_journalentry")},
                 ],
             },
             {
