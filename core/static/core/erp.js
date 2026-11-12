@@ -87,7 +87,24 @@
       e.stopPropagation();
       showTip(icon, text);
     });
-    label.appendChild(icon);
+    // Keep the "i" on the same line as the last word of the label ("... Number (TRN) (i)"), so it never drops under the text alone.
+    var textNode = null;
+    for (var n = label.lastChild; n; n = n.previousSibling) {
+      if (n.nodeType === 3 && n.nodeValue.trim()) { textNode = n; break; }
+      if (n.nodeType === 1 && n.textContent.trim()) { break; }
+    }
+    if (textNode) {
+      var value = textNode.nodeValue.replace(/\s+$/, "");
+      var cut = value.search(/\S+$/);
+      var tail = document.createElement("span");
+      tail.style.whiteSpace = "nowrap";
+      tail.appendChild(document.createTextNode(value.slice(cut)));
+      tail.appendChild(icon);
+      textNode.nodeValue = value.slice(0, cut);
+      textNode.parentNode.insertBefore(tail, textNode.nextSibling);
+    } else {
+      label.appendChild(icon);
+    }
   }
 
   // The same "i" icon for other scripts (the search box of the lists): window.erpMakeInfo("text") returns the icon.
@@ -1967,4 +1984,32 @@
     wrapped.erpWrapped = true;
     window.theme = wrapped;
   });
+})();
+
+
+/* Map links (Google Maps and similar) always open in a new tab, everywhere in the app. */
+(function () {
+  "use strict";
+  var MAP = /^https?:\/\/([a-z0-9-]+\.)*(maps\.app\.goo\.gl|goo\.gl\/maps|google\.[a-z.]+\/maps|maps\.google\.[a-z.]+|maps\.apple\.com|waze\.com|g\.page|share\.google)/i;
+
+  function isMapLink(a) {
+    var href = a.getAttribute("href") || "";
+    return MAP.test(href) || !!a.closest("[class*=field-map_link], [class*=map-link]");
+  }
+
+  function mark(a) {
+    if (a.getAttribute("target") !== "_blank") { a.setAttribute("target", "_blank"); }
+    a.setAttribute("rel", "noopener noreferrer");
+  }
+
+  document.addEventListener("click", function (e) {
+    var a = e.target && e.target.closest ? e.target.closest("a[href]") : null;
+    if (a && isMapLink(a)) { mark(a); }
+  }, true);
+
+  function scan() {
+    Array.prototype.forEach.call(document.querySelectorAll("a[href]"), function (a) { if (isMapLink(a)) { mark(a); } });
+  }
+  document.addEventListener("DOMContentLoaded", scan);
+  window.addEventListener("load", scan);
 })();

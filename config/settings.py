@@ -285,11 +285,11 @@ UNFOLD = {
     "SHOW_VIEW_ON_SITE": False,
     # Our own small style/behaviour layer (info icons, compact forms).
     # Bump the ?v= number whenever these files change so browsers reload them.
-    "STYLES": [lambda request: static("core/erp.css") + "?v=55"],
+    "STYLES": [lambda request: static("core/erp.css") + "?v=56"],
     "SCRIPTS": [
-        lambda request: static("core/erp.js") + "?v=36",
+        lambda request: static("core/erp.js") + "?v=37",
         lambda request: static("core/leases.js") + "?v=17",
-        lambda request: static("core/lists.js") + "?v=10",
+        lambda request: static("core/lists.js") + "?v=11",
     ],
     "SIDEBAR": {
         "show_search": True,
@@ -492,6 +492,8 @@ UNFOLD = {
                 "items": [
                     {"title": "Chart of accounts", "icon": "account_tree", "link": reverse_lazy("admin:accounting_account_changelist"),
                      "permission": _can("accounting.view_account")},
+                    {"title": "Opening balances", "icon": "start", "link": reverse_lazy("admin:accounting_account_opening"),
+                     "permission": _can("accounting.add_journalentry")},
                     {"title": "Journal entries", "icon": "menu_book", "link": reverse_lazy("admin:accounting_journalentry_changelist"),
                      "permission": _can("accounting.view_journalentry")},
                     {"title": "General ledger", "icon": "receipt_long", "link": reverse_lazy("admin:accounting_account_ledger"),
@@ -504,6 +506,14 @@ UNFOLD = {
                      "permission": _can("accounting.view_journalentry")},
                     {"title": "VAT return", "icon": "request_quote", "link": reverse_lazy("admin:accounting_account_vatreturn"),
                      "permission": _can("accounting.view_journalentry")},
+                    {"title": "Cash and bank", "icon": "account_balance_wallet", "link": reverse_lazy("admin:accounting_account_cashbank"),
+                     "permission": _can("accounting.view_journalentry")},
+                    {"title": "Fund transfers", "icon": "swap_horiz", "link": reverse_lazy("admin:accounting_fundtransfer_changelist"),
+                     "permission": _can("accounting.view_fundtransfer")},
+                    {"title": "Bank reconciliation", "icon": "fact_check", "link": reverse_lazy("admin:accounting_account_reconcile"),
+                     "permission": _can("accounting.add_reconciliation")},
+                    {"title": "Reconciliation history", "icon": "history", "link": reverse_lazy("admin:accounting_reconciliation_changelist"),
+                     "permission": _can("accounting.view_reconciliation")},
                 ],
             },
             {

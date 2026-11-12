@@ -1,0 +1,55 @@
+{% extends "admin/base_site.html" %}
+
+{% block content %}
+<div class="erp-dash">
+  <div class="erp-filterbar">
+    <a class="erp-btn erp-btn-light" href="{{ chart_url }}">Chart Of Accounts</a>
+    <a class="erp-btn erp-btn-light" href="{{ trial_url }}">Trial Balance</a>
+  </div>
+  <form method="post" class="erp-panel erp-scroll" id="open-form">
+    {% csrf_token %}
+    <p>Enter what each account held on the starting date: money in the bank is a <b>debit</b>; what you owe (payables, deposits held) is a <b>credit</b>.
+       You do not have to balance it: any difference goes to <b>{{ equity.code }} {{ equity.name }}</b> automatically.
+       Income and expense accounts do not have opening balances. You can come back and change these later.</p>
+    <div class="erp-filterbar">
+      <label>Balances as of <input type="date" name="as_of" value="{{ as_of }}" required></label>
+      <span>Debits: <b id="open-dr">0.00</b></span>
+      <span>Credits: <b id="open-cr">0.00</b></span>
+      <span>To Opening Balance Equity: <b id="open-diff">0.00</b></span>
+      <button type="submit" class="erp-btn erp-btn-primary">Save Opening Balances</button>
+    </div>
+    <table class="erp-table">
+      <thead><tr><th>Account</th><th>Type</th><th style="width:170px;text-align:right">Debit (AED)</th><th style="width:170px;text-align:right">Credit (AED)</th></tr></thead>
+      <tbody>
+      {% for r in rows %}
+        <tr>
+          <td{% if r.account.parent_id %} style="padding-left:28px"{% endif %}>{% if r.account.parent_id %}&#8627; {% endif %}{{ r.account.code }} - {{ r.account.name }}</td>
+          <td>{{ r.account.get_type_display }}</td>
+          <td><input type="text" inputmode="decimal" name="dr_{{ r.account.pk }}" value="{{ r.dr|stringformat:'s' }}" data-side="dr" style="text-align:right" placeholder="0.00"></td>
+          <td><input type="text" inputmode="decimal" name="cr_{{ r.account.pk }}" value="{{ r.cr|stringformat:'s' }}" data-side="cr" style="text-align:right" placeholder="0.00"></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </form>
+</div>
+<script>
+(function () {
+  var form = document.getElementById("open-form");
+  var inputs = form.querySelectorAll("input[data-side]");
+  function fmt(n) { return n.toLocaleString("en-US", {minimumFractionDigits: 2, maximumFractionDigits: 2}); }
+  function update() {
+    var dr = 0, cr = 0;
+    inputs.forEach(function (i) {
+      var v = parseFloat((i.value || "0").replace(/,/g, ""));
+      if (!isNaN(v)) { if (i.dataset.side === "dr") { dr += v; } else { cr += v; } }
+    });
+    document.getElementById("open-dr").textContent = fmt(dr);
+    document.getElementById("open-cr").textContent = fmt(cr);
+    document.getElementById("open-diff").textContent = fmt(Math.abs(dr - cr)) + (dr > cr ? " (credit)" : dr < cr ? " (debit)" : "");
+  }
+  inputs.forEach(function (i) { i.addEventListener("input", update); });
+  update();
+})();
+</script>
+{% endblock %}

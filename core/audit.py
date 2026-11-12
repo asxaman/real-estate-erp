@@ -54,6 +54,8 @@ AUDITED_MODELS = (
     "hr.FinalSettlement",
     "accounting.Account",
     "accounting.JournalEntry",
+    "accounting.FundTransfer",
+    "accounting.Reconciliation",
     "core.SystemSettings",
     "auth.User",
 )

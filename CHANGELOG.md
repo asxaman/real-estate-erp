@@ -1,5 +1,30 @@
 # Changelog
 
+## Update 73 - Accounting: main accounts and sub-accounts, opening balances
+**Migration needed.** Run `python manage.py makemigrations accounting`, then `python manage.py migrate`, then `python manage.py test`, then Ctrl+F5 twice.
+- **Main account and sub-account** in the Chart of accounts: when adding an account, choose a **Main account** to make it a sub-account (for example 1011 Emirates NBD under 1010 Bank accounts). A sub-account always takes the type of its main account; only one level is allowed. The list shows each main account with its sub-accounts indented below it, and a main account shows its own balance plus its sub-accounts. Filters: Main Accounts / Sub-Accounts. A main account that has sub-accounts cannot be deleted.
+- **General ledger** of a main account includes its sub-accounts (with an Account column); pick a sub-account to see only that one. **Profit and loss** and **Balance sheet** add the sub-accounts up under their main account.
+- **Opening balances** (left menu, Accounting): one page lists every asset, liability and equity account with Debit and Credit boxes and a "balances as of" date. Whatever does not balance is put to 3200 Opening Balance Equity automatically, with live totals on screen. You can open the page again to correct the balances at any time; it keeps a single entry (Opening balances) which shows in Journal entries and the Trial balance.
+- Sample data now has two bank sub-accounts with opening balances.
+- Note: tenant payments, bills and vouchers still post to the main Bank account (1010). Choosing the exact bank for each payment is a later update.
+
+## Update 72 - Small tweaks
+**No migration needed.** Ctrl+F5 twice after copying.
+- **Map links** (the "Currently:" link on a property and any other Google Maps / map link in the app) now always open in a **new tab**.
+- **Company Owned**: a property whose owner is Company Owned (and the Company Owned owner page itself) no longer shows the **Agreements** tab, since there is no owner agreement.
+- **Back to Top** button no longer appears when only the left menu is scrolled; it shows only when the page itself is scrolled.
+- Field labels with an "i" icon (for example Tax Registration Number (TRN)) keep the icon on the same line as the last word instead of dropping below the text.
+
+## Update 71 - Accounting part 3: Cash and bank, fund transfers, bank reconciliation, report export and print
+**Migration needed.** Run `python manage.py makemigrations accounting`, then `python manage.py migrate`, then `python manage.py test`, then Ctrl+F5 twice.
+- Left menu, Accounting: **Cash and bank**, **Fund transfers**, **Bank reconciliation**, **Reconciliation history**.
+- **Cash and bank**: every cash and bank account (numbers starting 10, for example 1000 Cash, 1010 Bank; add more such as 1011 in the Chart of accounts) with its ledger balance, the date it was last reconciled and how many lines are still unchecked.
+- **Fund transfers** (TRF-0001): move money between your own cash and bank accounts (cash banked, cash withdrawn, bank to bank). Posted to the ledger automatically; a wrong one is cancelled with a reason.
+- **Bank reconciliation**: choose the account and the statement date, type the closing balance from the bank statement and tick the lines that appear on it. A live total shows the difference; it can only be saved when the difference is 0.00. Each saved reconciliation (REC-0001) is kept in the history; the latest one of an account can be undone.
+- **Every accounting report** (General ledger, Trial balance, Profit and loss, Balance sheet, VAT return, Cash and bank) now has **Export to Excel / CSV** and **Print / Save as PDF** buttons.
+- Roles: the Accountant has all of these. Sample data includes a cash withdrawal transfer.
+- Note: if a paid record that was already reconciled is later edited, its ledger line is re-made and shows as unreconciled again.
+
 ## Update 70 - Accounting part 2: Profit and Loss, Balance Sheet, VAT return
 **No migration needed.** Run `python manage.py test`, then Ctrl+F5 twice.
 - Left menu, Accounting: **Profit and loss**, **Balance sheet**, **VAT return** (also linked from each Accounting page).

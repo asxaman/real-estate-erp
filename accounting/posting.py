@@ -206,9 +206,18 @@ def draft_ownerstatement(st):
     return d
 
 
+def draft_fundtransfer(t):
+    if t.cancelled:
+        return None
+    d = Draft(t.date, f"Transfer {t.code} · {t.from_account.name} to {t.to_account.name}" + (f" · {t.reference}" if t.reference else ""))
+    d.dr(t.to_account.code, t.amount)
+    d.cr(t.from_account.code, t.amount)
+    return d
+
+
 KINDS = {
     "leasepayment": draft_leasepayment, "vendorbill": draft_vendorbill, "expense": draft_expense, "paymentvoucher": draft_voucher,
-    "payrollrun": draft_payrollrun, "finalsettlement": draft_finalsettlement, "ownerstatement": draft_ownerstatement,
+    "payrollrun": draft_payrollrun, "finalsettlement": draft_finalsettlement, "ownerstatement": draft_ownerstatement, "fundtransfer": draft_fundtransfer,
 }
 
 
@@ -270,6 +279,8 @@ def sources():
     from payables.models import Expense, PaymentVoucher, VendorBill
     from statements.models import OwnerStatement
 
+    from .models import FundTransfer
+
     return {
         "leasepayment": LeasePayment.objects.filter(status="paid").select_related("lease__tenant", "lease__property__owner"),
         "vendorbill": VendorBill.objects.filter(status="open").select_related("vendor"),
@@ -278,6 +289,7 @@ def sources():
         "payrollrun": PayrollRun.objects.filter(status__in=("approved", "paid")),
         "finalsettlement": FinalSettlement.objects.filter(status__in=("approved", "paid")).select_related("employee"),
         "ownerstatement": OwnerStatement.objects.filter(status__in=("approved", "paid")).select_related("owner"),
+        "fundtransfer": FundTransfer.objects.filter(cancelled=False).select_related("from_account", "to_account"),
     }
 
 
@@ -295,3 +307,36 @@ def sync_all():
         JournalEntry.objects.filter(source_type=kind).exclude(source_id__in=keep).delete()
         result[kind] = made
     return result
+
+
+# ---------------------------------------------------------------------------------------
+# Opening (starting) balances: one entry that the Opening balances page keeps
+# ---------------------------------------------------------------------------------------
+OPENING = "opening"
+OPENING_EQUITY = "3200"
+
+
+def save_opening_balances(day, balances, user=None):
+    """balances: {Account: (debit, credit)}. Replaces the opening entry; any difference goes to Opening Balance Equity (3200)."""
+    ensure_chart()
+    with transaction.atomic():
+        entry = JournalEntry.objects.filter(source_type=OPENING, source_id=1).first()
+        if entry is None:
+            entry = JournalEntry(source_type=OPENING, source_id=1, created_by=user)
+        entry.date, entry.description, entry.status = day, "Opening balances", "posted"
+        entry.save()
+        entry.lines.all().delete()
+        lines, debit, credit = [], ZERO, ZERO
+        for acct, (dr, cr) in balances.items():
+            if dr or cr:
+                lines.append(JournalLine(entry=entry, account=acct, description="Opening balance", debit=dr, credit=cr))
+                debit, credit = debit + dr, credit + cr
+        if debit != credit:
+            plug = account(OPENING_EQUITY)
+            lines.append(JournalLine(entry=entry, account=plug, description="Opening balance equity (difference)",
+                                     debit=(credit - debit) if credit > debit else ZERO, credit=(debit - credit) if debit > credit else ZERO))
+        if not lines:
+            entry.delete()
+            return None
+        JournalLine.objects.bulk_create(lines)
+    return entry

@@ -401,7 +401,9 @@ def _add_tab(model_admin_class, inline, before):
 
     def get_inline_instances(self, request, obj=None):
         instances = original(self, request, obj)
-        if obj is None:  # a new owner or property has no agreements yet
+        # a new owner or property has no agreements yet, and the built-in "Company Owned" owner (and its properties) never has one
+        company = obj is not None and (getattr(obj, "is_company", False) or getattr(getattr(obj, "owner", None), "is_company", False))
+        if obj is None or company:
             instances = [i for i in instances if not isinstance(i, inline)]
         return instances
 

@@ -34,6 +34,8 @@ ROUTES = {
     "hr/finalsettlement": "final-settlements",
     "accounting/account": "chart-of-accounts",
     "accounting/journalentry": "journal-entries",
+    "accounting/fundtransfer": "fund-transfers",
+    "accounting/reconciliation": "reconciliations",
     "auth/user": "users",
     "auth/group": "groups",
     "core/systemsettings": "system-settings",

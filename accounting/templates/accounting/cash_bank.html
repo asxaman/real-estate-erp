@@ -1,0 +1,33 @@
+{% extends "admin/base_site.html" %}
+
+{% block content %}
+<div class="erp-dash">
+  <div class="erp-filterbar">
+    {% for label, url in links %}<a class="erp-btn erp-btn-light" href="{{ url }}">{{ label }}</a>{% endfor %}
+    {% if can_transfer %}<a class="erp-btn erp-btn-primary" href="{{ transfer_url }}">New Fund Transfer</a>{% endif %}
+    {% if can_reconcile %}<a class="erp-btn erp-btn-primary" href="{% url 'admin:accounting_account_reconcile' %}">Reconcile A Bank Statement</a>{% endif %}
+    <a class="erp-btn erp-btn-light" href="{{ history_url }}">Reconciliation History</a>
+  </div>
+  <div class="erp-panel erp-scroll">
+    {% include "accounting/_tools.html" %}
+    <table class="erp-table">
+      <thead><tr><th>Account</th><th style="text-align:right">Ledger Balance (AED)</th><th>Last Reconciled To</th><th style="text-align:right">Lines Not Yet Reconciled</th><th></th></tr></thead>
+      <tbody>
+      {% for r in rows %}
+        <tr>
+          <td><a href="{{ r.ledger }}">{{ r.account.code }}</a> {{ r.account.name }}</td>
+          <td style="text-align:right">{{ r.balance|floatformat:2 }}</td>
+          <td>{% if r.last %}{{ r.last.statement_date|date:"d/m/Y" }} ({{ r.last.code }}){% else %}Never{% endif %}</td>
+          <td style="text-align:right">{{ r.open }}</td>
+          <td>{% if can_reconcile %}<a href="{{ r.reconcile }}">Reconcile</a>{% endif %}</td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="5">No cash or bank accounts yet. Add accounts numbered 10xx in the Chart of accounts.</td></tr>
+      {% endfor %}
+        <tr><td><b>Total Cash And Bank</b></td><td style="text-align:right"><b>{{ total|floatformat:2 }}</b></td><td colspan="3"></td></tr>
+      </tbody>
+    </table>
+    <p><small>Add another bank account in the Chart of accounts with a number starting 10 (for example 1011). Use Fund Transfers to move money into it.</small></p>
+  </div>
+</div>
+{% endblock %}

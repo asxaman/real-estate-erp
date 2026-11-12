@@ -179,6 +179,8 @@
   }
 
   function queueUpdate(e) {
+    // the left menu scrolling on its own is not the page scrolling: no "Back to Top" for it
+    if (e && e.type === "scroll" && e.target && e.target.closest && e.target.closest("#nav-sidebar, aside, nav")) { return; }
     if (e && e.type === "scroll" && e.target) {
       // remember which part of the page scrolls up and down (a table scrolling sideways does not count)
       if (e.target === document) { chrome.scroller = document.scrollingElement; }

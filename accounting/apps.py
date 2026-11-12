@@ -34,7 +34,7 @@ class AccountingConfig(AppConfig):
         kinds = {
             "leases.LeasePayment": "leasepayment", "payables.VendorBill": "vendorbill", "payables.Expense": "expense",
             "payables.PaymentVoucher": "paymentvoucher", "hr.PayrollRun": "payrollrun", "hr.FinalSettlement": "finalsettlement",
-            "statements.OwnerStatement": "ownerstatement",
+            "statements.OwnerStatement": "ownerstatement", "accounting.FundTransfer": "fundtransfer",
         }
         for label, kind in kinds.items():
             model = apps.get_model(label)

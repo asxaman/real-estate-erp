@@ -13,7 +13,7 @@ from payables.models import Expense
 
 from . import posting
 from .admin import balances
-from .models import Account, JournalEntry, JournalLine
+from .models import Account, FundTransfer, JournalEntry, JournalLine, Reconciliation
 
 D = Decimal
 
@@ -185,3 +185,198 @@ class ScreenTests(TestCase):
         self.assertEqual(r.context["input_vat"], D("10.00"))
         self.assertEqual(r.context["purchases_std"], D("200.00"))
         self.assertTrue(r.context["refund"])
+
+
+class BankTests(TestCase):
+    def setUp(self):
+        self.admin = User.objects.create_superuser("boss2", "b2@example.com", "pw")
+        self.client.force_login(self.admin)
+        posting.ensure_chart()
+        manual([("1010", "1000", "0"), ("3200", "0", "1000")], date=today() - timedelta(days=5))
+
+    def transfer(self, amount="300"):
+        t = FundTransfer(from_account=posting.account("1010"), to_account=posting.account("1000"), amount=D(amount), date=today())
+        t.full_clean()
+        t.save()
+        return t
+
+    def test_transfer_posts_and_cancels(self):
+        t = self.transfer()
+        entry = JournalEntry.objects.get(source_type="fundtransfer", source_id=t.pk)
+        self.assertTrue(entry.lines.filter(account__code="1000", debit=D("300")).exists())
+        self.assertTrue(entry.lines.filter(account__code="1010", credit=D("300")).exists())
+        t.cancelled, t.cancel_reason = True, "Mistake"
+        t.full_clean()
+        t.save()
+        self.assertFalse(JournalEntry.objects.filter(source_type="fundtransfer").exists())
+
+    def test_transfer_rules(self):
+        same = FundTransfer(from_account=posting.account("1010"), to_account=posting.account("1010"), amount=D("5"))
+        with self.assertRaises(ValidationError):
+            same.full_clean()
+        bad = FundTransfer(from_account=posting.account("1010"), to_account=posting.account("4000"), amount=D("5"))
+        with self.assertRaises(ValidationError):
+            bad.full_clean()
+
+    def test_reconcile_needs_matching_balance(self):
+        bank = posting.account("1010")
+        self.transfer("300")  # bank 1000 - 300 = 700
+        url = reverse("admin:accounting_account_reconcile")
+        lines = list(JournalLine.objects.filter(account=bank))
+        data = {"account": bank.pk, "statement_date": today().isoformat(), "statement_balance": "999", "line": [l.pk for l in lines]}
+        self.assertEqual(self.client.post(url, data).status_code, 200)
+        self.assertEqual(Reconciliation.objects.count(), 0)
+        data["statement_balance"] = "700.00"
+        response = self.client.post(url, data)
+        self.assertEqual(response.status_code, 302)
+        rec = Reconciliation.objects.get()
+        self.assertEqual(rec.lines.count(), 2)
+        self.assertEqual(self.client.get(url, {"account": bank.pk}).context["opening"], D("700.00"))
+
+    def test_second_reconciliation_builds_on_first(self):
+        bank = posting.account("1010")
+        url = reverse("admin:accounting_account_reconcile")
+        first = list(JournalLine.objects.filter(account=bank))
+        self.client.post(url, {"account": bank.pk, "statement_date": today().isoformat(), "statement_balance": "1000", "line": [l.pk for l in first]})
+        self.transfer("200")
+        new = JournalLine.objects.get(account=bank, reconciliation__isnull=True)
+        response = self.client.post(url, {"account": bank.pk, "statement_date": today().isoformat(), "statement_balance": "800", "line": [new.pk]})
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(Reconciliation.objects.count(), 2)
+
+    def test_undo_reconciliation(self):
+        bank = posting.account("1010")
+        url = reverse("admin:accounting_account_reconcile")
+        line = JournalLine.objects.get(account=bank)
+        self.client.post(url, {"account": bank.pk, "statement_date": today().isoformat(), "statement_balance": "1000", "line": [line.pk]})
+        rec = Reconciliation.objects.get()
+        Reconciliation.objects.filter(pk=rec.pk).delete()
+        line.refresh_from_db()
+        self.assertIsNone(line.reconciliation)
+
+    def test_pages_and_exports(self):
+        self.transfer()
+        for name in ("cashbank", "reconcile"):
+            self.assertEqual(self.client.get(reverse(f"admin:accounting_account_{name}")).status_code, 200)
+        self.assertEqual(self.client.get(reverse("admin:accounting_fundtransfer_changelist")).status_code, 200)
+        self.assertEqual(self.client.get(reverse("admin:accounting_fundtransfer_add")).status_code, 200)
+        self.assertEqual(self.client.get(reverse("admin:accounting_reconciliation_changelist")).status_code, 200)
+        for name in ("ledger", "trialbalance", "profitloss", "balancesheet", "vatreturn", "cashbank"):
+            response = self.client.get(reverse(f"admin:accounting_account_{name}"), {"export": "csv"})
+            self.assertEqual(response.status_code, 200)
+            self.assertIn("csv", response["Content-Type"])
+            response = self.client.get(reverse(f"admin:accounting_account_{name}"), {"export": "excel"})
+            self.assertEqual(response.status_code, 200)
+
+
+class SubAccountTests(TestCase):
+    def setUp(self):
+        self.admin = User.objects.create_superuser("boss3", "b3@example.com", "pw")
+        self.client.force_login(self.admin)
+        posting.ensure_chart()
+        self.bank = posting.account("1010")
+
+    def sub(self, code="1011", name="Emirates NBD", **kwargs):
+        a = Account(code=code, name=name, type="asset", parent=self.bank, **kwargs)
+        a.full_clean()
+        a.save()
+        return a
+
+    def test_sub_follows_main_type_and_one_level_only(self):
+        a = Account(code="1011", name="NBD", type="expense", parent=self.bank)
+        a.full_clean()
+        self.assertEqual(a.type, "asset")
+        a.save()
+        deeper = Account(code="1012", name="Deeper", type="asset", parent=a)
+        with self.assertRaises(ValidationError):
+            deeper.full_clean()
+        self.assertEqual(a.full_name, "Bank accounts › NBD")
+
+    def test_main_with_subs_cannot_become_sub_and_system_stays_main(self):
+        self.sub()
+        cash = posting.account("1000")
+        self.bank.parent = cash
+        with self.assertRaises(ValidationError):
+            self.bank.full_clean()
+        cash2 = Account.objects.get(code="1000")
+        cash2.parent = Account.objects.get(code="1200")
+        with self.assertRaises(ValidationError):
+            cash2.full_clean()
+
+    def test_main_with_subs_cannot_be_deleted(self):
+        self.sub()
+        with self.assertRaises(ProtectedError):
+            self.bank.delete()
+
+    def test_ledger_of_main_includes_subs(self):
+        sub = self.sub()
+        manual([("1011", "700", "0"), ("3200", "0", "700")])
+        manual([("1010", "100", "0"), ("3200", "0", "100")])
+        response = self.client.get(reverse("admin:accounting_account_ledger"), {"account": self.bank.pk, "from": "", "to": today().isoformat()})
+        self.assertTrue(response.context["combined"])
+        self.assertEqual(response.context["closing"], D("800.00"))
+        only = self.client.get(reverse("admin:accounting_account_ledger"), {"account": sub.pk, "from": "", "to": today().isoformat()})
+        self.assertEqual(only.context["closing"], D("700.00"))
+
+    def test_reports_roll_up_subs(self):
+        self.sub()
+        manual([("1011", "700", "0"), ("3200", "0", "700")])
+        response = self.client.get(reverse("admin:accounting_account_balancesheet"))
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.context["balanced"])
+        self.assertEqual(response.context["asset_total"], D("700.00"))
+        names = [(r["account"].code, r["indent"]) for r in response.context["assets"]]
+        self.assertEqual(names, [("1010", False), ("1011", True)])
+
+    def test_chart_pages_open(self):
+        self.sub()
+        self.assertEqual(self.client.get(reverse("admin:accounting_account_changelist")).status_code, 200)
+        self.assertEqual(self.client.get(reverse("admin:accounting_account_changelist"), {"chip": "sub"}).status_code, 200)
+        self.assertEqual(self.client.get(reverse("admin:accounting_account_add")).status_code, 200)
+        self.assertEqual(self.client.get(reverse("admin:accounting_account_change", args=[self.bank.pk])).status_code, 200)
+
+
+class OpeningBalanceTests(TestCase):
+    def setUp(self):
+        self.admin = User.objects.create_superuser("boss4", "b4@example.com", "pw")
+        self.client.force_login(self.admin)
+        posting.ensure_chart()
+
+    def post(self, **amounts):
+        data = {"as_of": "2026-01-01"}
+        for key, value in amounts.items():
+            data[key] = value
+        return self.client.post(reverse("admin:accounting_account_opening"), data)
+
+    def test_page_opens(self):
+        self.assertEqual(self.client.get(reverse("admin:accounting_account_opening")).status_code, 200)
+
+    def test_difference_goes_to_equity_and_can_be_changed(self):
+        bank, payable = posting.account("1010"), posting.account("2000")
+        self.assertEqual(self.post(**{f"dr_{bank.pk}": "10,000.00", f"cr_{payable.pk}": "2500"}).status_code, 302)
+        entry = JournalEntry.objects.get(source_type="opening")
+        self.assertEqual(sum(l.debit for l in entry.lines.all()), sum(l.credit for l in entry.lines.all()))
+        self.assertTrue(entry.lines.filter(account__code="3200", credit=D("7500.00")).exists())
+        self.assertEqual(self.post(**{f"dr_{bank.pk}": "4000"}).status_code, 302)
+        self.assertEqual(JournalEntry.objects.filter(source_type="opening").count(), 1)
+        entry = JournalEntry.objects.get(source_type="opening")
+        self.assertEqual(entry.lines.count(), 2)
+        self.assertEqual(balances()[bank.pk], (D("4000.00"), D("0.00")))
+
+    def test_bad_amounts_are_refused(self):
+        bank = posting.account("1010")
+        self.assertEqual(self.post(**{f"dr_{bank.pk}": "abc"}).status_code, 200)
+        self.assertEqual(self.post(**{f"dr_{bank.pk}": "5", f"cr_{bank.pk}": "5"}).status_code, 200)
+        self.assertFalse(JournalEntry.objects.filter(source_type="opening").exists())
+
+    def test_clearing_all_removes_entry(self):
+        bank = posting.account("1010")
+        self.post(**{f"dr_{bank.pk}": "100"})
+        self.post()
+        self.assertFalse(JournalEntry.objects.filter(source_type="opening").exists())
+
+    def test_rebuild_keeps_opening_entry(self):
+        bank = posting.account("1010")
+        self.post(**{f"dr_{bank.pk}": "100"})
+        posting.sync_all()
+        self.assertTrue(JournalEntry.objects.filter(source_type="opening").exists())

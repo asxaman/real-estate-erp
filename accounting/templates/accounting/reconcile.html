@@ -1,0 +1,71 @@
+{% extends "admin/base_site.html" %}
+
+{% block content %}
+<div class="erp-dash">
+  <form method="get" class="erp-filterbar">
+    <a class="erp-btn erp-btn-light" href="{{ cash_url }}">Cash And Bank</a>
+    <a class="erp-btn erp-btn-light" href="{{ history_url }}">Reconciliation History</a>
+    <select name="account" onchange="this.form.submit()">
+      {% for a in accounts %}<option value="{{ a.pk }}"{% if chosen and a.pk == chosen.pk %} selected{% endif %}>{{ a.code }} - {{ a.name }}</option>{% endfor %}
+    </select>
+    <label>Statement date <input type="date" name="to" value="{{ statement_date }}" onchange="this.form.submit()"></label>
+  </form>
+  <form method="post" class="erp-panel erp-scroll" id="rec-form">
+    {% csrf_token %}
+    <input type="hidden" name="account" value="{{ chosen.pk }}">
+    <input type="hidden" name="statement_date" value="{{ statement_date }}">
+    <div class="erp-filterbar">
+      <label>Closing balance on the statement (AED) <input type="text" name="statement_balance" id="rec-balance" value="{{ posted.balance }}" inputmode="decimal" placeholder="0.00"></label>
+      <label>Notes <input type="text" name="notes" value="{{ posted.notes }}" maxlength="200" placeholder="Optional"></label>
+    </div>
+    <p>Tick every line that appears on the bank statement. The difference must be 0.00 before you can save.
+       Previously reconciled balance: <b>{{ opening|floatformat:2 }}</b>.</p>
+    <table class="erp-table">
+      <thead><tr><th style="width:40px"><input type="checkbox" id="rec-all" title="Tick all"></th><th>Date</th><th>Entry</th><th>Description</th><th style="text-align:right">Debit (AED)</th><th style="text-align:right">Credit (AED)</th></tr></thead>
+      <tbody>
+      {% for r in rows %}
+        <tr>
+          <td><input type="checkbox" name="line" value="{{ r.line.pk }}" data-net="{{ r.net|stringformat:'s' }}"{% if r.ticked %} checked{% endif %}></td>
+          <td>{{ r.entry.date|date:"d/m/Y" }}</td>
+          <td><a href="{{ r.url }}">{{ r.entry.code }}</a></td>
+          <td>{{ r.line.description|default:r.entry.description }}</td>
+          <td style="text-align:right">{% if r.line.debit %}{{ r.line.debit|floatformat:2 }}{% endif %}</td>
+          <td style="text-align:right">{% if r.line.credit %}{{ r.line.credit|floatformat:2 }}{% endif %}</td>
+        </tr>
+      {% empty %}
+        <tr><td colspan="6">Every line up to this date is already reconciled.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <div class="erp-filterbar" style="margin-top:12px">
+      <span>Cleared balance: <b id="rec-cleared">0.00</b></span>
+      <span>Statement: <b id="rec-stmt">0.00</b></span>
+      <span>Difference: <b id="rec-diff">0.00</b></span>
+      <button type="submit" class="erp-btn erp-btn-primary">Save Reconciliation</button>
+    </div>
+  </form>
+</div>
+<script>
+(function () {
+  var opening = {{ opening|stringformat:"s" }};
+  var form = document.getElementById("rec-form");
+  var boxes = form.querySelectorAll('input[name="line"]');
+  function fmt(n) { return n.toLocaleString("en-US", {minimumFractionDigits: 2, maximumFractionDigits: 2}); }
+  function update() {
+    var cleared = opening;
+    boxes.forEach(function (b) { if (b.checked) { cleared += parseFloat(b.dataset.net); } });
+    var stmt = parseFloat((document.getElementById("rec-balance").value || "0").replace(/,/g, ""));
+    if (isNaN(stmt)) { stmt = 0; }
+    document.getElementById("rec-cleared").textContent = fmt(cleared);
+    document.getElementById("rec-stmt").textContent = fmt(stmt);
+    document.getElementById("rec-diff").textContent = fmt(Math.round((cleared - stmt) * 100) / 100);
+  }
+  boxes.forEach(function (b) { b.addEventListener("change", update); });
+  document.getElementById("rec-balance").addEventListener("input", update);
+  document.getElementById("rec-all").addEventListener("change", function () {
+    var on = this.checked; boxes.forEach(function (b) { b.checked = on; }); update();
+  });
+  update();
+})();
+</script>
+{% endblock %}

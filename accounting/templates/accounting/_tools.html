@@ -1,0 +1,5 @@
+<style>@media print { .erp-filterbar, .erp-tools, aside, nav, header { display: none !important; } }</style>
+<div class="erp-filterbar erp-tools" style="margin-bottom:8px">
+  {% if can_export %}<a class="erp-btn erp-btn-light" href="{{ export_excel }}">Export To Excel</a><a class="erp-btn erp-btn-light" href="{{ export_csv }}">Export To CSV</a>{% endif %}
+  <button type="button" class="erp-btn erp-btn-light" onclick="window.print()">Print / Save As PDF</button>
+</div>

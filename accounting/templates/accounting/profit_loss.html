@@ -9,15 +9,16 @@
     <button type="submit" class="erp-btn erp-btn-primary">Show</button>
   </form>
   <div class="erp-panel erp-scroll">
+    {% include "accounting/_tools.html" %}
     <h3>Profit And Loss: {{ start_text }} to {{ end_text }}</h3>
     <table class="erp-table">
       <thead><tr><th>Account</th><th style="text-align:right">AED</th></tr></thead>
       <tbody>
         <tr><td colspan="2"><b>Income</b></td></tr>
-        {% for r in income %}<tr><td><a href="{{ r.url }}">{{ r.account.code }}</a> {{ r.account.name }}</td><td style="text-align:right">{{ r.value|floatformat:2 }}</td></tr>{% empty %}<tr><td colspan="2">No income in this period.</td></tr>{% endfor %}
+        {% for r in income %}<tr><td{% if r.indent %} style="padding-left:28px"{% endif %}>{% if r.bold %}<b>{% endif %}<a href="{{ r.url }}">{{ r.account.code }}</a> {{ r.account.name }}{% if r.direct %} (direct){% endif %}{% if r.bold %}</b>{% endif %}</td><td style="text-align:right">{% if r.bold %}<b>{% endif %}{{ r.value|floatformat:2 }}{% if r.bold %}</b>{% endif %}</td></tr>{% empty %}<tr><td colspan="2">No income in this period.</td></tr>{% endfor %}
         <tr><td><b>Total Income</b></td><td style="text-align:right"><b>{{ income_total|floatformat:2 }}</b></td></tr>
         <tr><td colspan="2"><b>Expenses</b></td></tr>
-        {% for r in expenses %}<tr><td><a href="{{ r.url }}">{{ r.account.code }}</a> {{ r.account.name }}</td><td style="text-align:right">{{ r.value|floatformat:2 }}</td></tr>{% empty %}<tr><td colspan="2">No expenses in this period.</td></tr>{% endfor %}
+        {% for r in expenses %}<tr><td{% if r.indent %} style="padding-left:28px"{% endif %}>{% if r.bold %}<b>{% endif %}<a href="{{ r.url }}">{{ r.account.code }}</a> {{ r.account.name }}{% if r.direct %} (direct){% endif %}{% if r.bold %}</b>{% endif %}</td><td style="text-align:right">{% if r.bold %}<b>{% endif %}{{ r.value|floatformat:2 }}{% if r.bold %}</b>{% endif %}</td></tr>{% empty %}<tr><td colspan="2">No expenses in this period.</td></tr>{% endfor %}
         <tr><td><b>Total Expenses</b></td><td style="text-align:right"><b>{{ expense_total|floatformat:2 }}</b></td></tr>
         <tr><td><b>{% if profit >= 0 %}Net Profit{% else %}Net Loss{% endif %}</b></td><td style="text-align:right"><b>{{ profit|floatformat:2 }}</b></td></tr>
       </tbody>

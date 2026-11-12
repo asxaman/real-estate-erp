@@ -10,6 +10,7 @@
     <span class="erp-dash-hello">Choose the return period (default: this quarter).</span>
   </form>
   <div class="erp-panel erp-scroll">
+    {% include "accounting/_tools.html" %}
     <h3>VAT Return: {{ start_text }} to {{ end_text }}</h3>
     <table class="erp-table">
       <thead><tr><th>Item</th><th style="text-align:right">Amount (AED)</th><th style="text-align:right">VAT (AED)</th></tr></thead>
